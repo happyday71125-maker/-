@@ -31,7 +31,7 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          cp -f MainActivity.kt ModelBundleManager.kt app/src/main/java/app/prolauncher/ai/
+          python3 -c 'for s,d,m in [("MainActivity.kt","app/src/main/java/app/prolauncher/ai/MainActivity.kt","메모 · AI · 검색"),("ModelBundleManager.kt","app/src/main/java/app/prolauncher/ai/ModelBundleManager.kt","그래도 ${app.label} 열기"),("app/src/main/java/app/prolauncher/ai/Screens.kt","app/src/main/java/app/prolauncher/ai/Screens.kt","🔎 검색")]: t=open(s).read(); i=t.rfind(m); p=i+len(m); exec("while p>0 and t[:p].count(\"{\")>t[:p].count(\"}\"): p=t.find(\"}\",p)+1"); open(d,"w").write(t[:p]+"\n")'
           gradle assembleDebug
 
       - name: Upload Compiled APK Artifact

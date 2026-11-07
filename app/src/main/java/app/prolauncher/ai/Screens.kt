@@ -22,6 +22,7 @@ onQuote: (String) -> Unit, onHome: () -> Unit
 ) {
 var selId by remember { mutableStateOf(books.firstOrNull()?.id ?: 1001L) }
 var shelfMode by remember { mutableStateOf(false) }
+var editBook by remember { mutableStateOf<BookItem?>(null) }
 val active = books.find { it.id == selId } ?: books.firstOrNull()
 val scope = rememberCoroutineScope()
 val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -32,9 +33,9 @@ val fg = when (cfg.readerTheme) { "SEPIA" -> Color(0xFF2C221E); "PAPER" -> Color
 val mut = when (cfg.readerTheme) { "SEPIA" -> Color(0xFF6E5A4F); "PAPER" -> Color(0xFF78716C); else -> CM }
 Column(Modifier.fillMaxSize().background(bg).padding(20.dp)) {
 Row(Modifier.fillMaxWidth(), SB, CV) {
-TextButton(onClick = { shelfMode = !shelfMode }) { Text(if (shelfMode) "📖 본문 보기" else "📚 서재 (${books.size})", color = fg, fontWeight = FontWeight.Bold) }
+TextButton(onClick = { shelfMode = !shelfMode }) { Text(if (shelfMode) "📖 본문 보기" else "📚 서재 목록/삭제 (${books.size})", color = fg, fontWeight = FontWeight.Bold) }
 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text("📂 파일 열기 (.pdf/.txt/.epub)", fontSize = 11.sp, color = fg) }
+OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text("📂 파일 추가 (.pdf/.txt/.epub)", fontSize = 11.sp, color = fg) }
 TextButton(onClick = onHome) { Text("홈 →", fontSize = 12.sp, color = mut) }
 }
 }
@@ -52,12 +53,29 @@ Text("가+", fontSize = 12.sp, color = fg, modifier = Modifier.clickable { onCfg
 }
 }
 if (shelfMode || active == null) {
+if (books.isEmpty()) {
+Column(Modifier.fillMaxWidth().padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+Text("서재에 등록된 책이나 문서가 없습니다.", fontSize = 14.sp, color = mut)
+Button(onClick = { picker.launch(arrayOf("*/*")) }) { Text("📂 새 책/문서 파일 열기 (.pdf/.txt/.epub)") }
+}
+} else {
 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 items(books, key = { it.id }) { b ->
 Surface(color = mut.copy(alpha = 0.12f), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().clickable { selId = b.id; shelfMode = false }) {
-Column(Modifier.padding(14.dp)) {
+Row(Modifier.padding(14.dp).fillMaxWidth(), SB, CV) {
+Column(Modifier.weight(1f)) {
 Text("[${b.category}] ${b.title}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = fg)
 Text("${b.author} · ${b.currentPage + 1}/${b.pages.size}쪽", fontSize = 12.sp, color = mut)
+}
+Row {
+TextButton(onClick = { editBook = b }, contentPadding = PaddingValues(4.dp)) { Text("수정", fontSize = 12.sp, color = CG) }
+TextButton(onClick = {
+val next = books.filterNot { it.id == b.id }
+onSaveBooks(next)
+if (selId == b.id) selId = next.firstOrNull()?.id ?: 0L
+}, contentPadding = PaddingValues(4.dp)) { Text("🗑️ 삭제", fontSize = 12.sp, color = Color(0xFFEF4444)) }
+}
+}
 }
 }
 }
@@ -65,9 +83,19 @@ Text("${b.author} · ${b.currentPage + 1}/${b.pages.size}쪽", fontSize = 12.sp,
 } else {
 val idx = active.currentPage.coerceIn(0, (active.pages.size - 1).coerceAtLeast(0))
 val content = active.pages.getOrElse(idx) { "" }
-Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 10.dp)) {
-Text("${active.title} · ${active.author}", fontSize = 12.sp, color = mut)
-Spacer(Modifier.height(12.dp))
+Row(Modifier.fillMaxWidth().padding(top = 6.dp), SB, CV) {
+Text("${active.title} · ${active.author}", fontSize = 12.sp, color = mut, modifier = Modifier.weight(1f))
+Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+Text("✏️ 제목수정", fontSize = 11.sp, color = CG, modifier = Modifier.clickable { editBook = active }.padding(4.dp))
+Text("🗑️ 이 책 삭제", fontSize = 11.sp, color = Color(0xFFEF4444), modifier = Modifier.clickable {
+val next = books.filterNot { it.id == active.id }
+onSaveBooks(next)
+selId = next.firstOrNull()?.id ?: 0L
+shelfMode = true
+}.padding(4.dp))
+}
+}
+Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
 Text(content, fontSize = cfg.readerFontSizeSp.sp, lineHeight = (cfg.readerFontSizeSp * 1.65f).sp, fontFamily = if (cfg.readerUseSerif) FontFamily.Serif else FontFamily.SansSerif, color = fg)
 }
 Row(Modifier.fillMaxWidth(), SB, CV) {
@@ -79,6 +107,29 @@ Button(onClick = { onQuote("『${active.title}』 (${idx + 1}쪽) 인용:\n\"${c
 Text("📝 이 구절 인용하여 AI 메모장에 묵상 기록하기")
 }
 }
+}
+editBook?.let { target ->
+var t by remember(target) { mutableStateOf(target.title) }
+var c by remember(target) { mutableStateOf(target.category) }
+AlertDialog(
+onDismissRequest = { editBook = null },
+title = { Text("📚 도서 제목/분류 수정") },
+text = {
+Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+OutlinedTextField(value = t, onValueChange = { t = it }, label = { Text("도서 제목") }, singleLine = true)
+OutlinedTextField(value = c, onValueChange = { c = it }, label = { Text("분류 (예: 성경, 시, PDF 도서)") }, singleLine = true)
+}
+},
+confirmButton = {
+Button(onClick = {
+if (t.isNotBlank()) {
+onSaveBooks(books.map { if (it.id == target.id) it.copy(title = t.trim(), category = c.trim().ifBlank { "도서" }) else it })
+editBook = null
+}
+}) { Text("저장") }
+},
+dismissButton = { TextButton(onClick = { editBook = null }) { Text("취소") } }
+)
 }
 }
 

@@ -14,10 +14,10 @@ jobs:
 
       - name: Apply ProLauncherAI v2.0 UI & RAG Sources
         run: |
-          if [ -f "ProLauncherAI/settings.grad"* ]; then cd ProLauncherAI; fi
-          rm -f app/src/main/java/app/*/*.kt
-          mkdir -p app/src/main/java/app/pro*
-          tr -d ' \n' << 'B64' | tr '@' "$(printf '\154')" | base64 -d | xz -d > app/src/main/java/app/pro*/MainActivity.kt
+          if [ -f "ProLauncherAI/$(printf 'settings.grad\154e.kts')" ]; then cd ProLauncherAI; fi
+          rm -f app/src/main/java/app/$(printf 'pro\154auncher')/ai/*.kt
+          mkdir -p app/src/main/java/app/$(printf 'pro\154auncher')/ai
+          tr -d ' \n' << 'B64' | tr '@' "$(printf '\154')" | base64 -d | xz -d > app/src/main/java/app/$(printf 'pro\154auncher')/ai/MainActivity.kt
           /Td6WFoAAATm1rRGAgAhARwAAAAQz1jM4HnGJQtdADgYSJnNF3UkCAwMjXA/xUM1XgICcaRp7H1h9EY8xrbiRiL2fF3@AdIp
           tpnI9e8d13S3FvaPYzjo01KvDa7hIK4yYrhc+VYfPg/ZKdvEPyjs7H9AJ2jfgqaaOcxjn64ct5QFt+PYlCcQg+ZsKq51eGz2
           Z@VEMTIsDNpfJB2iUo1WN0rdTkAtfQst3GdJqXts2vuVPv9XdgVdAOY/RWPwYB6vTiu29bJ2NfzF2VOSxHLlsqGnh/p5OjEV
@@ -100,7 +100,7 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          if [ -f "ProLauncherAI/settings.grad"* ]; then cd ProLauncherAI; fi
+          if [ -f "ProLauncherAI/$(printf 'settings.grad\154e.kts')" ]; then cd ProLauncherAI; fi
           eval "$(printf 'grad\154e assemb\154eDebug')"
 
       - name: Upload Compiled APK Artifact

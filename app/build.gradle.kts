@@ -11,8 +11,8 @@ android {
         applicationId = "app.prolauncher.ai"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "2.0.0"
     }
 
     buildTypes {
@@ -55,11 +55,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.foundation:foundation")
-
-    // Google AI Edge MediaPipe LLM Inference API (On-Device Local LLM: Gemma / Phi / Llama)
-    // Docs: https://developers.google.com/edge/mediapipe/solutions/genai/llm_inference/android
     implementation("com.google.mediapipe:tasks-genai:0.10.14")
-
-    // Coroutines for non-blocking Local AI inference & PackageManager queries
+    implementation("com.google.mediapipe:tasks-text:0.10.14")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 }

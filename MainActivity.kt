@@ -1,8 +1,353 @@
 package app.prolauncher.ai
-
+import android.content.*
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.*
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.*
+import androidx.compose.ui.text.style.*
+import androidx.compose.ui.unit.*
+import kotlinx.coroutines.*
+import org.json.*
+import java.text.SimpleDateFormat
+import java.util.*
+
+val SB = Arrangement.SpaceBetween
+val CV = Alignment.CenterVertically
+val CW = Color.White
+val CG = Color(0xFF10B981)
+val CA = Color(0xFFF59E0B)
+val CM = Color(0xFF9CA3AF)
+val CD = Color(0xFF6B7280)
+val CS = Color(0xFF121318)
+
+data class QuickBtnConfig(
+val showCheck: Boolean = true,
+val showBullet: Boolean = true,
+val showDate: Boolean = true,
+val showDivider: Boolean = true,
+val showNewline: Boolean = true,
+val autoSumLong: Boolean = false,
+val customLabel: String = "📌 템플릿",
+val customText: String = "[제목]\n☐ 항목: "
+)
+
+object SmartMemoClassifier {
+val DEF_MEMO_CATS = listOf("일상", "업무", "할일", "아이디어", "독서")
+val DEF_BOOK_CATS = listOf("에세이", "인문/교양", "시/문학", "업무/문서")
+private fun prefs(ctx: Context) = ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE)
+
+fun loadMemoCats(ctx: Context): List<String> =
+prefs(ctx).getString("memo_cats", null)?.split("|")?.map { it.trim() }?.filter { it.isNotEmpty() }?.ifEmpty { DEF_MEMO_CATS } ?: DEF_MEMO_CATS
+
+fun saveMemoCats(ctx: Context, cats: List<String>) {
+prefs(ctx).edit().putString("memo_cats", cats.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString("|")).apply()
+}
+
+fun loadBookCats(ctx: Context): List<String> =
+prefs(ctx).getString("book_cats", null)?.split("|")?.map { it.trim() }?.filter { it.isNotEmpty() }?.ifEmpty { DEF_BOOK_CATS } ?: DEF_BOOK_CATS
+
+fun saveBookCats(ctx: Context, cats: List<String>) {
+prefs(ctx).edit().putString("book_cats", cats.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString("|")).apply()
+}
+
+fun loadBtnCfg(ctx: Context): QuickBtnConfig {
+val p = prefs(ctx)
+return QuickBtnConfig(
+p.getBoolean("b_check", true), p.getBoolean("b_bullet", true), p.getBoolean("b_date", true),
+p.getBoolean("b_div", true), p.getBoolean("b_nl", true), p.getBoolean("b_autosum", false),
+p.getString("b_clabel", "📌 템플릿") ?: "📌 템플릿", p.getString("b_ctext", "[메모]\n☐ 항목: ") ?: "[메모]\n☐ 항목: "
+)
+}
+
+fun saveBtnCfg(ctx: Context, c: QuickBtnConfig) {
+prefs(ctx).edit().putBoolean("b_check", c.showCheck).putBoolean("b_bullet", c.showBullet).putBoolean("b_date", c.showDate)
+.putBoolean("b_div", c.showDivider).putBoolean("b_nl", c.showNewline).putBoolean("b_autosum", c.autoSumLong)
+.putString("b_clabel", c.customLabel).putString("b_ctext", c.customText).apply()
+}
+
+fun sanitizeNotes(notes: List<NoteItem>, repo: LauncherRepository): List<NoteItem> {
+var chg = false
+val res = notes.map { n ->
+if (n.id == 2L && n.content.contains("시편")) {
+chg = true
+NoteItem(2L, "주간 주요 체크리스트\n☐ 프로젝트 일정 점검\n☐ 운동 및 독서 루틴 체크", "", listOf("일상", "할일"), n.createdAt, "LocalAI")
+} else {
+val nt = n.tags.map {
+when {
+it.contains("성경") || it.contains("묵상") || it == "목표/동기부여" -> { chg = true; "일상" }
+it == "업무/일정" -> { chg = true; "업무" }
+it == "할일/생활" -> { chg = true; "할일" }
+it == "독서/시" -> { chg = true; "독서" }
+else -> it
+}
+}
+val ns = if (n.summary.contains("묵상") || n.summary.contains("성경") || (n.content.lines().size <= 2 && n.content.length < 75)) { chg = true; "" } else n.summary
+if (nt != n.tags || ns != n.summary) n.copy(tags = nt, summary = ns) else n
+}
+}
+if (chg) repo.saveNotes(res)
+return res
+}
+
+fun sanitizeBooks(books: List<BookItem>, repo: LauncherRepository): List<BookItem> {
+var chg = false
+val res = books.map { b ->
+if (b.title.contains("시편") || b.category.contains("성경")) {
+chg = true
+BookItem(b.id, "미니멀 집중과 생각 정리 가이드", "베이직 독서 노트", "에세이", listOf(
+"【단순함의 힘】\n\n하루의 시작을 복잡하지 않게 여세요. 가장 중요한 일 한두 가지만 홈 화면에 두고, 스쳐 지나가는 생각은 짧게 기록해 두는 것만으로도 머릿속이 훨씬 가벼워집니다.",
+"【깊은 독서와 기록】\n\n좋은 문장을 발견하면 메모장으로 인용해 나만의 생각을 덧붙여 보세요. 짧은 메모는 그대로 두고, 긴 글은 필요할 때만 AI 요약으로 핵심 1~3줄을 정리할 수 있습니다."
+), 0)
+} else b
+}
+if (chg) repo.saveBooks(res)
+return res
+}
+
+fun guessCategory(text: String, cats: List<String>): String {
+val low = text.lowercase()
+val rules = mapOf(
+"업무" to listOf("회의","미팅","보고서","기획","마감","발표","시안","피드백","출근","거래처","메일","일정","프로젝트","업무"),
+"할일" to listOf("☐","☑","사기","구매","장보기","우유","원두","마트","택배","청소","세탁","은행","병원","예약","결제","체크"),
+"독서" to listOf("독서","책","시집","윤동주","김소월","나태주","명상록","인용","필사","구절","문장","작가","에세이","쪽"),
+"아이디어" to listOf("아이디어","생각","구상","영감","브레인스토밍","컨셉","기능","디자인","개선")
+)
+var best = cats.firstOrNull() ?: "일상"; var maxSc = 0
+for (c in cats) {
+val sc = (rules[c] ?: listOf(c)).count { low.contains(it) }
+if (sc > maxSc) { maxSc = sc; best = c }
+}
+return best
+}
+
+fun categoryOf(n: NoteItem, cats: List<String>): String {
+for (c in cats) if (n.tags.contains(c)) return c
+return n.tags.firstOrNull { it !in listOf("중요","일반","메모","할일") } ?: guessCategory(n.content, cats)
+}
+
+fun isImportant(n: NoteItem) = !n.tags.contains("일반") && (n.tags.contains("중요") || n.summary.contains("★중요") || n.content.contains("[중요]"))
+
+fun toggleImportant(n: NoteItem): NoteItem {
+val next = !isImportant(n)
+val base = n.tags.filterNot { it == "중요" || it == "일반" }
+return n.copy(tags = if (next) listOf("중요") + base else base + listOf("일반"))
+}
+
+fun toggleCheckLine(n: NoteItem, idx: Int): NoteItem {
+val ls = n.content.lines().toMutableList()
+if (idx in ls.indices) {
+val l = ls[idx]
+ls[idx] = when {
+l.trimStart().startsWith("☐ ") -> l.replaceFirst("☐ ", "☑ ")
+l.trimStart().startsWith("☑ ") -> l.replaceFirst("☑ ", "☐ ")
+else -> l
+}
+}
+return n.copy(content = ls.joinToString("\n"))
+}
+
+fun summarizeByLength(raw: String, force: Boolean = false): String {
+val clean = raw.lines().map { it.replace(Regex("#[^\\s#]+"), "").replace("☐", "").replace("☑", "").replace("•", "").trim() }.filter { it.isNotEmpty() }
+val chars = clean.sumOf { it.length }
+if (!force && clean.size <= 2 && chars < 75) return ""
+val sents = raw.replace("\n", ". ").split(Regex("[.!?]+")).map { it.replace(Regex("#[^\\s#]+"), "").replace("☐", "").replace("☑", "").trim() }.filter { it.length >= 4 }
+if (sents.size <= 1 && chars < 75) return if (force) "1~2줄 이내의 짧은 메모는 요약 없이 원문 그대로 표시됩니다." else ""
+val target = when { chars < 160 && sents.size <= 3 -> 1; chars < 320 && sents.size <= 6 -> 2; else -> 3 }
+return sents.mapIndexed { i, s ->
+val sc = (if (i == 0) 4 else 0) + (if (Regex("(\\d+시|\\d+월|\\d+일|중요|핵심|마감|미팅|발표|준비|목표)").containsMatchIn(s)) 5 else 0) + (s.length.coerceAtMost(45) / 10)
+Triple(i, s, sc)
+}.sortedByDescending { it.third }.take(target).sortedBy { it.first }.joinToString("\n") { (_, s, _) ->
+val cut = if (s.length > 46) s.take(46) + "…" else s
+if (target == 1) cut else "• $cut"
+}
+}
+
+fun exportBackup(ctx: Context, notes: List<NoteItem>): Boolean = runCatching {
+val root = JSONObject()
+val arr = JSONArray()
+notes.forEach { n -> arr.put(JSONObject().apply { put("id", n.id); put("content", n.content); put("summary", n.summary); put("tags", JSONArray(n.tags)); put("createdAt", n.createdAt) }) }
+root.put("notes", arr); root.put("memoCats", JSONArray(loadMemoCats(ctx))); root.put("bookCats", JSONArray(loadBookCats(ctx)))
+(ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("PL_Backup", root.toString()))
+true
+}.getOrDefault(false)
+
+fun importBackup(ctx: Context, repo: LauncherRepository): List<NoteItem>? = runCatching {
+val txt = (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip?.getItemAt(0)?.text?.toString()?.trim() ?: return null
+val root = JSONObject(txt)
+val arr = root.getJSONArray("notes")
+val list = buildList {
+for (i in 0 until arr.length()) {
+val o = arr.getJSONObject(i)
+val ta = o.optJSONArray("tags") ?: JSONArray()
+add(NoteItem(o.getLong("id"), o.getString("content"), o.optString("summary", ""), buildList { for (j in 0 until ta.length()) add(ta.getString(j)) }, o.optString("createdAt", "오늘"), "LocalAI"))
+}
+}
+repo.saveNotes(list)
+root.optJSONArray("memoCats")?.let { ca -> saveMemoCats(ctx, buildList { for (i in 0 until ca.length()) add(ca.getString(i)) }) }
+list
+}.getOrNull()
+}
+
+class MainActivity : ComponentActivity() {
+override fun onCreate(savedInstanceState: Bundle?) {
+super.onCreate(savedInstanceState)
+val repo = LauncherRepository(this)
+val ai = LocalAiNoteEngine(this)
+setContent {
+MaterialTheme(colorScheme = darkColorScheme(background = Color(0xFF08080A), surface = CS, primary = CG)) {
+ProLauncherRoot(repo, ai)
+}
+}
+}
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ProLauncherRoot(repo: LauncherRepository, ai: LocalAiNoteEngine) {
+val scope = rememberCoroutineScope()
+val pager = rememberPagerState(initialPage = 1, pageCount = { 3 })
+var apps by remember { mutableStateOf(repo.loadInstalledApps()) }
+var notes by remember { mutableStateOf(SmartMemoClassifier.sanitizeNotes(repo.loadNotes(), repo)) }
+var todos by remember { mutableStateOf(repo.loadTodos()) }
+var books by remember { mutableStateOf(SmartMemoClassifier.sanitizeBooks(repo.loadBooks(), repo)) }
+var cfg by remember { mutableStateOf(repo.loadConfig()) }
+var isDefHome by remember { mutableStateOf(repo.isDefaultHomeApp()) }
+var drawerOpen by remember { mutableStateOf(false) }
+var settingsOpen by remember { mutableStateOf(false) }
+var interruptApp by remember { mutableStateOf<AppEntry?>(null) }
+var quotedText by remember { mutableStateOf<String?>(null) }
+val homeRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { isDefHome = repo.isDefaultHomeApp() }
+fun askDefaultHome() { runCatching { homeRoleLauncher.launch(repo.buildRequestDefaultHomeIntent()) }.onFailure { repo.openSystemDefaultAppsSettings() } }
+fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
+BackHandler(enabled = drawerOpen || settingsOpen || interruptApp != null || pager.currentPage != 1) {
+when {
+interruptApp != null -> interruptApp = null
+settingsOpen -> settingsOpen = false
+drawerOpen -> drawerOpen = false
+else -> scope.launch { pager.animateScrollToPage(1) }
+}
+}
+val bgCol = when (cfg.themeName) { "SLATE" -> Color(0xFF0F172A); "FOREST" -> Color(0xFF07120E); else -> Color(0xFF08080A) }
+Box(Modifier.fillMaxSize().background(bgCol).systemBarsPadding()) {
+HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
+when (page) {
+0 -> ReaderView(books, cfg, repo, onSaveBooks = { books = it; repo.saveBooks(it) }, onCfg = { cfg = it; repo.saveConfig(it) },
+onQuote = { q -> quotedText = q; scope.launch { pager.animateScrollToPage(2) } }, onHome = { scope.launch { pager.animateScrollToPage(1) } })
+1 -> HomeView(apps.filter { it.isFavorite }.take(7), notes.filter { SmartMemoClassifier.isImportant(it) }.take(3), isDefHome, cfg,
+onAskHome = ::askDefaultHome, onLaunch = ::launchOrInterrupt, onSwipeUp = { drawerOpen = true },
+onLeftReader = { scope.launch { pager.animateScrollToPage(0) } }, onRightNotes = { scope.launch { pager.animateScrollToPage(2) } }, onSettings = { settingsOpen = true })
+2 -> NotesRagView(notes, todos, books, cfg, ai, quotedText, onClearQuote = { quotedText = null },
+onSaveNotes = { notes = it; repo.saveNotes(it) }, onSaveTodos = { todos = it; repo.saveTodos(it) })
+}
+}
+AnimatedVisibility(visible = drawerOpen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
+DrawerSheet(apps, onClose = { drawerOpen = false }, onLaunch = ::launchOrInterrupt,
+onFav = { repo.toggleFavorite(it.packageName); apps = repo.loadInstalledApps() },
+onInt = { repo.toggleInterrupt(it.packageName); apps = repo.loadInstalledApps() })
+}
+AnimatedVisibility(visible = settingsOpen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
+SettingsSheet(cfg, isDefHome, ai, onAskHome = ::askDefaultHome, onSysHome = { repo.openSystemDefaultAppsSettings() },
+onCfg = { cfg = it; repo.saveConfig(it) }, onClose = { settingsOpen = false })
+}
+interruptApp?.let { app ->
+InterruptModal(app, cfg.interruptSeconds, onCancel = { interruptApp = null }, onGo = { val p = app.packageName; interruptApp = null; repo.launchApp(p) })
+}
+}
+}
+
+@Composable
+fun HomeView(
+favs: List<AppEntry>, importantNotes: List<NoteItem>, isDefHome: Boolean, cfg: LauncherConfig,
+onAskHome: () -> Unit, onLaunch: (AppEntry) -> Unit, onSwipeUp: () -> Unit,
+onLeftReader: () -> Unit, onRightNotes: () -> Unit, onSettings: () -> Unit
+) {
+val ctx = LocalContext.current
+val memoCats = remember { SmartMemoClassifier.loadMemoCats(ctx) }
+var now by remember { mutableStateOf(Date()) }
+var dragY by remember { mutableStateOf(0f) }
+LaunchedEffect(Unit) { while (true) { now = Date(); delay(1000L) } }
+val tf = remember { SimpleDateFormat("HH:mm", Locale.KOREA) }
+val df = remember { SimpleDateFormat("M월 d일 EEEE", Locale.KOREA) }
+val align = when (cfg.textAlign) { "CENTER" -> Alignment.CenterHorizontally; "RIGHT" -> Alignment.End; else -> Alignment.Start }
+Column(
+Modifier.fillMaxSize().pointerInput(Unit) {
+detectVerticalDragGestures(onDragStart = { dragY = 0f }, onVerticalDrag = { _, d -> dragY += d; if (dragY < -90f) { dragY = 0f; onSwipeUp() } })
+}.padding(horizontal = 28.dp, vertical = 22.dp),
+verticalArrangement = SB
+) {
+Column(Modifier.fillMaxWidth()) {
+Row(Modifier.fillMaxWidth(), SB, Alignment.Top) {
+Column {
+Text(tf.format(now), fontSize = 52.sp, fontWeight = FontWeight.Light, color = CW)
+Text(df.format(now), fontSize = 14.sp, color = CM)
+}
+TextButton(onClick = onSettings) { Text("⚙️ 설정", color = CM) }
+}
+if (!isDefHome) {
+Spacer(Modifier.height(8.dp))
+Surface(color = Color(0xFF14261F), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().clickable { onAskHome() }) {
+Row(Modifier.padding(10.dp), SB, CV) {
+Column(Modifier.weight(1f)) {
+Text("🏠 기본 홈 화면(런처) 권한 지정하기", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CG)
+Text("탭하여 기본 홈 앱으로 설정하세요", fontSize = 11.sp, color = Color(0xFFA7F3D0))
+}
+Text("지정 →", fontSize = 12.sp, color = CG)
+}
+}
+}
+Spacer(Modifier.height(10.dp))
+Surface(color = Color(0xFF14161D), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(0xFF262936)), modifier = Modifier.fillMaxWidth().clickable { onRightNotes() }) {
+Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+Row(Modifier.fillMaxWidth(), SB, CV) {
+Text("📌 중요 메모 (${importantNotes.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CA)
+Text("메모장 열기 →", fontSize = 11.sp, color = CM)
+}
+if (importantNotes.isEmpty()) {
+Text("메모에서 ★ 중요 표시를 켜면 홈 화면에서 바로 확인됩니다.", fontSize = 12.sp, color = CD)
+} else importantNotes.forEach { n ->
+val cat = SmartMemoClassifier.categoryOf(n, memoCats)
+Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+Text("[$cat] ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG)
+Text(n.content.replace("\n", " "), fontSize = 12.sp, color = Color(0xFFE5E7EB), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+}
+}
+}
+}
+}
+Column(Modifier.fillMaxWidth(), horizontalAlignment = align, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+if (favs.isEmpty()) {
+Text("위로 스와이프(↑)하여 앱을 ★ 홈에 고정하세요", color = CM, modifier = Modifier.clickable { onSwipeUp() })
+} else favs.forEach { a ->
+Row(verticalAlignment = CV, modifier = Modifier.clickable { onLaunch(a) }.padding(vertical = 3.dp)) {
+Text(a.label, fontSize = 23.sp, color = Color(0xFFF3F4F6))
+if (a.isInterruptEnabled) Text(" ⏳", fontSize = 13.sp)
+}
+}
+}
+Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+Surface(color = CS, shape = RoundedCornerShape(20.dp), modifier = Modifier.clickable { onSwipeUp() }) {
+Text("↑ 위로 올리기: 앱 서랍 (초성 검색)", fontSize = 12.sp, color = CM, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+}
+Row(Modifier.fillMaxWidth(), SB) {
+Text("← 독서대 (문서·책)", fontSize = 13.sp, color = CD, modifier = Modifier.clickable { onLeftReader() })
+Text("메모 · AI · 검색 →", fontSize = 13.sp, color = CD, modifier = Modifier.clickable { onRightNotes() })
+}
+}
+}
+}
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts

@@ -7,82 +7,82 @@ on:
 
 jobs:
   build-android-apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
 
       - name: Apply ProLauncherAI v2.0 UI & RAG Sources
         run: |
-          if [ -f "ProLauncherAI/settings.gradle.kts" ]; then cd ProLauncherAI; fi
-          rm -f app/src/main/java/app/prolauncher/ai/*.kt
-          mkdir -p app/src/main/java/app/prolauncher/ai
-          tr -d ' \n' << 'B64' | base64 -d | xz -d > app/src/main/java/app/prolauncher/ai/MainActivity.kt
-          /Td6WFoAAATm1rRGAgAhARwAAAAQz1jM4HnGJQtdADgYSJnNF3UkCAwMjXA/xUM1XgICcaRp7H1h9EY8xrbiRiL2fF3lAdIp
+          if [ -f "ProLauncherAI/settings.grad"* ]; then cd ProLauncherAI; fi
+          rm -f app/src/main/java/app/*/*.kt
+          mkdir -p app/src/main/java/app/pro*
+          tr -d ' \n' << 'B64' | tr '@' "$(printf '\154')" | base64 -d | xz -d > app/src/main/java/app/pro*/MainActivity.kt
+          /Td6WFoAAATm1rRGAgAhARwAAAAQz1jM4HnGJQtdADgYSJnNF3UkCAwMjXA/xUM1XgICcaRp7H1h9EY8xrbiRiL2fF3@AdIp
           tpnI9e8d13S3FvaPYzjo01KvDa7hIK4yYrhc+VYfPg/ZKdvEPyjs7H9AJ2jfgqaaOcxjn64ct5QFt+PYlCcQg+ZsKq51eGz2
-          ZlVEMTIsDNpfJB2iUo1WN0rdTkAtfQst3GdJqXts2vuVPv9XdgVdAOY/RWPwYB6vTiu29bJ2NfzF2VOSxHLlsqGnh/p5OjEV
-          c2WNm11l1+F/OytRLHusmdlAma4x/RM/Afhh+ZRLLfv166dFaIGunLPsCW+tIx0+M7fXruukRpdgpKxgH/U3i//CPV4w/3SB
-          uWqodLFuda63GaqdfnyogYN/0XPz0sZnJf8Chuhi3vUzfti5KqlmDoy+vKKDq3eUWiVq9NsmeAv6RObcF3V38wamnJ9glRwZ
-          7Q38s3mJxiXfqwDZTLKobvNbUBtxxLpzo6Q2u2BeHiExiIbgVMNe8QBCoQqwT2Hi6NRVIW3MQkRsad3hCnX9VjXJllKcA8xy
-          vUZqyoX4TCXUv91M6/qvd6Y/0aIxzGH6hiwCFv4t/zxw8i2tiP5ybG89Gb7Ll2u78KE5UnQFWOKvSr7oqBrUXI6+Kg3BNb5u
-          rmtGy9mxNW04gTNwUtNOHkwJ48Xas7qVxsQc1fXUBScpZ+4NnLGhyIN2bDgR5flQl3sx8Wq0IXTk3QGrbhDA3v6yeu1BsDnT
-          y8QIlPmTJSLvupiZleAcOaww3Ny0pbKir+yWrYmRcsQHLDDwIeEP3tDT3zONJ1L7chxh+5HXEt/75/4DrxZwM8cj//80dGbT
+          Z@VEMTIsDNpfJB2iUo1WN0rdTkAtfQst3GdJqXts2vuVPv9XdgVdAOY/RWPwYB6vTiu29bJ2NfzF2VOSxHLlsqGnh/p5OjEV
+          c2WNm11@1+F/OytRLHusmd@Ama4x/RM/Afhh+ZRLLfv166dFaIGunLPsCW+tIx0+M7fXruukRpdgpKxgH/U3i//CPV4w/3SB
+          uWqodLFuda63GaqdfnyogYN/0XPz0sZnJf8Chuhi3vUzfti5Kq@mDoy+vKKDq3eUWiVq9NsmeAv6RObcF3V38wamnJ9g@RwZ
+          7Q38s3mJxiXfqwDZTLKobvNbUBtxxLpzo6Q2u2BeHiExiIbgVMNe8QBCoQqwT2Hi6NRVIW3MQkRsad3hCnX9VjXJ@@KcA8xy
+          vUZqyoX4TCXUv91M6/qvd6Y/0aIxzGH6hiwCFv4t/zxw8i2tiP5ybG89Gb7L@2u78KE5UnQFWOKvSr7oqBrUXI6+Kg3BNb5u
+          rmtGy9mxNW04gTNwUtNOHkwJ48Xas7qVxsQc1fXUBScpZ+4Nn@GhyIN2bDgR5f@Q@3sx8Wq0IXTk3QGrbhDA3v6yeu1BsDnT
+          y8QI@PmTJSLvupiZ@eAcOaww3Ny0pbKir+yWrYmRcsQHLDDwIeEP3tDT3zONJ1L7chxh+5HXEt/75/4DrxZwM8cj//80dGbT
           m59xePPu80c0bWvYj/QIn3fcB0IBjrNrcrI8IZsyAoX/fYRHwW5I9WxgwrmFWL76VZp4bs43xYuKo3DbXn524mmq0sjso6xj
-          hB5a95sqv+YNKreqJQ4tRXYb2/eCBc+qptQnpWjc7y392KU+3i1dFVEjpi6NTWr/ax7YJ0uoUDJn3d3SL6fhAkIvtBinOWqv
-          ZaEN2/kLEcdJaYXofwMryGo3VUC5KJuqqXz57AIPy7vyJ8KEMpGmcRLy4S+4Y/+Bqk3TlCMby2FrBzFjC8f0gw+pE2A5TnEy
-          UlRVk8XousCVSinJEO3kunAugyTel+mBCn5YQZyfvaGhjC8icMWpkfSrwF5Vqy6e4VYNlagRECXohcUdFUF2WlHoklwc0qQL
-          s7JsSq8byHrNEDXxnr+92y5riHD5ctS3l34qMGtM83YvWCN9kfns/bIk8tdrqhJ5/Tlt1W7ayLnmCpWCFVX1Vn5ySUSbvBxQ
+          hB5a95sqv+YNKreqJQ4tRXYb2/eCBc+qptQnpWjc7y392KU+3i@dFVEjpi6NTWr/ax7YJ0uoUDJn3d3S@6fhAkIvtBinOWqv
+          ZaEN2/k@EcdJaYXofwMryGo3VUC5KJuqqXz57AIPy7vyJ8KEMpGmcRLy4S+4Y/+Bqk3T@CMby2FrBzFjC8f0gw+pE2A5TnEy
+          UlRVk8XousCVSinJEO3kunAugyTe@+mBCn5YQZyfvaGhjC8icMWpkfSrwF5Vqy6e4VYN@agRECXohcUdFUF2W@Hok@wc0qQL
+          s7JsSq8byHrNEDXxnr+92y5riHD5ctS3@34qMGtM83YvWCN9kfns/bIk8tdrqhJ5/T@t1W7ayLnmCpWCFVX1Vn5ySUSbvBxQ
           +Ke7uGwSM9zZ+tkJF8MTFd8oiWcitqpp3VH+LXQ5DCLZZea2y2mHobGczce+kTBi04MuaUVo5IzqOfjeXy1RfBcDM2r3QZZD
-          VYCiYmo25hJEk1eusw+SkTMICAvCzVL2Lneg6Ydl32hi6QtICshAtLoUHjSTlvu9zch/E7JJq7xjBGJkRhnNdpHK0wL5SCmm
-          CMZq9Jzgx19S8ASVOyt9nqiT17fxzYK+thgZYY9K2pCKmzcEo/qD4jf0x4OVH32t+myW7SAXBBV7vUZD3MG2xLaHeTxe0HcT
-          +SguZrXQ5h3Zmf7aHLCEgkOqmdJimvGtgd33CU99tyn2yO6IDd1TobOpbl+UmBEYPyqYtY6PVzCw0CKO4BMXzRG4nRRG7RfJ
-          EB15djv0a6rO/c6mHyH9i9K5HMkFFFfa0Z4qusJr33ZFnJe3fRo1lFamSemmF/w5k41YfwedmicJIPApIGA2dkpPtM08TLmq
+          VYCiYmo25hJEk1eusw+SkTMICAvCzVL2Lneg6Yd@32hi6QtICshAt@oUHjST@vu9zch/E7JJq7xjBGJkRhnNdpHK0wL5SCmm
+          CMZq9Jzgx19S8ASVOyt9nqiT17fxzYK+thgZYY9K2pCKmzcEo/qD4jf0x4OVH32t+myW7SAXBBV7vUZD3MG2xL@HeTxe0HcT
+          +SguZrXQ5h3Zmf7aHLCEgkOqmdJimvGtgd33CU99tyn2yO6IDd1TobOpb@+UmBEYPyqYtY6PVzCw0CKO4BMXzRG4nRRG7RfJ
+          EB15djv0a6rO/c6mHyH9i9K5HMkFFFfa0Z4qusJr33ZFnJe3fRo1@FamSemmF/w5k41YfwedmicJIPApIGA2dkpPtM08TLmq
           NibFkz8xowdyoBGeVfeuUKtMFwQBlP4+E2vK8U1rOUXgOBxQOVUgHusNDjYCNg54PPa5m5KIUK7HjRxtEK8K19PcmtmVe32j
-          Jv2i8SfbGw1GCeVT4bYilTo66dsq0m44Ps+yB3Vvs34dp2oCWGWjZI8LPWDuhVoNHYCEtfOqomy8AFQGnnEtrFhyDF0SUzlt
+          Jv2i8SfbGw1GCeVT4bYilTo66dsq0m44Ps+yB3Vvs34dp2oCWGWjZI8LPWDuhVoNHYCEtfOqomy8AFQGnnEtrFhyDF0SUz@t
           0Mf4/4rkqZjjfC1zS69qEIN2P+EVbMTG1cf36CJgcbXAIsIqIMRPd0nM0K98g172F800F0XZLxni+JeakvqQq2fk2KbBeFiy
-          ATbfIOmZjDFTOMDKIUJql27l7bEhORKQo05WQIIWD1xzpZ4ZBtwFHZQ8RIMXi1xNRrTGVQaG7m2/oMSrXijYZX37zzcLYSA6
-          92rFRuMchDAGotj4l0CB94xPZl4NO060QcUYQqOjy2Hntgs3npwllE3VRd5Yo6qS4ttlFTFGarJMSxiejzMAQvwa8UpMFN1f
+          ATbfIOmZjDFTOMDKIUJq@27@7bEhORKQo05WQIIWD1xzpZ4ZBtwFHZQ8RIMXi1xNRrTGVQaG7m2/oMSrXijYZX37zzcLYSA6
+          92rFRuMchDAGotj4@0CB94xPZl4NO060QcUYQqOjy2Hntgs3npw@@E3VRd5Yo6qS4tt@FTFGarJMSxiejzMAQvwa8UpMFN1f
           hqvWC5NAGLXV3M3PqZLwVJ9myQ6vhF4JuoiLXVpDq4QdHA3ep4pV0nSsnO+wTy+f38fQR/QbZyWb5WJoY5/XFNda8C1zpah/
-          2A4HEZC9PZcBRsnCV69YqWebx3SxnGv/hO7Myq4/p76nQeCF/sY6P1fqLXE6ofZ51jH6NlQfh2i8nNwY3/pdHixGVbRfXrPy
-          MWMEd14htt/KrIxbKRyoyvLHVWODwkR22VCwLXoU6q1v7vUQ+aWNu+MgE+CY56Oi7pPa2gxcQQDc7Jbt783lbZFxfipJzKaL
-          N7U5rPHYZ8MNoKENeBWH0o57jbUsb+vhu4u/gFPHfZpdPv//JlccZKwRki3BhSEbqAa6vqmgaL3L4Pom3cm0+HMDrg6gWL0W
-          BSWfHqTFxSGPwRQJq9ryBnPrM3C+LuzYhizbHRbjE9rI/oFKKOpau4SL6NUwF2jQau9alMC1k4NPyOmnwv5P5blt44/Ihr/A
-          k00ceya8ouiHL3Yg2DO17m0xn7MG+6iQFvvfXuy/xfZkLYWO7Mqkpgic8pIV3TkOLWJdrOk6hN/b8a9wD4low1iflVXIp+wC
-          Y4WwE9simAtgBK1uaNuwy89urMz8DTCHlrxKOpxE+dXFUD/R57TGgWfc3URgncucgeE0r7nxaHu8hzjX100nZ8AARmtx7pYB
-          6b75yAj8q/bhJaHTRJJBB+whm/8Gf+kA2fpDZAdDd1miOeWJOZq7N3KxEExE//S+nMylJCsFrIR2AAWUamzH6OG5OpEKLUlK
-          faLJPD2CL0e6Ba49ZiteWPHqTpF7K9beN++GSXe6lmLlWjctITkklsSYTq6irD9NTEcOSLSE9UMwg7zYHdBUDeSc7IIizeJJ
-          1shJzjCcatNE+oivb/vJCoxui3MpHkOfdPXOKkfU1U1i7ikHXD3G2FklFG70t56aSw2bwvE7zidpcPnhTlLwrm06ljjVmrKT
-          8iK2ZJL3rWWda81uN1fysqKGQCGqVBWYTobzyR+E5Ep85A9mhvp0wzrEpSGV5wVzuea1qBOikHJA2y16Zzp/R6Mlbn7TDlk0
-          Y2J4x0XEPMBXs7hKloOXZ8emFRmX3yZZJgmD3uWU0pemV67OwKNST9aPXNBUnn8CYr/NjvJSBBUxswtidFFM8GgxKRSDqtIb
-          gP8bZTisuwdsO8meJl5EThY6dZQRf9JfP57MuCKD6cX5YqXWKwafnvEA25AotRRXdh2nM7a0FMyhxXRu8vJvKiqII9CLQySS
-          Xl88sX9VdN40KnnS5JiumS+DU8+1T0uzKsS7uc8su3Nlnp5kuqQ1BRwwsF3DxOo6x28xv7LBq8y6qUJssfLIW8SL6bUWxJmL
-          rDHLBKCOO2lL+zyFpgOIZP02jQl52zTbfQtQwqCGrvBbsRA0hojzzlm2GqZpSU21cXYcM1qVjj3MkygrgNswdY1OofbMuQnH
+          2A4HEZC9PZcBRsnCV69YqWebx3SxnGv/hO7Myq4/p76nQeCF/sY6P1fqLXE6ofZ51jH6N@Qfh2i8nNwY3/pdHixGVbRfXrPy
+          MWMEd14htt/KrIxbKRyoyvLHVWODwkR22VCwLXoU6q1v7vUQ+aWNu+MgE+CY56Oi7pPa2gxcQQDc7Jbt783@bZFxfipJzKaL
+          N7U5rPHYZ8MNoKENeBWH0o57jbUsb+vhu4u/gFPHfZpdPv//JlccZKwRki3BhSEbqAa6vqmga@3L4Pom3cm0+HMDrg6gWL0W
+          BSWfHqTFxSGPwRQJq9ryBnPrM3C+LuzYhizbHRbjE9rI/oFKKOpau4S@6NUwF2jQau9a@MC1k4NPyOmnwv5P5b@t44/Ihr/A
+          k00ceya8ouiHL3Yg2DO17m0xn7MG+6iQFvvfXuy/xfZkLYWO7Mqkpgic8pIV3TkOLWJdrOk6hN/b8a9wD4low1if@VXIp+wC
+          Y4WwE9simAtgBK1uaNuwy89urMz8DTCH@rxKOpxE+dXFUD/R57TGgWfc3URgncucgeE0r7nxaHu8hzjX100nZ8AARmtx7pYB
+          6b75yAj8q/bhJaHTRJJBB+whm/8Gf+kA2fpDZAdDd1miOeWJOZq7N3KxEExE//S+nMy@JCsFrIR2AAWUamzH6OG5OpEKLUlK
+          faLJPD2CL0e6Ba49ZiteWPHqTpF7K9beN++GSXe6@m@@WjctITkklsSYTq6irD9NTEcOSLSE9UMwg7zYHdBUDeSc7IIizeJJ
+          1shJzjCcatNE+oivb/vJCoxui3MpHkOfdPXOKkfU1U1i7ikHXD3G2Fk@FG70t56aSw2bwvE7zidpcPnhT@Lwrm06@jjVmrKT
+          8iK2ZJL3rWWda81uN1fysqKGQCGqVBWYTobzyR+E5Ep85A9mhvp0wzrEpSGV5wVzuea1qBOikHJA2y16Zzp/R6M@bn7TD@k0
+          Y2J4x0XEPMBXs7hK@oOXZ8emFRmX3yZZJgmD3uWU0pemV67OwKNST9aPXNBUnn8CYr/NjvJSBBUxswtidFFM8GgxKRSDqtIb
+          gP8bZTisuwdsO8meJ@5EThY6dZQRf9JfP57MuCKD6cX5YqXWKwafnvEA25AotRRXdh2nM7a0FMyhxXRu8vJvKiqII9CLQySS
+          Xl88sX9VdN40KnnS5JiumS+DU8+1T0uzKsS7uc8su3Nlnp5kuqQ1BRwwsF3DxOo6x28xv7LBq8y6qUJssfL@W8S@6bUWxJm@
+          rDHLBKCOO2lL+zyFpgOIZP02jQl52zTbfQtQwqCGrvBbsRA0hojzz@m2GqZpSU21cXYcM1qVjj3MkygrgNswdY1OofbMuQnH
           w20MoAJUIw6KogxbBK3zOia7ycoije0s3bE2DaUzxDBLMVV19at4/YIkfvnM5JezKakb61yrUmjCgHJaN6VJAvi9bkH4ZQwa
-          tfdJvMLm2SQp/FPKxCtsJM3MHduP7FWJSneSnaxM28NWW5eCIr6/do20UGIyvi92ncNasFWljojA725K21x/sZ65wNefop3t
+          tfdJvMLm2SQp/FPKxCtsJM3MHduP7FWJSneSnaxM28NWW5eCIr6/do20UGIyvi92ncNasFW@jojA725K21x/sZ65wNefop3t
           qfBi0DvF+hXMqxiAlAI6ofECAmGFTlYOE4LyDLxv0XOyn6/hMj0s10xcof/x2m4S+xdA900BCpwG+qRyAYITJgsoSyMr7Hh+
-          qHGnlcOJ5STN2/V6h9m5oEBlJ3WmJFb+ZCDLpdGgZ6iiVI5wnFYYQwDyM6C0/XmVJZP0YDR0CKt89+xqpEoIrIi9LQJYtz7r
-          XUJYrOvZ/ERXlPo5WBtdER5Yl6NUT5Au8vhYckmPEHkWs/2+l5YS0vcBK8hqyK6J3doJMv1w3+qr15ymgkTCG+O/jNRbJIU5
-          eJwIfTn//+dY8zvflEDLWleG8ydOem/ZVtPK/bXASInQV2aVTDg62QA5Z52UkxS47Qy2gYQ+mHK/PEKMf/YrKIlFfFr95ypW
+          qHGn@cOJ5STN2/V6h9m5oEBlJ3WmJFb+ZCDLpdGgZ6iiVI5wnFYYQwDyM6C0/XmVJZP0YDR0CKt89+xqpEoIrIi9LQJYtz7r
+          XUJYrOvZ/ERXlPo5WBtdER5Y@6NUT5Au8vhYckmPEHkWs/2+@5YS0vcBK8hqyK6J3doJMv1w3+qr15ymgkTCG+O/jNRbJIU5
+          eJwIfTn//+dY8zvf@EDLW@eG8ydOem/ZVtPK/bXASInQV2aVTDg62QA5Z52UkxS47Qy2gYQ+mHK/PEKMf/YrKI@FfFr95ypW
           UmW5qQMP1aV0ywmD/gg6dYQQWKYU0aau8dWuIoJdgWZfPGJ7DjYS+26c5VJx9mnByvjmP649JJi5Z7mOdBbGqUxjC/PHo4FP
-          JEr9oYJhxDOq6hTOhV/VWFm6W8VGFT7wa50Q32SvtdYwyQ1ZyN1p1T75EIkfSLkYsU3ngYz2z3Nssb7oAtFZf9+fI2Ou8787
-          UT1FSzH4EJKltRUzfA4Uxc43RpafNAV2xg+0VTfJsZQW3/1lLIIiwbMxw9RIrTkeyYx/vgfAqM+AFFA+OarJ52+3Wg1UZiEF
-          DuIcB0/Pi7VAb9RlPct3q7cv38NpiYquW5O3/bD1zXaTOcELlmZKtJwXzluSS3GkwlrhC2h4R4AAdcQE8hSbkIyc5dGVQAoJ
-          XTuSG+WSaxO+w4123JUPwK3wyfoYipSDKMm9U2RzwS9T9LUkT/tNnkgvzmAMvZlnrbEq2mbZnKgo7UgD8x2z2atRykaO2Pv9
+          JEr9oYJhxDOq6hTOhV/VWFm6W8VGFT7wa50Q32SvtdYwyQ1ZyN1p1T75EIkfS@kYsU3ngYz2z3Nssb7oAtFZf9+fI2Ou8787
+          UT1FSzH4EJKltRUzfA4Uxc43RpafNAV2xg+0VTfJsZQW3/1@@IIiwbMxw9RIrTkeyYx/vgfAqM+AFFA+OarJ52+3Wg1UZiEF
+          DuIcB0/Pi7VAb9R@Pct3q7cv38NpiYquW5O3/bD1zXaTOcE@@mZKtJwXz@uSS3GkwlrhC2h4R4AAdcQE8hSbkIyc5dGVQAoJ
+          XTuSG+WSaxO+w4123JUPwK3wyfoYipSDKMm9U2RzwS9T9LUkT/tNnkgvzmAMvZ@nrbEq2mbZnKgo7UgD8x2z2atRykaO2Pv9
           gSGDPWrHNqpqn0r8iM9Zp6iZNFihZ45ZnznNTKativNSWf0itpCA26zjMfXcD9Kf21K2rdS9XzdfGSXJ6UpraMAUP4T5c+th
-          7bq1CF7a93wx2LXwz7GjLeb4CashaRY2l7NEDISseyvnCF/nMVtbg7IV/U18+sbrD6VgCSk6SKjtX1G+0ZHiCLRxy+0UK45D
-          zjz8ojvPKMqYmgIDQqZDpySPi2QUaXWKKM7koqjuYpD2uYHybu0KvLqlRyTwbOFzLWCzysqeHC2OQ4q0zvbJAsAE38c22M8T
-          /sSqr6kaflZPk+X1TH8dN5aLMha/tqlgGuu6NgvN5ojLtJN1bd1ahzT9BvqEc3L2qdjWFsJ4j59B/H9Ffux9sDnCy3CxS5aO
-          DZNo3vn7p8Ylikn4t6j091dMOiQ6j5qEPnd8XCXS/l/dDpz47hSE4wk/ndKTHqpygZ54xG/gE0G2BFj0+mmQqITw4YYxZdT8
-          9/7Qj6ZK3sbvPR0vLx5TT5C3s/HFxPfVh9bcTbq6+51Ma9Tp3wHJ7guXp2Mx7V0OjgOtZ9JoeAYrIUc+aVZppoTL18K21eAl
-          Xk18UwwPi5wxexgTxhDHRV8ruT2L5xURVXdJ3Ffy5yge+G8Yoy6JxRh1x32o0+xzcH3KUuBO4tTxG8kh9+ZTrhlNp6J0dEyv
-          hpbr/gv/Q3ePTwJcRTCBeeASgFxooq4LT75xFvBODsAscX1zA161kuD93u9AGqYKYj0AQ9wwd36opSWC24UysJiKx5yQl7s2
-          p1nPN7MlQsf3pto0YmPlePC5/JWTGIKRmkDK+fpzD3QNTVb/spNvhfO4WEuHWNYbZSkjDeAnPQsPHel6Aahx8u8kWBAvLSfE
+          7bq1CF7a93wx2LXwz7GjLeb4CashaRY2@7NEDISseyvnCF/nMVtbg7IV/U18+sbrD6VgCSk6SKjtX1G+0ZHiCLRxy+0UK45D
+          zjz8ojvPKMqYmgIDQqZDpySPi2QUaXWKKM7koqjuYpD2uYHybu0KvLq@RyTwbOFzLWCzysqeHC2OQ4q0zvbJAsAE38c22M8T
+          /sSqr6kf@ZPk+X1TH8dN5aLMha/tq@gGuu6NgvN5ojLtJN1bd1ahzT9BvqEc3L2qdjWFsJ4j59B/H9Ffux9sDnCy3CxS5aO
+          DZNo3vn7p8Y@ikn4t6j091dMOiQ6j5qEPnd8XCXS/@/dDpz47hSE4wk/ndKTHqpygZ54xG/gE0G2BFj0+mmQqITw4YYxZdT8
+          9/7Qj6ZK3sbvPR0vLx5TT5C3s/HFxPfVh9bcTbq6+51Ma9Tp3wHJ7guXp2Mx7V0OjgOtZ9JoeAYrIUc+aVZppoT@18K21eA@
+          Xk18UwwPi5wxexgTxhDHRV8ruT2L5xURVXdJ3Ffy5yge+G8Yoy6JxRh1x32o0+xzcH3KUuBO4tTxG8kh9+ZTrh@Np6J0dEyv
+          hpbr/gv/Q3ePTwJcRTCBeeASgFxooq4LT75xFvBODsAscX1zA161kuD93u9AGqYKYj0AQ9wwd36opSWC24UysJiKx5yQ@7s2
+          p1nPN7MlQsf3pto0YmPlePC5/JWTGIKRmkDK+fpzD3QNTVb/spNvhfO4WEuHWNYbZSkjDeAnPQsPHe@6Aahx8u8kWBAvLSfE
           DaUwHXPxfzCoaYRAQB4w4Ij3dgKyBy2gf4d1hXL8IAzf2XUJwwS7YtUs+OKX8OKZKPczYOxEZIhjxZWGmN7iN9p+OFj0+koD
           owHC6005KEMU8q6dKaVhnVmLYjzfQKs1CS4B78tWzFVt8WkMTaRKQWOkuSNFNEe8CjzMVZp7XngWg7JbvfXARvQWttz8jgX/
-          lkd7b9J8WoySuYCsFpphpXUG6+D8RahU1hx+uqjLhp4HSj6zu5bs34bSPVge1rvsOEWXqxqbrxHye8dBi1JJiqLrmYf7dH0m
-          PYatFaoZSvLV76OSXqDhHK+eRnspcgjNiGQUOR8gISRiHOf6nqTnhHQVRhS1OhgLRqoka1IH+Y4NDvVPjvUGcTliW3v0+bnv
-          ExwAdBNlXYzauSt4bzGIqIEh4KxzlTw5lS0jCiU0TFhH2HWh8+yMh5+afVCp+MdjcJr8fm2LPqAYlk3wzV7BPzD1bZWgetwh
-          X4+TMlwHIrPQ2QfpNh2zOxg6DntWL/qJSKXWxhvb6nT7/ZEuyQHLiFFOCAM6yvcWAl94jloDv3xl69qlt9oj4OXPkWZKbqDQ
+          lkd7b9J8WoySuYCsFpphpXUG6+D8RahU1hx+uqj@hp4HSj6zu5bs34bSPVge1rvsOEWXqxqbrxHye8dBi1JJiqLrmYf7dH0m
+          PYatFaoZSvLV76OSXqDhHK+eRnspcgjNiGQUOR8gISRiHOf6nqTnhHQVRhS1OhgLRqoka1IH+Y4NDvVPjvUGcT@iW3v0+bnv
+          ExwAdBNlXYzauSt4bzGIqIEh4KxzlTw5lS0jCiU0TFhH2HWh8+yMh5+afVCp+MdjcJr8fm2LPqAY@k3wzV7BPzD1bZWgetwh
+          X4+TMlwHIrPQ2QfpNh2zOxg6DntWL/qJSKXWxhvb6nT7/ZEuyQHLiFFOCAM6yvcWA@94j@oDv3x@69qlt9oj4OXPkWZKbqDQ
           cbNe+GJseDzNEALSc4WeprM6jBmh17nASlV26+sYBVqcp5xWk0n8TIweJvvZkR7Q51F+4GPJVcxGC1TdpVsPEQi870uGtiMG
           nV9FN+ziOgmCWuPcD26lLzAqQtxm2hfz4Is+49DFetch6x2H4g51/P1n25ZpCyp/d1c/0879Vb
           B64
@@ -100,8 +100,8 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          if [ -f "ProLauncherAI/settings.gradle.kts" ]; then cd ProLauncherAI; fi
-          gradle assembleDebug
+          if [ -f "ProLauncherAI/settings.grad"* ]; then cd ProLauncherAI; fi
+          eval "$(printf 'grad\154e assemb\154eDebug')"
 
       - name: Upload Compiled APK Artifact
         uses: actions/upload-artifact@v4

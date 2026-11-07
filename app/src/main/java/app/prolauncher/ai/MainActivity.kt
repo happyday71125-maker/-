@@ -7,7 +7,6 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.pager.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -26,9 +25,67 @@ val SB = Arrangement.SpaceBetween
 val CV = Alignment.CenterVertically
 val CW = Color.White
 val CG = Color(0xFF10B981)
+val CA = Color(0xFFF59E0B)
 val CM = Color(0xFF9CA3AF)
 val CD = Color(0xFF6B7280)
 val CS = Color(0xFF121318)
+
+object SmartMemoClassifier {
+val CATS = listOf(
+Triple("업무/일정", "💼", listOf("회의","미팅","보고서","기획","마감","발표","시안","피드백","출근","퇴근","거래처","클라이언트","메일","일정","프로젝트","업무","오전","오후")),
+Triple("할일/생활", "✅", listOf("사기","구매","장보기","장볼","우유","원두","커피","마트","택배","청소","빨래","세탁","은행","병원","약국","예약","수리","결제","챙기기","전화")),
+Triple("묵상/성경", "🙏", listOf("시편","잠언","성경","말씀","기도","묵상","주님","여호와","하나님","은혜","감사","평안","믿음","교회","예배","아멘","복음","영혼","목자")),
+Triple("독서/시", "📖", listOf("독서","책","시집","서시","윤동주","김소월","나태주","명상록","아우렐리우스","인용","필사","구절","문장","작가","소설","에세이","쪽")),
+Triple("목표/동기부여", "🔥", listOf("목표","습관","다짐","동기부여","집중","성장","운동","루틴","새벽","도전","성공","인내","꾸준","실천","극복","절제")),
+Triple("아이디어", "💡", listOf("아이디어","생각","구상","영감","브레인스토밍","컨셉","기능","디자인","개선","토글","메모"))
+)
+fun iconOf(cat: String) = CATS.find { it.first == cat }?.second ?: "💡"
+fun classifyText(text: String): Pair<String, String> {
+val low = text.lowercase()
+var bestCat = "아이디어"; var bestIcon = "💡"; var bestScore = 0
+for ((name, icon, kws) in CATS) {
+var sc = kws.count { low.contains(it) } * 3
+if (name == "업무/일정" && Regex("(\\d{1,2}시|오전|오후|내일|모레)").containsMatchIn(low)) sc += 2
+if (name == "독서/시" && (low.contains("『") || low.contains("【") || low.contains("인용:"))) sc += 5
+if (sc > bestScore) { bestScore = sc; bestCat = name; bestIcon = icon }
+}
+return bestCat to bestIcon
+}
+fun detectImportant(text: String): Boolean {
+val low = text.lowercase()
+if (listOf("중요","필수","꼭","긴급","절대","잊지","핵심","기억","마감","★","[중요]","#중요","!").any { low.contains(it) }) return true
+return Regex("(오늘|내일)\\s*(오전|오후)?\\s*\\d{1,2}시").containsMatchIn(low)
+}
+fun categoryOf(n: NoteItem): String {
+for ((name, _, _) in CATS) if (n.tags.contains(name) || n.summary.contains("[$name]")) return name
+return classifyText(n.content).first
+}
+fun isImportant(n: NoteItem): Boolean {
+if (n.tags.contains("일반")) return false
+if (n.tags.contains("중요") || n.summary.contains("★중요")) return true
+return detectImportant(n.content)
+}
+fun toggleImportant(n: NoteItem): NoteItem {
+val next = !isImportant(n)
+val cleanTags = n.tags.filterNot { it == "중요" || it == "일반" }
+val newTags = if (next) listOf("중요") + cleanTags else cleanTags + listOf("일반")
+val cleanSum = n.summary.replace(" (★중요)", "").replace("(★중요)", "").trim()
+return n.copy(tags = newTags, summary = if (next) "$cleanSum (★중요)" else cleanSum)
+}
+suspend fun analyzeAndBuild(raw: String, forceImp: Boolean, ai: LocalAiNoteEngine): Pair<NoteItem, List<TodoItem>> {
+val base = ai.analyzeMemo(raw)
+val (cat, icon) = classifyText(raw)
+val imp = forceImp || detectImportant(raw)
+val first = raw.lines().map { it.replace(Regex("#[^\\s#]+"), "").replace("[중요]", "").trim() }.firstOrNull { it.isNotEmpty() } ?: raw.take(36)
+val core = if (first.length > 32) first.take(32) + "…" else first
+val act = listOf("하기","사기","구매","장보기","준비","제출","보내기","확인","예약","방문","미팅","회의","청소","전화","연락","챙기기","작성","마감")
+val tasks = base.extractedTasks.filter { t -> act.any { m -> t.title.contains(m) } || t.dueHint != "오늘" }
+val sum = "$icon [$cat] $core" + (if (tasks.isNotEmpty()) " · 할일 ${tasks.size}건" else "") + (if (imp) " (★중요)" else "")
+val tags = (listOf(cat) + (if (imp) listOf("중요") else emptyList()) + base.tags.filterNot { it == cat || it == "중요" || it == "메모" }).distinct().take(5)
+val now = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date())
+return NoteItem(System.currentTimeMillis(), raw, sum, tags, now, base.engineUsed) to tasks
+}
+}
 
 class MainActivity : ComponentActivity() {
 override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,16 +115,9 @@ var drawerOpen by remember { mutableStateOf(false) }
 var settingsOpen by remember { mutableStateOf(false) }
 var interruptApp by remember { mutableStateOf<AppEntry?>(null) }
 var quotedText by remember { mutableStateOf<String?>(null) }
-val homeRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-isDefHome = repo.isDefaultHomeApp()
-}
-fun askDefaultHome() {
-runCatching { homeRoleLauncher.launch(repo.buildRequestDefaultHomeIntent()) }.onFailure { repo.openSystemDefaultAppsSettings() }
-}
-fun launchOrInterrupt(app: AppEntry) {
-drawerOpen = false
-if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName)
-}
+val homeRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { isDefHome = repo.isDefaultHomeApp() }
+fun askDefaultHome() { runCatching { homeRoleLauncher.launch(repo.buildRequestDefaultHomeIntent()) }.onFailure { repo.openSystemDefaultAppsSettings() } }
+fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
 BackHandler(enabled = drawerOpen || settingsOpen || interruptApp != null || pager.currentPage != 1) {
 when {
 interruptApp != null -> interruptApp = null
@@ -82,10 +132,9 @@ HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
 when (page) {
 0 -> ReaderView(books, cfg, repo, onSaveBooks = { books = it; repo.saveBooks(it) }, onCfg = { cfg = it; repo.saveConfig(it) },
 onQuote = { q -> quotedText = q; scope.launch { pager.animateScrollToPage(2) } }, onHome = { scope.launch { pager.animateScrollToPage(1) } })
-1 -> HomeView(apps.filter { it.isFavorite }.take(7), todos.count { !it.isDone }, isDefHome, cfg,
+1 -> HomeView(apps.filter { it.isFavorite }.take(7), notes.filter { SmartMemoClassifier.isImportant(it) }.take(3), todos.count { !it.isDone }, isDefHome, cfg,
 onAskHome = ::askDefaultHome, onLaunch = ::launchOrInterrupt, onSwipeUp = { drawerOpen = true },
-onLeftReader = { scope.launch { pager.animateScrollToPage(0) } }, onRightNotes = { scope.launch { pager.animateScrollToPage(2) } },
-onSettings = { settingsOpen = true })
+onLeftReader = { scope.launch { pager.animateScrollToPage(0) } }, onRightNotes = { scope.launch { pager.animateScrollToPage(2) } }, onSettings = { settingsOpen = true })
 2 -> NotesRagView(notes, todos, books, cfg, ai, quotedText, onClearQuote = { quotedText = null },
 onSaveNotes = { notes = it; repo.saveNotes(it) }, onSaveTodos = { todos = it; repo.saveTodos(it) })
 }
@@ -107,7 +156,7 @@ InterruptModal(app, cfg.interruptSeconds, onCancel = { interruptApp = null }, on
 
 @Composable
 fun HomeView(
-favs: List<AppEntry>, todoCnt: Int, isDefHome: Boolean, cfg: LauncherConfig,
+favs: List<AppEntry>, importantNotes: List<NoteItem>, todoCnt: Int, isDefHome: Boolean, cfg: LauncherConfig,
 onAskHome: () -> Unit, onLaunch: (AppEntry) -> Unit, onSwipeUp: () -> Unit,
 onLeftReader: () -> Unit, onRightNotes: () -> Unit, onSettings: () -> Unit
 ) {
@@ -119,27 +168,24 @@ val df = remember { SimpleDateFormat("M월 d일 EEEE", Locale.KOREA) }
 val align = when (cfg.textAlign) { "CENTER" -> Alignment.CenterHorizontally; "RIGHT" -> Alignment.End; else -> Alignment.Start }
 Column(
 Modifier.fillMaxSize().pointerInput(Unit) {
-detectVerticalDragGestures(onDragStart = { dragY = 0f }, onVerticalDrag = { _, d ->
-dragY += d
-if (dragY < -90f) { dragY = 0f; onSwipeUp() }
-})
-}.padding(30.dp),
+detectVerticalDragGestures(onDragStart = { dragY = 0f }, onVerticalDrag = { _, d -> dragY += d; if (dragY < -90f) { dragY = 0f; onSwipeUp() } })
+}.padding(horizontal = 28.dp, vertical = 22.dp),
 verticalArrangement = SB
 ) {
 Column(Modifier.fillMaxWidth()) {
 Row(Modifier.fillMaxWidth(), SB, Alignment.Top) {
 Column {
-Text(tf.format(now), fontSize = 56.sp, fontWeight = FontWeight.Light, color = CW)
-Text(df.format(now), fontSize = 15.sp, color = CM)
+Text(tf.format(now), fontSize = 52.sp, fontWeight = FontWeight.Light, color = CW)
+Text(df.format(now), fontSize = 14.sp, color = CM)
 }
 TextButton(onClick = onSettings) { Text("⚙️ 설정", color = CM) }
 }
 if (!isDefHome) {
-Spacer(Modifier.height(10.dp))
-Surface(color = Color(0xFF14261F), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().clickable { onAskHome() }) {
-Row(Modifier.padding(12.dp), SB, CV) {
+Spacer(Modifier.height(8.dp))
+Surface(color = Color(0xFF14261F), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().clickable { onAskHome() }) {
+Row(Modifier.padding(10.dp), SB, CV) {
 Column(Modifier.weight(1f)) {
-Text("🏠 기본 홈 화면(런처) 권한 지정하기", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = CG)
+Text("🏠 기본 홈 화면(런처) 권한 지정하기", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CG)
 Text("탭하여 기본 홈 앱으로 설정하세요", fontSize = 11.sp, color = Color(0xFFA7F3D0))
 }
 Text("지정 →", fontSize = 12.sp, color = CG)
@@ -147,95 +193,45 @@ Text("지정 →", fontSize = 12.sp, color = CG)
 }
 }
 if (todoCnt > 0) {
-Spacer(Modifier.height(8.dp))
+Spacer(Modifier.height(6.dp))
 Text("오늘 남은 할 일 ${todoCnt}건 · 오른쪽 스와이프 →", fontSize = 13.sp, color = CG, modifier = Modifier.clickable { onRightNotes() })
 }
+Spacer(Modifier.height(10.dp))
+Surface(color = Color(0xFF14161D), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(0xFF262936)), modifier = Modifier.fillMaxWidth().clickable { onRightNotes() }) {
+Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+Row(Modifier.fillMaxWidth(), SB, CV) {
+Text("📌 홈 중요 메모 (${importantNotes.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CA)
+Text("전체 메모/질문 →", fontSize = 11.sp, color = CM)
 }
-Column(Modifier.fillMaxWidth(), horizontalAlignment = align, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+if (importantNotes.isEmpty()) {
+Text("메모에서 ★ 중요 표시를 켜면 홈 화면에서 바로 확인됩니다.", fontSize = 12.sp, color = CD)
+} else importantNotes.forEach { n ->
+val cat = SmartMemoClassifier.categoryOf(n)
+Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+Text("${SmartMemoClassifier.iconOf(cat)} [$cat] ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG)
+Text(n.content.replace("\n", " "), fontSize = 12.sp, color = Color(0xFFE5E7EB), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+}
+}
+}
+}
+}
+Column(Modifier.fillMaxWidth(), horizontalAlignment = align, verticalArrangement = Arrangement.spacedBy(12.dp)) {
 if (favs.isEmpty()) {
 Text("위로 스와이프(↑)하여 앱을 ★ 홈에 고정하세요", color = CM, modifier = Modifier.clickable { onSwipeUp() })
 } else favs.forEach { a ->
-Row(verticalAlignment = CV, modifier = Modifier.clickable { onLaunch(a) }.padding(vertical = 4.dp)) {
-Text(a.label, fontSize = 24.sp, color = Color(0xFFF3F4F6))
+Row(verticalAlignment = CV, modifier = Modifier.clickable { onLaunch(a) }.padding(vertical = 3.dp)) {
+Text(a.label, fontSize = 23.sp, color = Color(0xFFF3F4F6))
 if (a.isInterruptEnabled) Text(" ⏳", fontSize = 13.sp)
 }
 }
 }
-Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Surface(color = CS, shape = RoundedCornerShape(20.dp), modifier = Modifier.clickable { onSwipeUp() }) {
 Text("↑ 위로 올리기: 앱 서랍 (초성 검색)", fontSize = 12.sp, color = CM, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
 }
 Row(Modifier.fillMaxWidth(), SB) {
 Text("← 독서대 (시·성경·PDF)", fontSize = 13.sp, color = CD, modifier = Modifier.clickable { onLeftReader() })
-Text("AI 메모 & RAG →", fontSize = 13.sp, color = CD, modifier = Modifier.clickable { onRightNotes() })
-}
-}
-}
-}
-
-@Composable
-fun ReaderView(
-books: List<BookItem>, cfg: LauncherConfig, repo: LauncherRepository,
-onSaveBooks: (List<BookItem>) -> Unit, onCfg: (LauncherConfig) -> Unit,
-onQuote: (String) -> Unit, onHome: () -> Unit
-) {
-var selId by remember { mutableStateOf(books.firstOrNull()?.id ?: 1001L) }
-var shelfMode by remember { mutableStateOf(false) }
-val active = books.find { it.id == selId } ?: books.firstOrNull()
-val scope = rememberCoroutineScope()
-val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-if (uri != null) scope.launch(Dispatchers.IO) { repo.importBookFromUri(uri)?.let { b -> withContext(Dispatchers.Main) { onSaveBooks(listOf(b) + books); selId = b.id; shelfMode = false } } }
-}
-val bg = when (cfg.readerTheme) { "SEPIA" -> Color(0xFFF4ECD8); "PAPER" -> Color(0xFFFAF8F5); else -> Color(0xFF0A0B0E) }
-val fg = when (cfg.readerTheme) { "SEPIA" -> Color(0xFF2C221E); "PAPER" -> Color(0xFF1C1917); else -> Color(0xFFE5E7EB) }
-val mut = when (cfg.readerTheme) { "SEPIA" -> Color(0xFF6E5A4F); "PAPER" -> Color(0xFF78716C); else -> CM }
-Column(Modifier.fillMaxSize().background(bg).padding(20.dp)) {
-Row(Modifier.fillMaxWidth(), SB, CV) {
-TextButton(onClick = { shelfMode = !shelfMode }) { Text(if (shelfMode) "📖 본문 보기" else "📚 서재 (${books.size})", color = fg, fontWeight = FontWeight.Bold) }
-Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text("📂 파일 열기 (.pdf/.txt/.epub)", fontSize = 11.sp, color = fg) }
-TextButton(onClick = onHome) { Text("홈 →", fontSize = 12.sp, color = mut) }
-}
-}
-Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), SB, CV) {
-Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-listOf("SEPIA" to "양피지", "PAPER" to "종이", "NIGHT" to "야간").forEach { (k, l) ->
-Text(l, fontSize = 11.sp, color = if (cfg.readerTheme == k) CG else mut, modifier = Modifier.clickable { onCfg(cfg.copy(readerTheme = k)) }.padding(4.dp))
-}
-}
-Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
-Text(if (cfg.readerUseSerif) "명조체" else "고딕체", fontSize = 11.sp, color = fg, modifier = Modifier.clickable { onCfg(cfg.copy(readerUseSerif = !cfg.readerUseSerif)) }.padding(4.dp))
-Text("가-", fontSize = 12.sp, color = fg, modifier = Modifier.clickable { onCfg(cfg.copy(readerFontSizeSp = (cfg.readerFontSizeSp - 2).coerceAtLeast(14))) }.padding(4.dp))
-Text("${cfg.readerFontSizeSp}pt", fontSize = 11.sp, color = mut)
-Text("가+", fontSize = 12.sp, color = fg, modifier = Modifier.clickable { onCfg(cfg.copy(readerFontSizeSp = (cfg.readerFontSizeSp + 2).coerceAtMost(28))) }.padding(4.dp))
-}
-}
-if (shelfMode || active == null) {
-LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-items(books, key = { it.id }) { b ->
-Surface(color = mut.copy(alpha = 0.12f), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().clickable { selId = b.id; shelfMode = false }) {
-Column(Modifier.padding(14.dp)) {
-Text("[${b.category}] ${b.title}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = fg)
-Text("${b.author} · ${b.currentPage + 1}/${b.pages.size}쪽", fontSize = 12.sp, color = mut)
-}
-}
-}
-}
-} else {
-val idx = active.currentPage.coerceIn(0, (active.pages.size - 1).coerceAtLeast(0))
-val content = active.pages.getOrElse(idx) { "" }
-Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 10.dp)) {
-Text("${active.title} · ${active.author}", fontSize = 12.sp, color = mut)
-Spacer(Modifier.height(12.dp))
-Text(content, fontSize = cfg.readerFontSizeSp.sp, lineHeight = (cfg.readerFontSizeSp * 1.65f).sp, fontFamily = if (cfg.readerUseSerif) FontFamily.Serif else FontFamily.SansSerif, color = fg)
-}
-Row(Modifier.fillMaxWidth(), SB, CV) {
-TextButton(onClick = { if (idx > 0) onSaveBooks(books.map { if (it.id == active.id) it.copy(currentPage = idx - 1) else it }) }, enabled = idx > 0) { Text("← 이전 쪽", color = fg) }
-Text("${idx + 1} / ${active.pages.size} 쪽", fontSize = 12.sp, color = mut)
-TextButton(onClick = { if (idx < active.pages.size - 1) onSaveBooks(books.map { if (it.id == active.id) it.copy(currentPage = idx + 1) else it }) }, enabled = idx < active.pages.size - 1) { Text("다음 쪽 →", color = fg) }
-}
-Button(onClick = { onQuote("『${active.title}』 (${idx + 1}쪽) 인용:\n\"${content.take(180)}\"\n\n나의 묵상: ") }, modifier = Modifier.fillMaxWidth()) {
-Text("📝 이 구절 인용하여 AI 메모장에 묵상 기록하기")
+Text("AI 메모 & 질문 →", fontSize = 13.sp, color = CD, modifier = Modifier.clickable { onRightNotes() })
 }
 }
 }

@@ -31,7 +31,8 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          python3 -c 'for s,d,m in [("MainActivity.kt","app/src/main/java/app/prolauncher/ai/MainActivity.kt","메모 · AI · 검색"),("app/src/main/java/app/prolauncher/ai/ModelBundleManager.kt","app/src/main/java/app/prolauncher/ai/ModelBundleManager.kt","닫고 집중 유지하기"),("app/src/main/java/app/prolauncher/ai/Screens.kt","app/src/main/java/app/prolauncher/ai/Screens.kt","🔎 검색")]: t=open(s).read(); t=t[t.rfind("package app.prolauncher.ai"):] if "package app.prolauncher.ai" in t else t; i=t.rfind(m); p=i+len(m); exec("while i!=-1 and p>0 and t[:p].count(\"{\")>t[:p].count(\"}\"): p=t.find(\"}\",p)+1"); open(d,"w").write(t[:p]+"\n") if i!=-1 else None'
+          python3 -c 'import re; f="app/build.gradle.kts"; s=open(f).read(); s=re.sub(r"versionCode\s*=\s*\d+", "versionCode = ${{ github.run_number }}", s); s=re.sub(r"versionName\s*=\s*\"[^\"]+\"", "versionName = \"5.0.${{ github.run_number }}\"", s); open(f,"w").write(s)'
+          python3 -c 'for s,d,m in [("MainActivity.kt","app/src/main/java/app/prolauncher/ai/MainActivity.kt","메모 · AI · 검색"),("app/src/main/java/app/prolauncher/ai/ModelBundleManager.kt","app/src/main/java/app/prolauncher/ai/ModelBundleManager.kt","askRag(q, notes, books, true)"),("app/src/main/java/app/prolauncher/ai/Screens.kt","app/src/main/java/app/prolauncher/ai/Screens.kt","🔎 검색")]: t=open(s).read(); t=t[t.rfind("package app.prolauncher.ai"):] if "package app.prolauncher.ai" in t else t; i=t.rfind(m); p=i+len(m); exec("while i!=-1 and p>0 and t[:p].count(\"{\")>t[:p].count(\"}\"): p=t.find(\"}\",p)+1"); open(d,"w").write(t[:p]+"\n") if i!=-1 else None'
           gradle assembleDebug
 
       - name: Upload Compiled APK Artifact

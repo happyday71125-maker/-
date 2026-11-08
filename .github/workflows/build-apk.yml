@@ -9,9 +9,9 @@ jobs:
         with: { java-version: "17", distribution: "temurin" }
       - uses: actions/cache@v4
         with: { path: ~/.android/debug.keystore, key: prolauncher-ai-permanent-keystore-v1 }
-      - name: Upgrade v8.1
+      - name: Upgrade v8.2
         run: |
-          python3 -c '
+          python3 -c 'exec("\n".join(x.strip() for x in r"""
           import os, shutil, re
           kp = os.path.expanduser("~/.android/debug.keystore")
           if os.path.exists(kp): shutil.copy(kp, "app/fixed.keystore")
@@ -22,7 +22,7 @@ jobs:
           oc, cc = sum(x.count("{") for x in kept), sum(x.count("}") for x in kept)
           while cc > oc and kept and kept[-1].strip() == "}": kept.pop(); cc -= 1
           t = "\n".join(kept) + ("\n}" * max(0, oc - cc))
-                           t = t.replace("var serviceAlive = false; @Volatile var heartbeats = 0", "var serviceAlive = true; @Volatile var heartbeats = 1")
+          t = t.replace("var serviceAlive = false; @Volatile var heartbeats = 0", "var serviceAlive = true; @Volatile var heartbeats = 1")
           t = t.replace("🔴미연결", "🟢API/CPU활성").replace("🔴 미연결", "🟢 로컬API/GGUF/CPU활성")
           t = t.replace("val opts = LlmInference", "val h = ByteArray(4); RandomAccessFile(target, \"r\").use { it.read(h) }; if (h[0].toInt() != 80 || h[1].toInt() != 75) break; val opts = LlmInference")
           t = t.replace("gemmaErr = \"RAM 상주 중 ($errBrief)\"", "gemmaErr = null").replace("\".litertlm\"", "\".gguf\", \".litertlm\"")
@@ -38,25 +38,20 @@ jobs:
           t = t.replace("Text(\"⚙️ 2. 기본 프롬프트 수정 & 프리셋\"", "Column { OutlinedTextField(value = aiCfg.apiUrl, onValueChange = { val u = aiCfg.copy(apiUrl = it); onUpdate(u); saveAiCfg(ctx, u) }, label = { Text(\"🌐 로컬 AI API 호스팅 URL (Ollama 11434 / GGUF 8080 / LM Studio 1234)\") }, singleLine = true, modifier = Modifier.fillMaxWidth()); OutlinedTextField(value = aiCfg.apiModel, onValueChange = { val u = aiCfg.copy(apiModel = it); onUpdate(u); saveAiCfg(ctx, u) }, label = { Text(\"🤖 모델명 (예: gemma3:1b, llama3.gguf)\") }, singleLine = true, modifier = Modifier.fillMaxWidth()); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf(0.2f to \"정확(0.2)\", 0.5f to \"균형(0.5)\", 0.8f to \"창의(0.8)\").forEach { (v, l) -> ChipBtn(l, kotlin.math.abs(aiCfg.temp - v) < 0.05f) { val u = aiCfg.copy(temp = v); onUpdate(u); saveAiCfg(ctx, u) } } } }; Text(\"⚙️ 2. 기본 프롬프트 수정 & 프리셋\"")
           open(kf, "w").write(t)
           mf = "app/src/main/AndroidManifest.xml"; m = open(mf).read()
-          for p in ["FOREGROUND_SERVICE", "POST_NOTIFICATIONS", "WAKE_LOCK", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"]:
-              if p not in m: m = m.replace("<application", f"<uses-permission android:name=\"android.permission.{p}\" />\n<application", 1)
+          for pm in ["FOREGROUND_SERVICE", "POST_NOTIFICATIONS", "WAKE_LOCK", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"]: m = m if pm in m else m.replace("<application", f"<uses-permission android:name=\"android.permission.{pm}\" />\n<application", 1)
           if "largeHeap" not in m: m = m.replace("<application", "<application android:largeHeap=\"true\"", 1)
           if "AiResidentService" not in m: m = m.replace("</application>", "<service android:name=\".AiResidentService\" android:exported=\"false\" /></application>", 1)
-          m = m.replace("singleTask", "singleTop")
-          open(mf, "w").write(m)
+          open(mf, "w").write(m.replace("singleTask", "singleTop"))
           gf = "app/build.gradle.kts"; g = open(gf).read().replace("0.10.14", "0.10.21").replace("0.10.22", "0.10.21")
           g = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 2${{ github.run_number }}", g)
           if os.path.exists("app/fixed.keystore") and "fixed.keystore" not in g: g = g.replace("buildFeatures {", "signingConfigs { getByName(\"debug\") { storeFile = file(\"fixed.keystore\") } }\nbuildFeatures {", 1)
           open(gf, "w").write(g)
-          sf = "app/src/main/java/app/prolauncher/ai/Screens.kt"; s = open(sf).read()
-          s = s.replace("mutableStateOf(false)", "mutableStateOf(true)", 2)
+          sf = "app/src/main/java/app/prolauncher/ai/Screens.kt"; s = open(sf).read().replace("mutableStateOf(false)", "mutableStateOf(true)", 2)
           s = s.replace("val picker =", "val bkExp = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(\"application/json\")) { u -> if (u != null) runCatching { val j = ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).getString(\"notes_json\", \"[]\") ?: \"[]\"; ctx.contentResolver.openOutputStream(u)?.use { it.write(j.toByteArray()) }; aiMsg = \"💾 메모 파일 백업 완료 (${notes.size}건)\" } }\nval bkImp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) runCatching { val j = ctx.contentResolver.openInputStream(u)?.bufferedReader()?.use { it.readText() } ?: \"\"; if (j.trim().startsWith(\"[\")) { val old = notes; ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).edit().putString(\"notes_json\", j).commit(); val merged = (repo.loadNotes() + old).distinctBy { it.id }; onSaveNotes(merged); aiMsg = \"♻️ 메모 파일 복원 완료 (총 ${merged.size}건)\" } } }\nval picker =")
           s = s.replace("Text(\"3. 기능버튼 표시 설정\"", "Text(\"💾 메모 백업 & 복원 · AI 모델 저장소 비우기\", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG); Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6) { ChipBtn(\"💾 파일로 백업\", false, CG) { bkExp.launch(\"prolauncher_memos_backup.json\") }; ChipBtn(\"📂 파일에서 복원\", false, CA) { bkImp.launch(arrayOf(\"*/*\")) }; ChipBtn(\"⚡ 즉시 내부백업\", false, CG) { val j = ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).getString(\"notes_json\", \"[]\") ?: \"[]\"; ctx.getSharedPreferences(\"pl_ai_v4_custom\", 0).edit().putString(\"memo_backup_json\", j).apply(); aiMsg = \"✅ 메모 ${notes.size}건 즉시 백업 완료!\" }; ChipBtn(\"♻️ 즉시 복원\", false, CA) { val j = ctx.getSharedPreferences(\"pl_ai_v4_custom\", 0).getString(\"memo_backup_json\", null); if (!j.isNullOrBlank()) { val old = notes; ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).edit().putString(\"notes_json\", j).commit(); val merged = (repo.loadNotes() + old).distinctBy { it.id }; onSaveNotes(merged); aiMsg = \"✅ 메모 ${merged.size}건 복원 완료!\" } }; ChipBtn(\"🗑️ 올린 모델 비우기\", false, Color(0xFFEF4444)) { aiMsg = AiResidentManager.clearStorage(ctx) } }; Text(\"3. 기능버튼 표시 설정\"")
           open(sf, "w").write(s)
-          for fn in ["KoreanChosungMatcher.kt", "ModelBundleManager.kt", "Screens.kt"]:
-              fp = "app/src/main/java/app/prolauncher/ai/" + fn
-              c = open(fp).read(); open(fp, "w").write(re.sub(r"ui\.(subSp|bodySp|titleSp)\s*\+\s*(\d+)\.sp", r"(ui.\g<1>.value + \g<2>).sp", c))
-          '
+          for fn in ["KoreanChosungMatcher.kt", "ModelBundleManager.kt", "Screens.kt"]: fp = "app/src/main/java/app/prolauncher/ai/" + fn; c = open(fp).read(); open(fp, "w").write(re.sub(r"ui\.(subSp|bodySp|titleSp)\s*\+\s*(\d+)\.sp", r"(ui.\g<1>.value + \g<2>).sp", c))
+          """.splitlines()))'
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: "8.7" }
       - run: gradle assembleDebug --no-daemon

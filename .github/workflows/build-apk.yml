@@ -65,7 +65,7 @@ jobs:
           s = open(f, encoding="utf-8").read()
           s = s.replace("0.10.14", "0.10.21")
           s = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 1${{ github.run_number }}", s)
-          s = re.sub(r'versionName\s*=\s*"[^"]*"', 'versionName = "7.3.${{ github.run_number }}"', s)
+          s = re.sub(r'versionName\s*=\s*"[^"]*"', 'versionName = "7.4.${{ github.run_number }}"', s)
           if "fixed.keystore" not in s:
               sc = (
                   '    signingConfigs {\n'
@@ -154,10 +154,24 @@ jobs:
               kt = kt.replace('Text("🗂️ 3. RAG 작동 범위 및 임베딩젬마2 옵션"', 'UiScaleFontSection(ctx, aiCfg, ui, onUpdate); Text("🗂️ 3. RAG 작동 범위 및 임베딩젬마2 옵션"', 1)
               open(kf, "w", encoding="utf-8").write(kt)
 
+          all_kt = "\n".join(open(p, encoding="utf-8").read() for p in glob.glob("app/src/main/java/**/*.kt", recursive=True))
           mbm_f = "app/src/main/java/app/prolauncher/ai/ModelBundleManager.kt"
           mbm_t = open(mbm_f, encoding="utf-8").read()
-          if "fun SmartMemoClassifier.guessCategory" not in mbm_t:
-              ext_code = '''
+          extra = []
+          if "class QuickBtnConfig" not in all_kt:
+              extra.append('data class QuickBtnConfig(val showCheck: Boolean = true, val showBullet: Boolean = true, val showDate: Boolean = true, val showDivider: Boolean = true, val showNewline: Boolean = true, val autoSumLong: Boolean = false, val customLabel: String = "📌 템플릿", val customText: String = "[메모]\\n☐ 항목: ")')
+          ext_code = '''
+          private val DEF_MEMO_CATS_E = listOf("일상", "업무", "할일", "아이디어", "독서")
+          private val DEF_BOOK_CATS_E = listOf("에세이", "인문/교양", "시/문학", "업무/문서")
+          private fun extPrefs(ctx: Context) = ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE)
+          fun SmartMemoClassifier.loadMemoCats(ctx: Context): List<String> = extPrefs(ctx).getString("memo_cats", null)?.split("|")?.map { it.trim() }?.filter { it.isNotEmpty() }?.ifEmpty { DEF_MEMO_CATS_E } ?: DEF_MEMO_CATS_E
+          fun SmartMemoClassifier.saveMemoCats(ctx: Context, cats: List<String>) { extPrefs(ctx).edit().putString("memo_cats", cats.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString("|")).apply() }
+          fun SmartMemoClassifier.loadBookCats(ctx: Context): List<String> = extPrefs(ctx).getString("book_cats", null)?.split("|")?.map { it.trim() }?.filter { it.isNotEmpty() }?.ifEmpty { DEF_BOOK_CATS_E } ?: DEF_BOOK_CATS_E
+          fun SmartMemoClassifier.saveBookCats(ctx: Context, cats: List<String>) { extPrefs(ctx).edit().putString("book_cats", cats.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString("|")).apply() }
+          fun SmartMemoClassifier.loadBtnCfg(ctx: Context): QuickBtnConfig { val p = extPrefs(ctx); return QuickBtnConfig(p.getBoolean("b_check", true), p.getBoolean("b_bullet", true), p.getBoolean("b_date", true), p.getBoolean("b_div", true), p.getBoolean("b_nl", true), p.getBoolean("b_autosum", false), p.getString("b_clabel", "📌 템플릿") ?: "📌 템플릿", p.getString("b_ctext", "[메모]\\n☐ 항목: ") ?: "[메모]\\n☐ 항목: ") }
+          fun SmartMemoClassifier.saveBtnCfg(ctx: Context, c: QuickBtnConfig) { extPrefs(ctx).edit().putBoolean("b_check", c.showCheck).putBoolean("b_bullet", c.showBullet).putBoolean("b_date", c.showDate).putBoolean("b_div", c.showDivider).putBoolean("b_nl", c.showNewline).putBoolean("b_autosum", c.autoSumLong).putString("b_clabel", c.customLabel).putString("b_ctext", c.customText).apply() }
+          fun SmartMemoClassifier.isImportant(n: NoteItem): Boolean = !n.tags.contains("일반") && (n.tags.contains("중요") || n.summary.contains("★중요") || n.content.contains("[중요]"))
+          fun SmartMemoClassifier.toggleImportant(n: NoteItem): NoteItem { val next = !isImportant(n); val base = n.tags.filterNot { it == "중요" || it == "일반" }; return n.copy(tags = if (next) listOf("중요") + base else base + listOf("일반")) }
           fun SmartMemoClassifier.guessCategory(text: String, cats: List<String>): String {
           val low = text.lowercase()
           val rules = mapOf("업무" to listOf("회의","미팅","보고서","기획","마감","발표","시안","피드백","출근","거래처","메일","일정","프로젝트","업무"), "할일" to listOf("☐","☑","사기","구매","장보기","우유","원두","마트","택배","청소","세탁","은행","병원","예약","결제","체크"), "독서" to listOf("독서","책","시집","윤동주","김소월","나태주","명상록","인용","발췌","구절","문장","작가","에세이","쪽"), "아이디어" to listOf("아이디어","생각","구상","영감","브레인스토밍","컨셉","기능","디자인","개선"))
@@ -184,7 +198,9 @@ jobs:
           return sents.mapIndexed { i, s -> Triple(i, s, (if (i == 0) 4 else 0) + (s.length.coerceAtMost(45) / 10)) }.sortedByDescending { it.third }.take(target).sortedBy { it.first }.joinToString("\\n") { (_, s, _) -> val cut = if (s.length > 46) s.take(46) + "…" else s; if (target == 1) cut else "• $cut" }
           }
           '''
-              open(mbm_f, "w", encoding="utf-8").write(mbm_t + "\n" + ext_code)
+          extra.append(ext_code)
+          if "fun SmartMemoClassifier.loadBookCats" not in mbm_t:
+              open(mbm_f, "w", encoding="utf-8").write(mbm_t + "\n" + "\n".join(extra) + "\n")
 
           sf = "app/src/main/java/app/prolauncher/ai/Screens.kt"
           st = open(sf, encoding="utf-8").read()

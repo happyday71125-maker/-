@@ -65,7 +65,7 @@ jobs:
           s = open(f, encoding="utf-8").read()
           s = s.replace("0.10.14", "0.10.21")
           s = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 1${{ github.run_number }}", s)
-          s = re.sub(r'versionName\s*=\s*"[^"]*"', 'versionName = "7.0.${{ github.run_number }}"', s)
+          s = re.sub(r'versionName\s*=\s*"[^"]*"', 'versionName = "7.1.${{ github.run_number }}"', s)
           if "fixed.keystore" not in s:
               sc = (
                   '    signingConfigs {\n'
@@ -80,10 +80,80 @@ jobs:
               s = s.replace("buildFeatures {", sc + "buildFeatures {", 1)
           open(f, "w", encoding="utf-8").write(s)
 
+          kf = "app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt"
+          kt = open(kf, encoding="utf-8").read()
+          if "UiScaleFontSection" not in kt:
+              old_b = re.search(r"data class ResponsiveUi\(.*?\nfun saveAiCfg\(ctx: Context, c: AiRagConfig\) \{\n.*?\n\}", kt, flags=re.S)
+              new_b = '''data class ResponsiveUi(
+          val hPad: Dp, val vPad: Dp, val cardPad: Dp,
+          val titleSp: TextUnit, val bodySp: TextUnit, val subSp: TextUnit,
+          val panelMaxH: Dp, val isCompact: Boolean,
+          val clockSp: TextUnit = 48.sp, val appSp: TextUnit = 21.sp,
+          val menuSp: TextUnit = 11.sp, val menuHPad: Dp = 9.dp, val menuVPad: Dp = 5.dp,
+          val readerSp: Int = 18
+          )
+          @Composable
+          fun rememberUi(scaleMode: String = "AUTO"): ResponsiveUi {
+          val ctx = LocalContext.current
+          val tick = AiResidentManager.uiTick
+          LaunchedEffect(Unit) { AiResidentManager.ensureStartedAndLoaded(ctx) }
+          val cfg = remember(tick, scaleMode) { loadAiCfg(ctx) }
+          val mode = if (scaleMode != "AUTO") scaleMode else cfg.uiScale
+          val conf = LocalConfiguration.current; val w = conf.screenWidthDp; val h = conf.screenHeightDp
+          val mult = when (mode) { "COMPACT" -> 0.88f; "LARGE" -> 1.12f; else -> if (h < 700 || w < 350) 0.90f else if (h > 850 || w > 410) 1.06f else 1.0f }
+          val mScale = (cfg.menuScalePct.coerceIn(75, 140) / 100f) * mult
+          val compact = h < 700 || w < 350 || mode == "COMPACT"
+          val bodyVal = (cfg.memoFontSp.coerceIn(11, 22) * mult).coerceIn(11f, 24f)
+          val menuVal = (cfg.menuFontSp.coerceIn(9, 18) * mScale).coerceIn(9f, 20f)
+          val homeVal = (cfg.homeFontSp.coerceIn(15, 30) * mult).coerceIn(15f, 32f)
+          return ResponsiveUi(((if (compact) 10f else 14f) * mult).dp, ((if (compact) 7f else 11f) * mult).dp, ((if (compact) 8f else 11f) * mult).dp, (bodyVal + 3f).sp, bodyVal.sp, menuVal.sp, (h * 0.52f).coerceIn(240f, 440f).dp, compact, (homeVal * 2.25f).coerceIn(36f, 64f).sp, homeVal.sp, menuVal.sp, (9f * mScale).coerceIn(6f, 16f).dp, (5f * mScale).coerceIn(3f, 10f).dp, cfg.readerFontSp.coerceIn(14, 30))
+          }
+          const val DEF_SYS_PROMPT = "당신은 사용자의 질문 의도를 정확히 파악해 핵심만 명쾌하고 논리적으로 답하는 스마트 AI 챗봇입니다. 동문서답 없이 사용자의 질문에 직접적으로, 구체적이고 실용적인 한국어로 답변하세요."
+          val PROMPT_PRESETS = listOf("🤖 기본 비서" to DEF_SYS_PROMPT, "📌 핵심 요약" to "핵심 결론을 먼저 1줄로 제시하고 세부 요점을 글머리(•)로 간결하게 정리하세요.", "💡 기획 코치" to "주제에 대해 실행 가능한 아이디어 3가지와 구체적인 첫 단계를 제안하세요.", "✍️ 문장 교정" to "사용자의 문장을 자연스럽고 세련된 한국어 표현으로 다듬어 주세요.")
+          data class AiRagConfig(val sysPrompt: String = DEF_SYS_PROMPT, val ragOn: Boolean = false, val ragScope: String = "ALL", val ragTopK: Int = 5, val ragBooks: Boolean = true, val ragImpOnly: Boolean = false, val uiScale: String = "AUTO", val menuScalePct: Int = 100, val memoFontSp: Int = 14, val menuFontSp: Int = 11, val homeFontSp: Int = 21, val readerFontSp: Int = 18)
+          fun loadAiCfg(ctx: Context): AiRagConfig {
+          val p = ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE)
+          return AiRagConfig(p.getString("ai_sys_prompt", DEF_SYS_PROMPT)?.ifBlank { DEF_SYS_PROMPT } ?: DEF_SYS_PROMPT, p.getBoolean("ai_rag_on", false), p.getString("ai_rag_scope", "ALL") ?: "ALL", p.getInt("ai_rag_topk", 5), p.getBoolean("ai_rag_books", true), p.getBoolean("ai_rag_imp", false), p.getString("ui_scale_mode", "AUTO") ?: "AUTO", p.getInt("ui_menu_pct", 100), p.getInt("ui_memo_sp", 14), p.getInt("ui_menu_sp", 11), p.getInt("ui_home_sp", 21), p.getInt("ui_reader_sp", 18))
+          }
+          fun saveAiCfg(ctx: Context, c: AiRagConfig) {
+          ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE).edit().putString("ai_sys_prompt", c.sysPrompt).putBoolean("ai_rag_on", c.ragOn).putString("ai_rag_scope", c.ragScope).putInt("ai_rag_topk", c.ragTopK).putBoolean("ai_rag_books", c.ragBooks).putBoolean("ai_rag_imp", c.ragImpOnly).putString("ui_scale_mode", c.uiScale).putInt("ui_menu_pct", c.menuScalePct).putInt("ui_memo_sp", c.memoFontSp).putInt("ui_menu_sp", c.menuFontSp).putInt("ui_home_sp", c.homeFontSp).putInt("ui_reader_sp", c.readerFontSp).apply()
+          AiResidentManager.uiTick++
+          }
+          @Composable
+          fun UiScaleFontSection(ctx: Context, aiCfg: AiRagConfig, ui: ResponsiveUi, onUpdate: (AiRagConfig) -> Unit) {
+          Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          Text("📐 화면 해상도 배율 · 각 부분별 메뉴 & 글자 크기 조절", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG)
+          Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          listOf("AUTO" to "자동(해상도맞춤)", "COMPACT" to "컴팩트(작게)", "NORMAL" to "표준", "LARGE" to "크게").forEach { (k, l) -> ChipBtn(l, aiCfg.uiScale == k) { val u = aiCfg.copy(uiScale = k); onUpdate(u); saveAiCfg(ctx, u) } }
+          ChipBtn("🔄 크기 초기화", false, CA) { val u = aiCfg.copy(uiScale = "AUTO", menuScalePct = 100, memoFontSp = 14, menuFontSp = 11, homeFontSp = 21, readerFontSp = 18); onUpdate(u); saveAiCfg(ctx, u) }
+          }
+          Surface(color = Color(0xFF0C1017), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, Color(0xFF263244)), modifier = Modifier.fillMaxWidth()) {
+          Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          Row(Modifier.fillMaxWidth(), SB, CV) { Text("🔘 메뉴·버튼 크기 (${aiCfg.menuScalePct}%)", fontSize = ui.subSp, color = CW); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn("작게 -", false) { val u = aiCfg.copy(menuScalePct = (aiCfg.menuScalePct - 5).coerceAtLeast(80)); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("100%", aiCfg.menuScalePct == 100) { val u = aiCfg.copy(menuScalePct = 100); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("크게 +", false) { val u = aiCfg.copy(menuScalePct = (aiCfg.menuScalePct + 5).coerceAtMost(135)); onUpdate(u); saveAiCfg(ctx, u) } } }
+          Row(Modifier.fillMaxWidth(), SB, CV) { Text("🏷️ 상단메뉴·탭 글자 (${aiCfg.menuFontSp}pt)", fontSize = ui.subSp, color = CW); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn("가 -", false) { val u = aiCfg.copy(menuFontSp = (aiCfg.menuFontSp - 1).coerceAtLeast(9)); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("11pt", aiCfg.menuFontSp == 11) { val u = aiCfg.copy(menuFontSp = 11); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("가 +", false) { val u = aiCfg.copy(menuFontSp = (aiCfg.menuFontSp + 1).coerceAtMost(17)); onUpdate(u); saveAiCfg(ctx, u) } } }
+          Row(Modifier.fillMaxWidth(), SB, CV) { Text("📝 메모·AI채팅 글자 (${aiCfg.memoFontSp}pt)", fontSize = ui.subSp, color = CW); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn("가 -", false) { val u = aiCfg.copy(memoFontSp = (aiCfg.memoFontSp - 1).coerceAtLeast(11)); onUpdate(u); saveAiCfg(ctx, u); ChipBtn("14pt", aiCfg.memoFontSp == 14) { val u = aiCfg.copy(memoFontSp = 14); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("가 +", false) { val u = aiCfg.copy(memoFontSp = (aiCfg.memoFontSp + 1).coerceAtMost(22)); onUpdate(u); saveAiCfg(ctx, u) } } }
+          Row(Modifier.fillMaxWidth(), SB, CV) { Text("🏠 홈 시계·앱목록 글자 (${aiCfg.homeFontSp}pt)", fontSize = ui.subSp, color = CW); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn("가 -", false) { val u = aiCfg.copy(homeFontSp = (aiCfg.homeFontSp - 1).coerceAtLeast(15)); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("21pt", aiCfg.homeFontSp == 21) { val u = aiCfg.copy(homeFontSp = 21); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("가 +", false) { val u = aiCfg.copy(homeFontSp = (aiCfg.homeFontSp + 1).coerceAtMost(28)); onUpdate(u); saveAiCfg(ctx, u) } } }
+          Row(Modifier.fillMaxWidth(), SB, CV) { Text("📖 독서대(서재) 본문 글자 (${aiCfg.readerFontSp}pt)", fontSize = ui.subSp, color = CW); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn("가 -", false) { val u = aiCfg.copy(readerFontSp = (aiCfg.readerFontSp - 1).coerceAtLeast(14)); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("18pt", aiCfg.readerFontSp == 18) { val u = aiCfg.copy(readerFontSp = 18); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("가 +", false) { val u = aiCfg.copy(readerFontSp = (aiCfg.readerFontSp + 1).coerceAtMost(30)); onUpdate(u); saveAiCfg(ctx, u) } } }
+          }
+          }
+          }
+          }'''
+              if old_b:
+                  kt = kt[:old_b.start()] + new_b + kt[old_b.end():]
+                  kt = kt.replace('ChipBtn("★ 중요 메모만", aiCfg.ragImpOnly) { val u = aiCfg.copy(ragImpOnly = !aiCfg.ragImpOnly); onUpdate(u); saveAiCfg(ctx, u) }\n}', 'ChipBtn("★ 중요 메모만", aiCfg.ragImpOnly) { val u = aiCfg.copy(ragImpOnly = !aiCfg.ragImpOnly); onUpdate(u); saveAiCfg(ctx, u) }\n}\nUiScaleFontSection(ctx, aiCfg, ui, onUpdate)')
+                  open(kf, "w", encoding="utf-8").write(kt)
+
           sf = "app/src/main/java/app/prolauncher/ai/Screens.kt"
           st = open(sf, encoding="utf-8").read()
+          st = st.replace("var aiCfg by remember { mutableStateOf(loadAiCfg(ctx)) }", "val tick = AiResidentManager.uiTick; var aiCfg by remember(tick) { mutableStateOf(loadAiCfg(ctx)) }")
           st = st.replace("var aiPromptCfgOpen by remember { mutableStateOf(false) }", "var aiPromptCfgOpen by remember { mutableStateOf(true) }")
           st = st.replace('"✅ LLM 챗봇 + 전체 메모 RAG 엔진 활성"', "AiResidentManager.statusSummary()")
+          if "UiScaleFontSection" not in st:
+              st = re.sub(
+                  r'Text\("1\. 화면 해상도 배율 설정".*?\n\}\n\}',
+                  'UiScaleFontSection(ctx, aiCfg, ui) { aiCfg = it }',
+                  st, count=1, flags=re.S
+              )
           open(sf, "w", encoding="utf-8").write(st)
 
           for p in glob.glob("app/src/main/java/**/*.kt", recursive=True):
@@ -104,7 +174,7 @@ jobs:
           gradle-version: "8.7"
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

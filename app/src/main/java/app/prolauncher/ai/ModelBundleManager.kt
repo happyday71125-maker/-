@@ -1,9 +1,6 @@
 package app.prolauncher.ai
 import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContpackage app.prolauncher.ai
-import android.content.Context
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -236,7 +233,7 @@ LaunchedEffect(flt, q) { if (q.trim().isNotEmpty() && !q.startsWith(" ") && flt.
 Column(Modifier.fillMaxSize().background(Color(0xFA08080A)).padding(horizontal = ui.hPad + 4.dp, vertical = ui.vPad + 4.dp)) {
 Row(Modifier.fillMaxWidth(), SB, CV) { Text("↑ 앱 서랍 (초성 검색)", fontSize = ui.titleSp, fontWeight = FontWeight.Bold, color = CW); ChipBtn("↓ 닫기", false) { onClose() } }
 Spacer(Modifier.height(6.dp))
-OutlinedTextField(value = q, onValueChange = { q = it }, placeholder = { Text("초성 검색 (예: ㅋㅋㅇㅌ)") }, singleLine = true, modifier = Modifier.weight(1f))
+OutlinedTextField(value = q, onValueChange = { q = it }, placeholder = { Text("초성 검색 (예: ㅋㅋㅇㅌ)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 Spacer(Modifier.height(8.dp))
 LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
 items(flt, key = { it.packageName }) { a ->
@@ -307,4 +304,4 @@ Button(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("닫고 �
 TextButton(onClick = { if (left == 0) onGo() }, enabled = left == 0) { Text(if (left > 0) "${left}초 후 열기 가능..." else "그래도 ${app.label} 열기") }
 }
 }}
-}ri
+}

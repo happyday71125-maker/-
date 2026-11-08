@@ -9,7 +9,7 @@ jobs:
         with: { java-version: "17", distribution: "temurin" }
       - uses: actions/cache@v4
         with: { path: ~/.android/debug.keystore, key: prolauncher-ai-permanent-keystore-v1 }
-      - name: Upgrade v8.2
+      - name: Upgrade v8.3
         run: |
           python3 -c 'exec("\n".join(x.strip() for x in r"""
           import os, shutil, re
@@ -17,7 +17,7 @@ jobs:
           if os.path.exists(kp): shutil.copy(kp, "app/fixed.keystore")
           kf = "app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt"
           p = open(kf).read().split("import android.app.*")
-          cand = p[-1] if "readerFontSp" in p[-1] else p[1]
+          cand = (p[-1] if "readerFontSp" in p[-1] else p[1]).replace("package app.prolauncher.ai", "")
           kept = (p[0] + "import android.app.*" + cand).replace(".setPreferredBackend(LlmInference.Backend.GPU)", "").replace(".setPreferredBackend(LlmInference.Backend.CPU)", "").splitlines()
           oc, cc = sum(x.count("{") for x in kept), sum(x.count("}") for x in kept)
           while cc > oc and kept and kept[-1].strip() == "}": kept.pop(); cc -= 1
@@ -29,9 +29,9 @@ jobs:
           t = re.sub(r"else \"🔴 \[Gemma 3 1B 미연결\].*?\n", "else \"🟢 [로컬 AI API & GGUF/CPU 정상 작동] (${loadAiCfg(ctx).apiUrl})\"\n", t)
           t = re.sub(r"if \(!useRag\) return@withContext \"🔴.*", "if (!useRag) return@withContext \"💡 [로컬 AI/CPU 응답] 질문(\"+q+\") 확인 완료. API 설정 또는 메모 RAG를 활용하세요.\"", t)
           t = t.replace("fun startService(", "fun clearStorage(ctx: Context): String { runCatching { gemmaLlm?.close(); embedder?.close() }; gemmaLlm = null; gemmaBuf = null; embedder = null; embedBuf = null; gemmaMb = 0L; embedMb = 0L; gemmaName = \"비움\"; embedName = \"비움\"; var b = 0L; listOf(\"models\", \"llm_models\").forEach { d -> File(ctx.applicationContext.filesDir, d).listFiles()?.forEach { b += it.length(); it.delete() } }; prefs(ctx).edit().clear().apply(); uiTick++; return \"🗑️ 올린 모델 해제 및 저장소 비우기 완료 (${b/1048576L}MB 확보)\" }\nfun startService(")
-          t = t.replace("val readerFontSp: Int = 18)", "val readerFontSp: Int = 18, val apiUrl: String = \"http\"+\"://127.0.0.1:11434/v1/chat/completions\", val apiModel: String = \"gemma3:1b\", val temp: Float = 0.5f, val maxTok: Int = 512)")
-          t = t.replace("p.getInt(\"ui_reader_sp\", 18))", "p.getInt(\"ui_reader_sp\", 18), p.getString(\"ai_api_url\", \"http\"+\"://127.0.0.1:11434/v1/chat/completions\") ?: \"\", p.getString(\"ai_api_model\", \"gemma3:1b\") ?: \"gemma3:1b\", p.getFloat(\"ai_temp\", 0.5f), p.getInt(\"ai_max_tok\", 512))")
-          t = t.replace(".putInt(\"ui_reader_sp\", c.readerFontSp).apply()", ".putInt(\"ui_reader_sp\", c.readerFontSp).putString(\"ai_api_url\", c.apiUrl.trim()).putString(\"ai_api_model\", c.apiModel.trim()).putFloat(\"ai_temp\", c.temp).putInt(\"ai_max_tok\", c.maxTok).apply()")
+          t = t.replace("val uiScale: String = \"AUTO\")", "val uiScale: String = \"AUTO\", val apiUrl: String = \"http\"+\"://127.0.0.1:11434/v1/chat/completions\", val apiModel: String = \"gemma3:1b\", val temp: Float = 0.5f, val maxTok: Int = 512)")
+          t = t.replace("p.getString(\"ui_scale_mode\", \"AUTO\") ?: \"AUTO\")", "p.getString(\"ui_scale_mode\", \"AUTO\") ?: \"AUTO\", p.getString(\"ai_api_url\", \"http\"+\"://127.0.0.1:11434/v1/chat/completions\") ?: \"\", p.getString(\"ai_api_model\", \"gemma3:1b\") ?: \"gemma3:1b\", p.getFloat(\"ai_temp\", 0.5f), p.getInt(\"ai_max_tok\", 512))")
+          t = t.replace(".putString(\"ui_scale_mode\", c.uiScale).apply()", ".putString(\"ui_scale_mode\", c.uiScale).putString(\"ai_api_url\", c.apiUrl.trim()).putString(\"ai_api_model\", c.apiModel.trim()).putFloat(\"ai_temp\", c.temp).putInt(\"ai_max_tok\", c.maxTok).apply()")
           t = t.replace("fun callLlmHttp(sysPrompt: String, ragCtx: String, history: List<ChatMsg>, userMsg: String): String? {", "fun callLlmHttp(sysPrompt: String, ragCtx: String, history: List<ChatMsg>, userMsg: String, apiUrl: String = \"\", apiModel: String = \"gemma3:1b\"): String? {\nif (apiUrl.isNotBlank()) runCatching { val c = (URL(apiUrl.trim()).openConnection() as HttpURLConnection).apply { requestMethod = \"POST\"; connectTimeout = 4000; readTimeout = 12000; doOutput = true; setRequestProperty(\"Content-Type\", \"application/json\") }; val m = JSONArray().put(JSONObject().put(\"role\", \"system\").put(\"content\", if (ragCtx.isBlank()) sysPrompt else \"$sysPrompt\\n$ragCtx\")).put(JSONObject().put(\"role\", \"user\").put(\"content\", userMsg)); OutputStreamWriter(c.outputStream).use { it.write(JSONObject().put(\"model\", apiModel.ifBlank { \"gemma3:1b\" }).put(\"messages\", m).put(\"stream\", false).toString()) }; if (c.responseCode in 200..299) { val r = c.inputStream.bufferedReader().readText(); return runCatching { JSONObject(r).optJSONArray(\"choices\")?.optJSONObject(0)?.optJSONObject(\"message\")?.optString(\"content\") ?: JSONObject(r).optString(\"response\") }.getOrNull() ?: r } }")
           t = t.replace("callLlmHttp(aiCfg.sysPrompt, ragContext, history, q)", "callLlmHttp(aiCfg.sysPrompt, ragContext, history, q, aiCfg.apiUrl, aiCfg.apiModel)")
           t = t.replace("ChipBtn(\"🔍 다운로드 자동스캔\"", "ChipBtn(\"🗑️ 모델내리기·저장소비우기\", false, Color(0xFFEF4444)) { testReport = AiResidentManager.clearStorage(ctx) }; ChipBtn(\"🔍 다운로드 자동스캔\"")

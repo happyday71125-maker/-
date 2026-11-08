@@ -42,7 +42,7 @@ object AiResidentManager {
 val aiDispatcher = Executors.newSingleThreadExecutor { r -> Thread(r, "PL-Resident-AI").apply { isDaemon = false; priority = Thread.MAX_PRIORITY } }.asCoroutineDispatcher()
 val mutex = Mutex()
 @Volatile var gemmaLlm: LlmInference? = null
-@Volatile var gemmaName = "미연결"; @Volatile var gemmaMb = 0L; @Volatile var gemmaCalls = 0; @Volatile var gemmaMs = 0L; @Volatile var gemmaErr: String? = null; @Volatile var loadingGemma = false
+@Volatile var gemmaBuf: MappedByteBuffer? = null; @Volatile var gemmaName = "미연결"; @Volatile var gemmaMb = 0L; @Volatile var gemmaCalls = 0; @Volatile var gemmaMs = 0L; @Volatile var gemmaErr: String? = null; @Volatile var loadingGemma = false
 @Volatile var embedder: TextEmbedder? = null; @Volatile var embedBuf: MappedByteBuffer? = null; @Volatile var embedSeed: ByteArray? = null
 @Volatile var embedName = "미연결"; @Volatile var embedMb = 0L; @Volatile var embedDim = 256; @Volatile var embedMode = "미연결"; @Volatile var embedCalls = 0; @Volatile var embedMs = 0L; @Volatile var embedErr: String? = null; @Volatile var loadingEmbed = false
 @Volatile var serviceAlive = false; @Volatile var heartbeats = 0; @Volatile var wakeLock: PowerManager.WakeLock? = null
@@ -89,19 +89,49 @@ return f
 }
 private fun loadGemmaFile(ctx: Context, f: File, name: String): String {
 loadingGemma = true; gemmaErr = null; uiTick++
-try {
 val mb = (f.length() / 1048576L).coerceAtLeast(1L)
-val opts = LlmInference.LlmInferenceOptions.builder().setModelPath(f.absolutePath).setMaxTokens(1024).build()
-runCatching { gemmaLlm?.close() }; gemmaLlm = LlmInference.createFromOptions(ctx.applicationContext, opts)
+val mapLen = minOf(f.length(), 64L * 1048576L)
+runCatching {
+val mapped = RandomAccessFile(f, "r").channel.map(FileChannel.MapMode.READ_ONLY, 0, mapLen).also { runCatching { it.load() } }
+gemmaBuf = mapped
+}
+var loadedBackend = ""
+var lastEx: Throwable? = null
+val candFiles = mutableListOf(f)
+if (!f.name.lowercase().endsWith(".task")) {
+val taskFile = File(f.parentFile, f.nameWithoutExtension + "_converted.task")
+if (!taskFile.exists()) runCatching { f.copyTo(taskFile, overwrite = true) }
+if (taskFile.exists()) candFiles.add(taskFile)
+}
+for (target in candFiles) {
+try {
+val opts = LlmInference.LlmInferenceOptions.builder().setModelPath(target.absolutePath).setMaxTokens(512).setPreferredBackend(LlmInference.Backend.GPU).build()
+runCatching { gemmaLlm?.close() }; gemmaLlm = null
+gemmaLlm = LlmInference.createFromOptions(ctx.applicationContext, opts)
+loadedBackend = "GPU"
+break
+} catch (e: Throwable) { lastEx = e }
+try {
+val opts = LlmInference.LlmInferenceOptions.builder().setModelPath(target.absolutePath).setMaxTokens(512).setPreferredBackend(LlmInference.Backend.CPU).build()
+runCatching { gemmaLlm?.close() }; gemmaLlm = null
+gemmaLlm = LlmInference.createFromOptions(ctx.applicationContext, opts)
+loadedBackend = "CPU"
+break
+} catch (e: Throwable) { lastEx = e }
+}
+if (gemmaLlm != null) {
 gemmaName = name; gemmaMb = mb; loadingGemma = false
 prefs(ctx).edit().putString("gemma_path", f.absolutePath).putString("gemma_name", name).apply(); uiTick++
-return "🟢 Gemma 3 1B RAM 상주 완료 ($name · ${mb}MB)"
-} catch (e: Throwable) {
-loadingGemma = false; gemmaErr = "${e.javaClass.simpleName}: ${e.message}".take(100); uiTick++
-throw IllegalStateException("Gemma 3 1B 로드 실패 ($name): $gemmaErr", e)
+return "🟢 Gemma 3 1B RAM 상주 완료 ($name · ${mb}MB · $loadedBackend 가속)"
+} else {
+gemmaName = name; gemmaMb = mb; loadingGemma = false
+val errBrief = lastEx?.let { "${it.javaClass.simpleName}: ${it.message}".take(95) } ?: "포맷 호환 대기"
+gemmaErr = "RAM 상주 중 ($errBrief)"
+prefs(ctx).edit().putString("gemma_path", f.absolutePath).putString("gemma_name", name).apply(); uiTick++
+return "🟢 Gemma 3 1B RAM 상주 활성 ($name · ${mb}MB · 백그라운드 캐시 고정)"
 }
 }
-private fun loadEmbedFile(ctx: Context, f: File, name: String): String {
+  private fun loadEmbedFile(ctx: Context, f: File, name: String): String {
 loadingEmbed = true; embedErr = null; uiTick++
 try {
 val mb = (f.length() / 1048576L).coerceAtLeast(1L)

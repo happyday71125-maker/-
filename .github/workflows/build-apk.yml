@@ -65,7 +65,7 @@ jobs:
           s = open(f, encoding="utf-8").read()
           s = s.replace("0.10.14", "0.10.21")
           s = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 1${{ github.run_number }}", s)
-          s = re.sub(r'versionName\s*=\s*"[^"]*"', 'versionName = "7.1.${{ github.run_number }}"', s)
+          s = re.sub(r'versionName\s*=\s*"[^"]*"', 'versionName = "7.3.${{ github.run_number }}"', s)
           if "fixed.keystore" not in s:
               sc = (
                   '    signingConfigs {\n'
@@ -80,10 +80,21 @@ jobs:
               s = s.replace("buildFeatures {", sc + "buildFeatures {", 1)
           open(f, "w", encoding="utf-8").write(s)
 
+          for p in glob.glob("app/src/main/java/**/*.kt", recursive=True):
+              kt = open(p, encoding="utf-8").read()
+              o, c = kt.count("{"), kt.count("}")
+              if c > o:
+                  lines = kt.rstrip().splitlines()
+                  while c > o and lines and lines[-1].strip() == "}":
+                      lines.pop()
+                      c -= 1
+                  open(p, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+
           kf = "app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt"
           kt = open(kf, encoding="utf-8").read()
-          if "UiScaleFontSection" not in kt:
-              old_b = re.search(r"data class ResponsiveUi\(.*?\nfun saveAiCfg\(ctx: Context, c: AiRagConfig\) \{\n.*?\n\}", kt, flags=re.S)
+          i1 = kt.find("data class ResponsiveUi")
+          i2 = kt.find("data class ChatMsg")
+          if i1 != -1 and i2 != -1 and "UiScaleFontSection" not in kt:
               new_b = '''data class ResponsiveUi(
           val hPad: Dp, val vPad: Dp, val cardPad: Dp,
           val titleSp: TextUnit, val bodySp: TextUnit, val subSp: TextUnit,
@@ -131,40 +142,58 @@ jobs:
           Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
           Row(Modifier.fillMaxWidth(), SB, CV) { Text("🔘 메뉴·버튼 크기 (${aiCfg.menuScalePct}%)", fontSize = ui.subSp, color = CW); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn("작게 -", false) { val u = aiCfg.copy(menuScalePct = (aiCfg.menuScalePct - 5).coerceAtLeast(80)); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("100%", aiCfg.menuScalePct == 100) { val u = aiCfg.copy(menuScalePct = 100); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("크게 +", false) { val u = aiCfg.copy(menuScalePct = (aiCfg.menuScalePct + 5).coerceAtMost(135)); onUpdate(u); saveAiCfg(ctx, u) } } }
           Row(Modifier.fillMaxWidth(), SB, CV) { Text("🏷️ 상단메뉴·탭 글자 (${aiCfg.menuFontSp}pt)", fontSize = ui.subSp, color = CW); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn("가 -", false) { val u = aiCfg.copy(menuFontSp = (aiCfg.menuFontSp - 1).coerceAtLeast(9)); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("11pt", aiCfg.menuFontSp == 11) { val u = aiCfg.copy(menuFontSp = 11); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("가 +", false) { val u = aiCfg.copy(menuFontSp = (aiCfg.menuFontSp + 1).coerceAtMost(17)); onUpdate(u); saveAiCfg(ctx, u) } } }
-          Row(Modifier.fillMaxWidth(), SB, CV) { Text("📝 메모·AI채팅 글자 (${aiCfg.memoFontSp}pt)", fontSize = ui.subSp, color = CW); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn("가 -", false) { val u = aiCfg.copy(memoFontSp = (aiCfg.memoFontSp - 1).coerceAtLeast(11)); onUpdate(u); saveAiCfg(ctx, u); ChipBtn("14pt", aiCfg.memoFontSp == 14) { val u = aiCfg.copy(memoFontSp = 14); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("가 +", false) { val u = aiCfg.copy(memoFontSp = (aiCfg.memoFontSp + 1).coerceAtMost(22)); onUpdate(u); saveAiCfg(ctx, u) } } }
+          Row(Modifier.fillMaxWidth(), SB, CV) { Text("📝 메모·AI채팅 글자 (${aiCfg.memoFontSp}pt)", fontSize = ui.subSp, color = CW); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn("가 -", false) { val u = aiCfg.copy(memoFontSp = (aiCfg.memoFontSp - 1).coerceAtLeast(11)); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("14pt", aiCfg.memoFontSp == 14) { val u = aiCfg.copy(memoFontSp = 14); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("가 +", false) { val u = aiCfg.copy(memoFontSp = (aiCfg.memoFontSp + 1).coerceAtMost(22)); onUpdate(u); saveAiCfg(ctx, u) } } }
           Row(Modifier.fillMaxWidth(), SB, CV) { Text("🏠 홈 시계·앱목록 글자 (${aiCfg.homeFontSp}pt)", fontSize = ui.subSp, color = CW); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn("가 -", false) { val u = aiCfg.copy(homeFontSp = (aiCfg.homeFontSp - 1).coerceAtLeast(15)); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("21pt", aiCfg.homeFontSp == 21) { val u = aiCfg.copy(homeFontSp = 21); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("가 +", false) { val u = aiCfg.copy(homeFontSp = (aiCfg.homeFontSp + 1).coerceAtMost(28)); onUpdate(u); saveAiCfg(ctx, u) } } }
           Row(Modifier.fillMaxWidth(), SB, CV) { Text("📖 독서대(서재) 본문 글자 (${aiCfg.readerFontSp}pt)", fontSize = ui.subSp, color = CW); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn("가 -", false) { val u = aiCfg.copy(readerFontSp = (aiCfg.readerFontSp - 1).coerceAtLeast(14)); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("18pt", aiCfg.readerFontSp == 18) { val u = aiCfg.copy(readerFontSp = 18); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn("가 +", false) { val u = aiCfg.copy(readerFontSp = (aiCfg.readerFontSp + 1).coerceAtMost(30)); onUpdate(u); saveAiCfg(ctx, u) } } }
           }
           }
           }
-          }'''
-              if old_b:
-                  kt = kt[:old_b.start()] + new_b + kt[old_b.end():]
-                  kt = kt.replace('ChipBtn("★ 중요 메모만", aiCfg.ragImpOnly) { val u = aiCfg.copy(ragImpOnly = !aiCfg.ragImpOnly); onUpdate(u); saveAiCfg(ctx, u) }\n}', 'ChipBtn("★ 중요 메모만", aiCfg.ragImpOnly) { val u = aiCfg.copy(ragImpOnly = !aiCfg.ragImpOnly); onUpdate(u); saveAiCfg(ctx, u) }\n}\nUiScaleFontSection(ctx, aiCfg, ui, onUpdate)')
-                  open(kf, "w", encoding="utf-8").write(kt)
+          }
+          '''
+              kt = kt[:i1] + new_b + kt[i2:]
+              kt = kt.replace('Text("🗂️ 3. RAG 작동 범위 및 임베딩젬마2 옵션"', 'UiScaleFontSection(ctx, aiCfg, ui, onUpdate); Text("🗂️ 3. RAG 작동 범위 및 임베딩젬마2 옵션"', 1)
+              open(kf, "w", encoding="utf-8").write(kt)
+
+          mbm_f = "app/src/main/java/app/prolauncher/ai/ModelBundleManager.kt"
+          mbm_t = open(mbm_f, encoding="utf-8").read()
+          if "fun SmartMemoClassifier.guessCategory" not in mbm_t:
+              ext_code = '''
+          fun SmartMemoClassifier.guessCategory(text: String, cats: List<String>): String {
+          val low = text.lowercase()
+          val rules = mapOf("업무" to listOf("회의","미팅","보고서","기획","마감","발표","시안","피드백","출근","거래처","메일","일정","프로젝트","업무"), "할일" to listOf("☐","☑","사기","구매","장보기","우유","원두","마트","택배","청소","세탁","은행","병원","예약","결제","체크"), "독서" to listOf("독서","책","시집","윤동주","김소월","나태주","명상록","인용","발췌","구절","문장","작가","에세이","쪽"), "아이디어" to listOf("아이디어","생각","구상","영감","브레인스토밍","컨셉","기능","디자인","개선"))
+          var best = cats.firstOrNull() ?: "일상"; var maxSc = 0
+          for (c in cats) { val sc = (rules[c] ?: listOf(c)).count { low.contains(it) }; if (sc > maxSc) { maxSc = sc; best = c } }
+          return best
+          }
+          fun SmartMemoClassifier.categoryOf(n: NoteItem, cats: List<String>): String {
+          for (c in cats) if (n.tags.contains(c)) return c
+          return n.tags.firstOrNull { it !in listOf("중요","일반","메모","할일") } ?: guessCategory(n.content, cats)
+          }
+          fun SmartMemoClassifier.toggleCheckLine(n: NoteItem, idx: Int): NoteItem {
+          val ls = n.content.lines().toMutableList()
+          if (idx in ls.indices) { val l = ls[idx]; ls[idx] = when { l.trimStart().startsWith("☐ ") -> l.replaceFirst("☐ ", "☑ "); l.trimStart().startsWith("☑ ") -> l.replaceFirst("☑ ", "☐ "); else -> l } }
+          return n.copy(content = ls.joinToString("\\n"))
+          }
+          fun SmartMemoClassifier.summarizeByLength(raw: String, force: Boolean = false): String {
+          val clean = raw.lines().map { it.replace(Regex("#[^\\\\s#]+"), "").replace("☐", "").replace("☑", "").replace("•", "").trim() }.filter { it.isNotEmpty() }
+          val chars = clean.sumOf { it.length }
+          if (!force && clean.size <= 2 && chars < 75) return ""
+          val sents = raw.replace("\\n", ". ").split(Regex("[.!?]+")).map { it.replace(Regex("#[^\\\\s#]+"), "").replace("☐", "").replace("☑", "").trim() }.filter { it.length >= 4 }
+          if (sents.size <= 1 && chars < 75) return if (force) "1~2줄 이내의 짧은 메모는 요약 없이 원문 그대로 표시됩니다." else ""
+          val target = when { chars < 160 && sents.size <= 3 -> 1; chars < 320 && sents.size <= 6 -> 2; else -> 3 }
+          return sents.mapIndexed { i, s -> Triple(i, s, (if (i == 0) 4 else 0) + (s.length.coerceAtMost(45) / 10)) }.sortedByDescending { it.third }.take(target).sortedBy { it.first }.joinToString("\\n") { (_, s, _) -> val cut = if (s.length > 46) s.take(46) + "…" else s; if (target == 1) cut else "• $cut" }
+          }
+          '''
+              open(mbm_f, "w", encoding="utf-8").write(mbm_t + "\n" + ext_code)
 
           sf = "app/src/main/java/app/prolauncher/ai/Screens.kt"
           st = open(sf, encoding="utf-8").read()
-          st = st.replace("var aiCfg by remember { mutableStateOf(loadAiCfg(ctx)) }", "val tick = AiResidentManager.uiTick; var aiCfg by remember(tick) { mutableStateOf(loadAiCfg(ctx)) }")
-          st = st.replace("var aiPromptCfgOpen by remember { mutableStateOf(false) }", "var aiPromptCfgOpen by remember { mutableStateOf(true) }")
-          st = st.replace('"✅ LLM 챗봇 + 전체 메모 RAG 엔진 활성"', "AiResidentManager.statusSummary()")
-          if "UiScaleFontSection" not in st:
-              st = re.sub(
-                  r'Text\("1\. 화면 해상도 배율 설정".*?\n\}\n\}',
-                  'UiScaleFontSection(ctx, aiCfg, ui) { aiCfg = it }',
-                  st, count=1, flags=re.S
-              )
+          st = st.replace("var aiCfg by remember { mutableStateOf(loadAiCfg(ctx)) }", "val tick = AiResidentManager.uiTick; var aiCfg by remember(tick) { mutableStateOf(loadAiCfg(ctx)) }", 1)
+          st = st.replace("var aiPromptCfgOpen by remember { mutableStateOf(false) }", "var aiPromptCfgOpen by remember { mutableStateOf(true) }", 1)
+          st = st.replace('"✅ LLM 챗봇 + 전체 메모 RAG 엔진 활성"', "AiResidentManager.statusSummary()", 1)
+          if "UiScaleFontSection(" not in st:
+              st = st.replace('Text("1. 화면 해상도 배율 설정"', 'UiScaleFontSection(ctx, aiCfg, ui) { aiCfg = it }; Text("1. 화면 해상도 배율 설정"', 1)
           open(sf, "w", encoding="utf-8").write(st)
-
-          for p in glob.glob("app/src/main/java/**/*.kt", recursive=True):
-              kt = open(p, encoding="utf-8").read()
-              o, c = kt.count("{"), kt.count("}")
-              if c > o:
-                  lines = kt.rstrip().splitlines()
-                  while c > o and lines and lines[-1].strip() == "}":
-                      lines.pop()
-                      c -= 1
-                  open(p, "w", encoding="utf-8").write("\n".join(lines) + "\n")
           PYEOF
           python3 /tmp/prep.py
 

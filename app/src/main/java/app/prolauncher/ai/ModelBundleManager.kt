@@ -17,6 +17,16 @@ import androidx.compose.ui.unit.*
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
+data class QuickBtnConfig(
+  val showCheck: Boolean = true,
+  val showBullet: Boolean = true,
+  val showDate: Boolean = true,
+  val showDivider: Boolean = true,
+  val showNewline: Boolean = true,
+  val autoSumLong: Boolean = false,
+  val customLabel: String = "📌 템플릿",
+  val customText: String = "[메모]\n☐ 항목: "
+  )
 
 private val DEF_MEMO_CATS_E = listOf("일상", "업무", "할일", "아이디어", "독서")
 private val DEF_BOOK_CATS_E = listOf("에세이", "인문/교양", "시/문학", "업무/문서")

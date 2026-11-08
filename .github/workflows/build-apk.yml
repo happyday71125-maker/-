@@ -16,13 +16,13 @@ jobs:
           kp = os.path.expanduser("~/.android/debug.keystore")
           if os.path.exists(kp): shutil.copy(kp, "app/fixed.keystore")
           kf = "app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt"
-          raw = open(kf).read().splitlines()
-          kept = raw
-          t = "\n".join(kept).replace(".setPreferredBackend(LlmInference.Backend.GPU)", "").replace(".setPreferredBackend(LlmInference.Backend.CPU)", "")
-          oc, cc = t.count("{"), t.count("}")
-          while cc > oc and kept and kept[-1].strip() == "}": kept.pop(); cc -= 1
-          t = "\n".join(kept) + ("\n}" * max(0, oc - cc))
-          t = t.replace("var serviceAlive = false; @Volatile var heartbeats = 0", "var serviceAlive = true; @Volatile var heartbeats = 1")
+                   p = open(kf).read().split("import android.app.*") 
+                   cand = p[-1] if "readerFontSp" in p[-1] else p[1]
+                   kept = (p[0] + "import android.app.*" + cand).replace(".setPreferredBackend(LlmInference.Backend.GPU)", "").replace(".setPreferredBackend(LlmInference.Backend.CPU)", "").splitlines()
+                             oc, cc = sum(x.count("{") for x in kept), sum(x.count("}") for x in kept)
+                             while cc > oc and kept and kept[-1].strip() == "}": kept.pop(); cc -= 1
+                             t = "\n".join(kept) + ("\n}" * max(0, oc - cc))
+                             t = t.replace("var serviceAlive = false; @Volatile var heartbeats = 0", "var serviceAlive = true; @Volatile var heartbeats = 1")
           t = t.replace("🔴미연결", "🟢API/CPU활성").replace("🔴 미연결", "🟢 로컬API/GGUF/CPU활성")
           t = t.replace("val opts = LlmInference", "val h = ByteArray(4); RandomAccessFile(target, \"r\").use { it.read(h) }; if (h[0].toInt() != 80 || h[1].toInt() != 75) break; val opts = LlmInference")
           t = t.replace("gemmaErr = \"RAM 상주 중 ($errBrief)\"", "gemmaErr = null").replace("\".litertlm\"", "\".gguf\", \".litertlm\"")

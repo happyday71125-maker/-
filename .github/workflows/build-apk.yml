@@ -1,4 +1,4 @@
-name: Build ProLauncherAI APK
+name: Build Android APK
 
 on:
   push:
@@ -6,45 +6,108 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-android-apk:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Source
+      - name: Checkout Source Code
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          java-version: "17"
+          distribution: "temurin"
 
-      - name: Persist Android Debug Keystore
+      - name: Cache Permanent Debug Keystore (No Conflict on Update)
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.android/debug.keystore
-            app/fixed.keystore
+          path: ~/.android/debug.keystore
           key: prolauncher-ai-permanent-keystore-v1
+
+      - name: Prepare Resident AI Engine & Fixed Signing Key
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkey -noprompt -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" < /dev/null
+          fi
+          cp ~/.android/debug.keystore app/fixed.keystore
+          sed -i -E 's/ui\.(subSp|bodySp|titleSp) \+ ([0-9]+)\.sp/(ui.\1.value + \2).sp/g' app/src/main/java/app/prolauncher/ai/*.kt
+          cat << 'PYEOF' > /tmp/prep.py
+          import glob, re
+          mf = "app/src/main/AndroidManifest.xml"
+          m = open(mf, encoding="utf-8").read()
+          perms = (
+              '    <uses-permission android:name="android.permission.INTERNET" />\n'
+              '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n'
+              '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n'
+              '    <uses-permission android:name="android.permission.WAKE_LOCK" />\n'
+              '    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n'
+          )
+          if "FOREGROUND_SERVICE" not in m:
+              m = m.replace("<application", perms + "    <application", 1)
+          if "largeHeap" not in m:
+              m = m.replace("<application", '<application\n        android:largeHeap="true"', 1)
+          m = m.replace('android:launchMode="singleTask"', 'android:launchMode="singleTop"')
+          m = m.replace('android:clearTaskOnLaunch="true"', '')
+          m = m.replace('android:stateNotNeeded="true"', '')
+          m = m.replace('android:excludeFromRecents="true"', '')
+          if "AiResidentService" not in m:
+              svc = (
+                  '        <uses-native-library android:name="libvndksupport.so" android:required="false" />\n'
+                  '        <uses-native-library android:name="libOpenCL.so" android:required="false" />\n'
+                  '        <service android:name=".AiResidentService" android:enabled="true" android:exported="false" />\n'
+                  '    </application>'
+              )
+              m = m.replace("</application>", svc, 1)
+          open(mf, "w", encoding="utf-8").write(m)
+
+          f = "app/build.gradle.kts"
+          s = open(f, encoding="utf-8").read()
+          s = s.replace("0.10.14", "0.10.21")
+          s = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 1${{ github.run_number }}", s)
+          s = re.sub(r'versionName\s*=\s*"[^"]*"', 'versionName = "7.0.${{ github.run_number }}"', s)
+          if "fixed.keystore" not in s:
+              sc = (
+                  '    signingConfigs {\n'
+                  '        getByName("debug") {\n'
+                  '            storeFile = file("fixed.keystore")\n'
+                  '            storePassword = "android"\n'
+                  '            keyAlias = "androiddebugkey"\n'
+                  '            keyPassword = "android"\n'
+                  '        }\n'
+                  '    }\n'
+              )
+              s = s.replace("buildFeatures {", sc + "buildFeatures {", 1)
+          open(f, "w", encoding="utf-8").write(s)
+
+          sf = "app/src/main/java/app/prolauncher/ai/Screens.kt"
+          st = open(sf, encoding="utf-8").read()
+          st = st.replace("var aiPromptCfgOpen by remember { mutableStateOf(false) }", "var aiPromptCfgOpen by remember { mutableStateOf(true) }")
+          st = st.replace('"✅ LLM 챗봇 + 전체 메모 RAG 엔진 활성"', "AiResidentManager.statusSummary()")
+          open(sf, "w", encoding="utf-8").write(st)
+
+          for p in glob.glob("app/src/main/java/**/*.kt", recursive=True):
+              kt = open(p, encoding="utf-8").read()
+              o, c = kt.count("{"), kt.count("}")
+              if c > o:
+                  lines = kt.rstrip().splitlines()
+                  while c > o and lines and lines[-1].strip() == "}":
+                      lines.pop()
+                      c -= 1
+                  open(p, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+          PYEOF
+          python3 /tmp/prep.py
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: '8.7'
+          gradle-version: "8.7"
 
       - name: Build Debug APK
-        run: |
-          mkdir -p ~/.android
-          if [ -f ~/.android/debug.keystore ] && [ ! -f app/fixed.keystore ]; then cp -f ~/.android/debug.keystore app/fixed.keystore; fi
-          sed -i -E 's/ui\.(subSp|bodySp|titleSp) \+ ([0-9]+)\.sp/(ui.\1.value + \2).sp/g' app/src/main/java/app/prolauncher/ai/*.kt
-          if [ ! -f app/fixed.keystore ]; then keytool -genkeypair -v -keystore app/fixed.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"; fi
-          cp -f app/fixed.keystore ~/.android/debug.keystore
-          python3 -c 'import re; f="app/build.gradle.kts"; s=open(f).read(); s=re.sub(r"versionCode\s*=\s*\d+", "versionCode = 1${{ github.run_number }}", s); s=re.sub(r"versionName\s*=\s*\"[^\"]+\"", "versionName = \"6.0.${{ github.run_number }}\"", s); s=s.replace("defaultConfig {", "signingConfigs { getByName(\"debug\") { storeFile = file(\"fixed.keystore\"); storePassword = \"android\"; keyAlias = \"androiddebugkey\"; keyPassword = \"android\" } }\nbuildTypes { getByName(\"debug\") { signingConfig = signingConfigs.getByName(\"debug\") } }\ndefaultConfig {") if "signingConfigs" not in s else s; open(f,"w").write(s)'
-          python3 -c 'mf="app/src/main/AndroidManifest.xml"; ms=open(mf).read(); ms=ms.replace("<application", "<uses-permission android:name=\"android.permission.INTERNET\" />\n<application android:usesCleartextTraffic=\"true\"") if "android.permission.INTERNET" not in ms else ms; open(mf,"w").write(ms)'
-          python3 -c 'for s,d,m in [("MainActivity.kt","app/src/main/java/app/prolauncher/ai/MainActivity.kt","메모 · AI · 검색"),("app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt","app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt","onPickModel()"),("app/src/main/java/app/prolauncher/ai/ModelBundleManager.kt","app/src/main/java/app/prolauncher/ai/ModelBundleManager.kt","닫고 집중 유지하기"),("app/src/main/java/app/prolauncher/ai/Screens.kt","app/src/main/java/app/prolauncher/ai/Screens.kt","🔎 검색")]: t=open(s).read(); t=t[t.rfind("package app.prolauncher.ai"):] if "package app.prolauncher.ai" in t else t; i=t.rfind(m); p=i+len(m); exec("while i!=-1 and p>0 and t[:p].count(\"{\")>t[:p].count(\"}\"): p=t.find(\"}\",p)+1"); open(d,"w").write(t[:p]+"\n") if i!=-1 else None'
-          gradle assembleDebug
+        run: ./gradlew assembleDebug --no-daemon
 
-      - name: Upload Compiled APK Artifact
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ProLauncherAI-debug-apk
-          path: "app/build/outputs/apk/debug/*.apk"
+          path: app/build/outputs/apk/debug/*.apk

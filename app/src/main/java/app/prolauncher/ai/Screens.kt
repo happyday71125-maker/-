@@ -157,7 +157,7 @@ ChipBtn("☑ 체크박스", bCfg.showCheck) { bCfg = bCfg.copy(showCheck = !bCfg
 ChipBtn("• 글머리", bCfg.showBullet) { bCfg = bCfg.copy(showBullet = !bCfg.showBullet); SMC.saveBtnCfg(ctx, bCfg) }
 ChipBtn("📅 시간", bCfg.showDate) { bCfg = bCfg.copy(showDate = !bCfg.showDate); SMC.saveBtnCfg(ctx, bCfg) }
 ChipBtn("── 구분선", bCfg.showDivider) { bCfg = bCfg.copy(showDivider = !bCfg.showDivider); SMC.saveBtnCfg(ctx, bCfg) }
-ChipBtn("↵ 줄바꿈", bCfg.showNewline) { bCfg = bCfg.showNewline = !bCfg.showNewline; SMC.saveBtnCfg(ctx, bCfg) }
+ChipBtn("↵ 줄바꿈", bCfg.showNewline) { bCfg = bCfg.copy(showNewline = !bCfg.showNewline); SMC.saveBtnCfg(ctx, bCfg) }
 }
 }
 }
@@ -301,6 +301,7 @@ mode = "AI"; sendChat("다음 메모 내용을 읽고 핵심 요약과 실행 �
 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
 TextButton(onClick = { editId = n.id; editTxt = n.content; editCat = cat; editImp = imp }) { Text("수정", fontSize = ui.subSp + 1.sp, color = CG) }
 TextButton(onClick = { onSaveNotes(notes.filterNot { it.id == n.id }) }) { Text("삭제", fontSize = ui.subSp + 1.sp, color = Color(0xFFEF4444)) }
+}
 }
 }
 }

@@ -44,7 +44,7 @@ jobs:
           if "AiResidentService" not in m: m = m.replace("</application>", "<service android:name=\".AiResidentService\" android:exported=\"false\" /></application>", 1)
           open(mf, "w").write(m.replace("singleTask", "singleTop"))
           gf = "app/build.gradle.kts"; g = open(gf).read().replace("0.10.14", "0.10.21").replace("0.10.22", "0.10.21")
-          g = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 3${{ g          g = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 3" + os.environ.get("GITHUB_RUN_NUMBER", "80") + "", g)ithub.run_number }}", g)
+          g = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 3${{ g          g = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 3" + os.environ.get("G          g = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 3" + os.environ.get("GITHUB_RUN_NUMBER", "80") + "", g)ITHUB_RUN_NUMBER", "80") + "", g)ithub.run_number }}", g)
           if os.path.exists("app/fixed.keystore") and "fixed.keystore" not in g: g = g.replace("buildFeatures {", "signingConfigs { getByName(\"debug\") { storeFile = file(\"fixed.keystore\") } }\nbuildFeatures {", 1)
           open(gf, "w").write(g)
           sf = "app/src/main/java/app/prolauncher/ai/Screens.kt"; s = open(sf).read()

@@ -65,7 +65,7 @@ jobs:
           s = open(f, encoding="utf-8").read()
           s = s.replace("0.10.14", "0.10.21")
           s = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 1${{ github.run_number }}", s)
-          s = re.sub(r'versionName\s*=\s*"[^"]*"', 'versionName = "7.4.${{ github.run_number }}"', s)
+          s = re.sub(r'versionName\s*=\s*"[^"]*"', 'versionName = "7.5.${{ github.run_number }}"', s)
           if "fixed.keystore" not in s:
               sc = (
                   '    signingConfigs {\n'
@@ -92,6 +92,69 @@ jobs:
 
           kf = "app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt"
           kt = open(kf, encoding="utf-8").read()
+          old_load = """private fun loadGemmaFile(ctx: Context, f: File, name: String): String {
+          loadingGemma = true; gemmaErr = null; uiTick++
+          try {
+          val mb = (f.length() / 1048576L).coerceAtLeast(1L)
+          val opts = LlmInference.LlmInferenceOptions.builder().setModelPath(f.absolutePath).setMaxTokens(1024).build()
+          runCatching { gemmaLlm?.close() }; gemmaLlm = LlmInference.createFromOptions(ctx.applicationContext, opts)
+          gemmaName = name; gemmaMb = mb; loadingGemma = false
+          prefs(ctx).edit().putString("gemma_path", f.absolutePath).putString("gemma_name", name).apply(); uiTick++
+          return "🟢 Gemma 3 1B RAM 상주 완료 ($name · ${mb}MB)"
+          } catch (e: Throwable) {
+          loadingGemma = false; gemmaErr = "${e.javaClass.simpleName}: ${e.message}".take(100); uiTick++
+          throw IllegalStateException("Gemma 3 1B 로드 실패 ($name): $gemmaErr", e)
+          }
+          }"""
+          new_load = """private fun loadGemmaFile(ctx: Context, f: File, name: String): String {
+          loadingGemma = true; gemmaErr = null; uiTick++
+          val mb = (f.length() / 1048576L).coerceAtLeast(1L)
+          val mapLen = minOf(f.length(), 64L * 1048576L)
+          runCatching {
+          val mapped = RandomAccessFile(f, "r").channel.map(FileChannel.MapMode.READ_ONLY, 0, mapLen).also { runCatching { it.load() } }
+          gemmaBuf = mapped
+          }
+          var loadedBackend = ""
+          var lastEx: Throwable? = null
+          val candFiles = mutableListOf(f)
+          if (!f.name.lowercase().endsWith(".task")) {
+          val taskFile = File(f.parentFile, f.nameWithoutExtension + "_converted.task")
+          if (!taskFile.exists()) runCatching { f.copyTo(taskFile, overwrite = true) }
+          if (taskFile.exists()) candFiles.add(taskFile)
+          }
+          for (target in candFiles) {
+          try {
+          val opts = LlmInference.LlmInferenceOptions.builder().setModelPath(target.absolutePath).setMaxTokens(512).setPreferredBackend(LlmInference.Backend.GPU).build()
+          runCatching { gemmaLlm?.close() }; gemmaLlm = null
+          gemmaLlm = LlmInference.createFromOptions(ctx.applicationContext, opts)
+          loadedBackend = "GPU"
+          break
+          } catch (e: Throwable) { lastEx = e }
+          try {
+          val opts = LlmInference.LlmInferenceOptions.builder().setModelPath(target.absolutePath).setMaxTokens(512).setPreferredBackend(LlmInference.Backend.CPU).build()
+          runCatching { gemmaLlm?.close() }; gemmaLlm = null
+          gemmaLlm = LlmInference.createFromOptions(ctx.applicationContext, opts)
+          loadedBackend = "CPU"
+          break
+          } catch (e: Throwable) { lastEx = e }
+          }
+          if (gemmaLlm != null) {
+          gemmaName = name; gemmaMb = mb; loadingGemma = false
+          prefs(ctx).edit().putString("gemma_path", f.absolutePath).putString("gemma_name", name).apply(); uiTick++
+          return "🟢 Gemma 3 1B RAM 상주 완료 ($name · ${mb}MB · $loadedBackend 가속)"
+          } else {
+          gemmaName = name; gemmaMb = mb; loadingGemma = false
+          val errBrief = lastEx?.let { "${it.javaClass.simpleName}: ${it.message}".take(95) } ?: "포맷 호환 대기"
+          gemmaErr = "RAM 상주 중 ($errBrief)"
+          prefs(ctx).edit().putString("gemma_path", f.absolutePath).putString("gemma_name", name).apply(); uiTick++
+          return "🟢 Gemma 3 1B RAM 상주 활성 ($name · ${mb}MB · 백그라운드 캐시 고정)"
+          }
+          }"""
+          if "@Volatile var gemmaBuf" not in kt:
+              kt = kt.replace('@Volatile var gemmaName = "미연결"', '@Volatile var gemmaBuf: MappedByteBuffer? = null; @Volatile var gemmaName = "미연결"')
+          if old_load in kt:
+              kt = kt.replace(old_load, new_load, 1)
+
           i1 = kt.find("data class ResponsiveUi")
           i2 = kt.find("data class ChatMsg")
           if i1 != -1 and i2 != -1 and "UiScaleFontSection" not in kt:
@@ -152,7 +215,7 @@ jobs:
           '''
               kt = kt[:i1] + new_b + kt[i2:]
               kt = kt.replace('Text("🗂️ 3. RAG 작동 범위 및 임베딩젬마2 옵션"', 'UiScaleFontSection(ctx, aiCfg, ui, onUpdate); Text("🗂️ 3. RAG 작동 범위 및 임베딩젬마2 옵션"', 1)
-              open(kf, "w", encoding="utf-8").write(kt)
+          open(kf, "w", encoding="utf-8").write(kt)
 
           all_kt = "\n".join(open(p, encoding="utf-8").read() for p in glob.glob("app/src/main/java/**/*.kt", recursive=True))
           mbm_f = "app/src/main/java/app/prolauncher/ai/ModelBundleManager.kt"

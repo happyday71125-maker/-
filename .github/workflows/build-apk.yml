@@ -55,7 +55,7 @@ jobs:
           open(sf, "w").write(s)
           for fn in ["KoreanChosungMatcher.kt", "ModelBundleManager.kt", "Screens.kt"]:
               fp = "app/src/main/java/app/prolauncher/ai/" + fn
-              open(fp, "w").write(re.sub(r"ui\.(subSp|bodySp|titleSp)\s*\+\s*(\d+)\.sp", r"(ui.\g<1>.value + \g<2>).sp", open(fp).read()))
+              c = open(fp).read(); open(fp, "w").write(re.sub(r"ui\.(subSp|bodySp|titleSp)\s*\+\s*(\d+)\.sp", r"(ui.\g<1>.value + \g<2>).sp", c))
           '
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: "8.7" }

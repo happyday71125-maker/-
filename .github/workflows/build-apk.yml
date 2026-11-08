@@ -24,7 +24,7 @@ jobs:
           path: ~/.android/debug.keystore
           key: prolauncher-ai-permanent-keystore-v1
 
-      - name: Prepare Fixed Signing Key
+      - name: Prepare Fixed Signing Key & Clean Sources
         run: |
           mkdir -p ~/.android
           if [ ! -f ~/.android/debug.keystore ]; then
@@ -32,6 +32,15 @@ jobs:
           fi
           cp ~/.android/debug.keystore app/fixed.keystore
           sed -i -E 's/ui\.(subSp|bodySp|titleSp) \+ ([0-9]+)\.sp/(ui.\1.value + \2).sp/g' app/src/main/java/app/prolauncher/ai/*.kt
+          python3 -c '
+          kf = "app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt"
+          s = open(kf, encoding="utf-8").read()
+          if s.count("package app.prolauncher.ai") > 1:
+              s = "package app.prolauncher.ai" + s.split("package app.prolauncher.ai")[1]
+          s = s.replace(".setPreferredBackend(LlmInference.Backend.GPU)", "")
+          s = s.replace(".setPreferredBackend(LlmInference.Backend.CPU)", "")
+          open(kf, "w", encoding="utf-8").write(s)
+          '
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3

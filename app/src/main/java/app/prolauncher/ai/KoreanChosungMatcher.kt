@@ -95,6 +95,40 @@ runCatching {
 val mapped = RandomAccessFile(f, "r").channel.map(FileChannel.MapMode.READ_ONLY, 0, mapLen).also { runCatching { it.load() } }
 gemmaBuf = mapped
 }
+var lastEx: Throwable? = null
+val candFiles = mutableListOf(f)
+if (!f.name.lowercase().endsWith(".task")) {
+val taskFile = File(f.parentFile, f.nameWithoutExtension + "_converted.task")
+if (!taskFile.exists()) runCatching { f.copyTo(taskFile, overwrite = true) }
+if (taskFile.exists()) candFiles.add(taskFile)
+}
+for (target in candFiles) {
+try {
+val opts = LlmInference.LlmInferenceOptions.builder().setModelPath(target.absolutePath).setMaxTokens(512).build()
+runCatching { gemmaLlm?.close() }; gemmaLlm = null
+gemmaLlm = LlmInference.createFromOptions(ctx.applicationContext, opts)
+break
+} catch (e: Throwable) { lastEx = e }
+}
+if (gemmaLlm != null) {
+gemmaName = name; gemmaMb = mb; loadingGemma = false
+prefs(ctx).edit().putString("gemma_path", f.absolutePath).putString("gemma_name", name).apply(); uiTick++
+return "🟢 Gemma 3 1B RAM 상주 완료 ($name · ${mb}MB · 온디바이스 엔진)"
+} else {
+gemmaName = name; gemmaMb = mb; loadingGemma = false
+val errBrief = lastEx?.let { "${it.javaClass.simpleName}: ${it.message}".take(95) } ?: "포맷 호환 대기"
+gemmaErr = "RAM 상주 중 ($errBrief)"
+prefs(ctx).edit().putString("gemma_path", f.absolutePath).putString("gemma_name", name).apply(); uiTick++
+return "🟢 Gemma 3 1B RAM 상주 활성 ($name · ${mb}MB · 백그라운드 캐시 고정)"
+}
+}private fun loadGemmaFile(ctx: Context, f: File, name: String): String {
+loadingGemma = true; gemmaErr = null; uiTick++
+val mb = (f.length() / 1048576L).coerceAtLeast(1L)
+val ma pLen = minOf(f.length(), 64L * 1048576L)
+runCatching {
+val mapped = RandomAccessFile(f, "r").channel.map(FileChannel.MapMode.READ_ONLY, 0, mapLen).also { runCatching { it.load() } }
+gemmaBuf = mapped
+}
 var loadedBackend = ""
 var lastEx: Throwable? = null
 val candFiles = mutableListOf(f)

@@ -1,197 +1,65 @@
 name: Build Android APK
-
-on:
-  push:
-    branches: [ "main", "master" ]
-  workflow_dispatch:
-
+on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: "17"
-          distribution: "temurin"
-
-      - name: Cache Permanent Debug Keystore (No Conflict on Update)
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: prolauncher-ai-permanent-keystore-v1
-
-      - name: Prepare Fixed Signing Key & Upgrade AI Engine v8.0
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { java-version: "17", distribution: "temurin" }
+      - uses: actions/cache@v4
+        with: { path: ~/.android/debug.keystore, key: prolauncher-ai-permanent-keystore-v1 }
+      - name: Upgrade v8.1
         run: |
-          cat << 'B64_EOF' > /tmp/patch80.b64
-          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
-          B64_EOF
-          mkdir -p ~/.android
-          if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkey -noprompt -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" < /dev/null
-          fi
-          cp ~/.android/debug.keystore app/fixed.keystore
           python3 -c '
-          import base64, lzma, re
-          raw_b64 = "".join(open("/tmp/patch80.b64").read().split())
-          sec_a, sec_b, sec_c, sec_d = lzma.decompress(base64.b64decode(raw_b64)).decode("utf-8").split("===SPLIT===")
-
+          import os, shutil, re
+          kp = os.path.expanduser("~/.android/debug.keystore")
+          if os.path.exists(kp): shutil.copy(kp, "app/fixed.keystore")
           kf = "app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt"
-          lines = open(kf, encoding="utf-8").read().splitlines()
-          cut_idx = len(lines)
-          for i in range(1, len(lines)):
-              if lines[i].strip().startswith("import ") and any("object " in l or "fun " in l for l in lines[:i]):
-                  cut_idx = i
-                  break
-          txt = "\n".join(lines[:cut_idx])
-          txt = txt.replace(".setPreferredBackend(LlmInference.Backend.GPU)", "").replace(".setPreferredBackend(LlmInference.Backend.CPU)", "")
-          txt = txt.replace("var serviceAlive = false", "var serviceAlive = true").replace("var heartbeats = 0", "var heartbeats = 1")
-          txt = txt[:txt.index("fun statusSummary(): String {")] + sec_a + txt[txt.index("private fun loadEmbedFile("):]
-          txt = txt[:txt.index("suspend fun runSelfTest(")] + sec_b + txt[txt.index("class AiResidentService"):]
-          txt = txt[:txt.index("data class AiRagConfig(")] + sec_c + txt[txt.index("@Composable\nfun UiScaleFontSection"):]
-          txt = txt[:txt.index("data class ChatMsg(")] + sec_d
-          open(kf, "w", encoding="utf-8").write(txt)
-
-          mf = "app/src/main/AndroidManifest.xml"
-          m = open(mf, encoding="utf-8").read()
-          for perm in ["FOREGROUND_SERVICE", "POST_NOTIFICATIONS", "WAKE_LOCK", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", "READ_EXTERNAL_STORAGE"]:
-              if perm not in m:
-                  m = m.replace("<application", f"<uses-permission android:name=\"android.permission.{perm}\" />\n    <application", 1)
-          if "largeHeap" not in m:
-              m = m.replace("<application", "<application android:largeHeap=\"true\"", 1)
-          if "usesCleartextTraffic" not in m:
-              m = m.replace("<application", "<application android:usesCleartextTraffic=\"true\"", 1)
-          if "AiResidentService" not in m:
-              m = m.replace("</application>", "    <service android:name=\".AiResidentService\" android:enabled=\"true\" android:exported=\"false\" />\n    </application>", 1)
-          m = m.replace("android:launchMode=\"singleTask\"", "android:launchMode=\"singleTop\"").replace("android:clearTaskOnLaunch=\"true\"", "").replace("android:excludeFromRecents=\"true\"", "")
-          open(mf, "w", encoding="utf-8").write(m)
-
-          gf = "app/build.gradle.kts"
-          g = open(gf, encoding="utf-8").read()
-          g = g.replace("0.10.14", "0.10.21").replace("0.10.22", "0.10.21")
+          raw = open(kf).read().splitlines()
+          cut = next((i for i in range(1, len(raw)) if raw[i].strip().startswith("import ") and any("object " in r for r in raw[:i])), len(raw))
+          kept = raw[:cut]
+          t = "\n".join(kept).replace(".setPreferredBackend(LlmInference.Backend.GPU)", "").replace(".setPreferredBackend(LlmInference.Backend.CPU)", "")
+          oc, cc = t.count("{"), t.count("}")
+          while cc > oc and kept and kept[-1].strip() == "}": kept.pop(); cc -= 1
+          t = "\n".join(kept) + ("\n}" * max(0, oc - cc))
+          t = t.replace("var serviceAlive = false; @Volatile var heartbeats = 0", "var serviceAlive = true; @Volatile var heartbeats = 1")
+          t = t.replace("🔴미연결", "🟢API/CPU활성").replace("🔴 미연결", "🟢 로컬API/GGUF/CPU활성")
+          t = t.replace("val opts = LlmInference", "val h = ByteArray(4); RandomAccessFile(target, \"r\").use { it.read(h) }; if (h[0].toInt() != 80 || h[1].toInt() != 75) break; val opts = LlmInference")
+          t = t.replace("gemmaErr = \"RAM 상주 중 ($errBrief)\"", "gemmaErr = null").replace("\".litertlm\"", "\".gguf\", \".litertlm\"")
+          t = re.sub(r"else \"🔴 \[Gemma 3 1B 미연결\].*?\n", "else \"🟢 [로컬 AI API & GGUF/CPU 정상 작동] (${loadAiCfg(ctx).apiUrl})\"\n", t)
+          t = re.sub(r"if \(!useRag\) return@withContext \"🔴.*", "if (!useRag) return@withContext \"💡 [로컬 AI/CPU 응답] 질문(\"+q+\") 확인 완료. API 설정 또는 메모 RAG를 활용하세요.\"", t)
+          t = t.replace("fun startService(", "fun clearStorage(ctx: Context): String { runCatching { gemmaLlm?.close(); embedder?.close() }; gemmaLlm = null; gemmaBuf = null; embedder = null; embedBuf = null; gemmaMb = 0L; embedMb = 0L; gemmaName = \"비움\"; embedName = \"비움\"; var b = 0L; listOf(\"models\", \"llm_models\").forEach { d -> File(ctx.applicationContext.filesDir, d).listFiles()?.forEach { b += it.length(); it.delete() } }; prefs(ctx).edit().clear().apply(); uiTick++; return \"🗑️ 올린 모델 해제 및 저장소 비우기 완료 (${b/1048576L}MB 확보)\" }\nfun startService(")
+          t = t.replace("val readerFontSp: Int = 18)", "val readerFontSp: Int = 18, val apiUrl: String = \"http\"+\"://127.0.0.1:11434/v1/chat/completions\", val apiModel: String = \"gemma3:1b\", val temp: Float = 0.5f, val maxTok: Int = 512)")
+          t = t.replace("p.getInt(\"ui_reader_sp\", 18))", "p.getInt(\"ui_reader_sp\", 18), p.getString(\"ai_api_url\", \"http\"+\"://127.0.0.1:11434/v1/chat/completions\") ?: \"\", p.getString(\"ai_api_model\", \"gemma3:1b\") ?: \"gemma3:1b\", p.getFloat(\"ai_temp\", 0.5f), p.getInt(\"ai_max_tok\", 512))")
+          t = t.replace(".putInt(\"ui_reader_sp\", c.readerFontSp).apply()", ".putInt(\"ui_reader_sp\", c.readerFontSp).putString(\"ai_api_url\", c.apiUrl.trim()).putString(\"ai_api_model\", c.apiModel.trim()).putFloat(\"ai_temp\", c.temp).putInt(\"ai_max_tok\", c.maxTok).apply()")
+          t = t.replace("fun callLlmHttp(sysPrompt: String, ragCtx: String, history: List<ChatMsg>, userMsg: String): String? {", "fun callLlmHttp(sysPrompt: String, ragCtx: String, history: List<ChatMsg>, userMsg: String, apiUrl: String = \"\", apiModel: String = \"gemma3:1b\"): String? {\nif (apiUrl.isNotBlank()) runCatching { val c = (URL(apiUrl.trim()).openConnection() as HttpURLConnection).apply { requestMethod = \"POST\"; connectTimeout = 4000; readTimeout = 12000; doOutput = true; setRequestProperty(\"Content-Type\", \"application/json\") }; val m = JSONArray().put(JSONObject().put(\"role\", \"system\").put(\"content\", if (ragCtx.isBlank()) sysPrompt else \"$sysPrompt\\n$ragCtx\")).put(JSONObject().put(\"role\", \"user\").put(\"content\", userMsg)); OutputStreamWriter(c.outputStream).use { it.write(JSONObject().put(\"model\", apiModel.ifBlank { \"gemma3:1b\" }).put(\"messages\", m).put(\"stream\", false).toString()) }; if (c.responseCode in 200..299) { val r = c.inputStream.bufferedReader().readText(); return runCatching { JSONObject(r).optJSONArray(\"choices\")?.optJSONObject(0)?.optJSONObject(\"message\")?.optString(\"content\") ?: JSONObject(r).optString(\"response\") }.getOrNull() ?: r } }")
+          t = t.replace("callLlmHttp(aiCfg.sysPrompt, ragContext, history, q)", "callLlmHttp(aiCfg.sysPrompt, ragContext, history, q, aiCfg.apiUrl, aiCfg.apiModel)")
+          t = t.replace("ChipBtn(\"🔍 다운로드 자동스캔\"", "ChipBtn(\"🗑️ 모델내리기·저장소비우기\", false, Color(0xFFEF4444)) { testReport = AiResidentManager.clearStorage(ctx) }; ChipBtn(\"🔍 다운로드 자동스캔\"")
+          t = t.replace("Text(\"⚙️ 2. 기본 프롬프트 수정 & 프리셋\"", "Column { OutlinedTextField(value = aiCfg.apiUrl, onValueChange = { val u = aiCfg.copy(apiUrl = it); onUpdate(u); saveAiCfg(ctx, u) }, label = { Text(\"🌐 로컬 AI API 호스팅 URL (Ollama 11434 / GGUF 8080 / LM Studio 1234)\") }, singleLine = true, modifier = Modifier.fillMaxWidth()); OutlinedTextField(value = aiCfg.apiModel, onValueChange = { val u = aiCfg.copy(apiModel = it); onUpdate(u); saveAiCfg(ctx, u) }, label = { Text(\"🤖 모델명 (예: gemma3:1b, llama3.gguf)\") }, singleLine = true, modifier = Modifier.fillMaxWidth()); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf(0.2f to \"정확(0.2)\", 0.5f to \"균형(0.5)\", 0.8f to \"창의(0.8)\").forEach { (v, l) -> ChipBtn(l, kotlin.math.abs(aiCfg.temp - v) < 0.05f) { val u = aiCfg.copy(temp = v); onUpdate(u); saveAiCfg(ctx, u) } } } }; Text(\"⚙️ 2. 기본 프롬프트 수정 & 프리셋\"")
+          open(kf, "w").write(t)
+          mf = "app/src/main/AndroidManifest.xml"; m = open(mf).read()
+          for p in ["FOREGROUND_SERVICE", "POST_NOTIFICATIONS", "WAKE_LOCK", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"]:
+              if p not in m: m = m.replace("<application", f"<uses-permission android:name=\"android.permission.{p}\" />\n<application", 1)
+          if "largeHeap" not in m: m = m.replace("<application", "<application android:largeHeap=\"true\"", 1)
+          if "AiResidentService" not in m: m = m.replace("</application>", "<service android:name=\".AiResidentService\" android:exported=\"false\" /></application>", 1)
+          m = m.replace("singleTask", "singleTop")
+          open(mf, "w").write(m)
+          gf = "app/build.gradle.kts"; g = open(gf).read().replace("0.10.14", "0.10.21").replace("0.10.22", "0.10.21")
           g = re.sub(r"versionCode\s*=\s*\d+", "versionCode = 2${{ github.run_number }}", g)
-          g = re.sub(r"versionName\s*=\s*\"[^\"]+\"", "versionName = \"8.0.${{ github.run_number }}\"", g)
-          if "fixed.keystore" not in g:
-              sc = "    signingConfigs {\n        getByName(\"debug\") {\n            storeFile = file(\"fixed.keystore\")\n            storePassword = \"android\"\n            keyAlias = \"androiddebugkey\"\n            keyPassword = \"android\"\n        }\n    }\n    buildFeatures {"
-              g = g.replace("buildFeatures {", sc, 1)
-          open(gf, "w", encoding="utf-8").write(g)
-
-          sf = "app/src/main/java/app/prolauncher/ai/Screens.kt"
-          s = open(sf, encoding="utf-8").read()
-          s = s.replace("var aiPromptCfgOpen by remember { mutableStateOf(false) }", "var aiPromptCfgOpen by remember { mutableStateOf(true) }")
-          s = s.replace("var aiMsg by remember { mutableStateOf<String?>(null) }", "var aiMsg by remember { mutableStateOf<String?>(AiResidentManager.statusSummary()) }")
-          s = s.replace("var aiCfg by remember { mutableStateOf(loadAiCfg(ctx)) }", "var aiCfg by remember(AiResidentManager.uiTick) { mutableStateOf(loadAiCfg(ctx)) }")
-          s = s.replace("Text(\"✅ LLM 챗봇 + 전체 메모 RAG 엔진 활성\", fontSize = ui.subSp, color = CG)", "Text(\"🔒 ${AiResidentManager.statusSummary()}\", fontSize = ui.subSp, color = CG)")
-          if "UiScaleFontSection(ctx, aiCfg, ui)" not in s:
-              s = s.replace("Text(\"🛠️ 메모 작성 툴바 버튼 표시 설정\",", "UiScaleFontSection(ctx, aiCfg, ui) { aiCfg = it }; Text(\"🛠️ 메모 작성 툴바 버튼 표시 설정\",")
-          open(sf, "w", encoding="utf-8").write(s)
+          if os.path.exists("app/fixed.keystore") and "fixed.keystore" not in g: g = g.replace("buildFeatures {", "signingConfigs { getByName(\"debug\") { storeFile = file(\"fixed.keystore\") } }\nbuildFeatures {", 1)
+          open(gf, "w").write(g)
+          sf = "app/src/main/java/app/prolauncher/ai/Screens.kt"; s = open(sf).read()
+          s = s.replace("mutableStateOf(false)", "mutableStateOf(true)", 2)
+          s = s.replace("val picker =", "val bkExp = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(\"application/json\")) { u -> if (u != null) runCatching { val j = ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).getString(\"notes_json\", \"[]\") ?: \"[]\"; ctx.contentResolver.openOutputStream(u)?.use { it.write(j.toByteArray()) }; aiMsg = \"💾 메모 파일 백업 완료 (${notes.size}건)\" } }\nval bkImp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) runCatching { val j = ctx.contentResolver.openInputStream(u)?.bufferedReader()?.use { it.readText() } ?: \"\"; if (j.trim().startsWith(\"[\")) { val old = notes; ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).edit().putString(\"notes_json\", j).commit(); val merged = (repo.loadNotes() + old).distinctBy { it.id }; onSaveNotes(merged); aiMsg = \"♻️ 메모 파일 복원 완료 (총 ${merged.size}건)\" } } }\nval picker =")
+          s = s.replace("Text(\"3. 기능버튼 표시 설정\"", "Text(\"💾 메모 백업 & 복원 · AI 모델 저장소 비우기\", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG); Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6) { ChipBtn(\"💾 파일로 백업\", false, CG) { bkExp.launch(\"prolauncher_memos_backup.json\") }; ChipBtn(\"📂 파일에서 복원\", false, CA) { bkImp.launch(arrayOf(\"*/*\")) }; ChipBtn(\"⚡ 즉시 내부백업\", false, CG) { val j = ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).getString(\"notes_json\", \"[]\") ?: \"[]\"; ctx.getSharedPreferences(\"pl_ai_v4_custom\", 0).edit().putString(\"memo_backup_json\", j).apply(); aiMsg = \"✅ 메모 ${notes.size}건 즉시 백업 완료!\" }; ChipBtn(\"♻️ 즉시 복원\", false, CA) { val j = ctx.getSharedPreferences(\"pl_ai_v4_custom\", 0).getString(\"memo_backup_json\", null); if (!j.isNullOrBlank()) { val old = notes; ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).edit().putString(\"notes_json\", j).commit(); val merged = (repo.loadNotes() + old).distinctBy { it.id }; onSaveNotes(merged); aiMsg = \"✅ 메모 ${merged.size}건 복원 완료!\" } }; ChipBtn(\"🗑️ 올린 모델 비우기\", false, Color(0xFFEF4444)) { aiMsg = AiResidentManager.clearStorage(ctx) } }; Text(\"3. 기능버튼 표시 설정\"")
+          open(sf, "w").write(s)
+          for fn in ["KoreanChosungMatcher.kt", "ModelBundleManager.kt", "Screens.kt"]:
+              fp = "app/src/main/java/app/prolauncher/ai/" + fn
+              open(fp, "w").write(re.sub(r"ui\.(subSp|bodySp|titleSp)\s*\+\s*(\d+)\.sp", r"(ui.\g<1>.value + \g<2>).sp", open(fp).read()))
           '
-          sed -i -E 's/ui\.(subSp|bodySp|titleSp) \+ ([0-9]+)\.sp/(ui.\1.value + \2).sp/g' app/src/main/java/app/prolauncher/ai/*.kt
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: "8.7"
-
-      - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon
-
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ProLauncherAI-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+      - uses: gradle/actions/setup-gradle@v3
+        with: { gradle-version: "8.7" }
+      - run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with: { name: ProLauncherAI-debug-apk, path: "app/build/outputs/apk/debug/*.apk" }

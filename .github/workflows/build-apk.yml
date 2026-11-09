@@ -1,1 +1,100 @@
-
+name: Build Android APK
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: prolauncher-ai-permanent-keystore-v1
+      - name: Upgrade v8.7
+        run: |
+          python3 -c 'exec("\n".join(x.strip() for x in r"""
+          import os, shutil, re
+          kp = os.path.expanduser("~/.android/debug.keystore")
+          if os.path.isfile(kp): shutil.copy(kp, "app/fixed.keystore")
+          kf = "app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt"
+          raw_kf = open(kf).read()
+          p = raw_kf.split("import android.app.*")
+          cand = (p[-1] if "readerFontSp" in p[-1] else p[1]).replace("package app.prolauncher.ai", "") if len(p) > 1 else ""
+          kept = ((p[0] + "import android.app.*" + cand) if len(p) > 1 else raw_kf).replace(".setPreferredBackend(LlmInference.Backend.GPU)", "").replace(".setPreferredBackend(LlmInference.Backend.CPU)", "").splitlines()
+          oc, cc = sum(x.count("{") for x in kept), sum(x.count("}") for x in kept)
+          while cc > oc and kept and kept[-1].strip() == "}": kept.pop(); cc -= 1
+          t = "\n".join(kept) + ("\n}" * max(0, oc - cc))
+          t = re.sub(r"LlmInference\.createFromOptions\([^)]+\)", r"runCatching { \g<0> }.getOrNull()", t)
+          t = t.replace("fun startService(ctx: Context) = runCatching {", "fun clearStorage(ctx: Context): String { runCatching { gemmaLlm?.close(); embedder?.close() }; gemmaLlm = null; gemmaBuf = null; embedder = null; embedBuf = null; gemmaMb = 0L; embedMb = 0L; gemmaName = \"미연결\"; embedName = \"미연결\"; var b = 0L; listOf(\"models\", \"llm_models\").forEach { d -> File(ctx.applicationContext.filesDir, d).listFiles()?.forEach { b += it.length(); it.delete() } }; prefs(ctx).edit().clear().apply(); uiTick++; return \"🗑️ 로컬 GGUF · 임베딩 해제 및 비우기 완료 (\" + (b/1048576L) + \"MB 확보)\" }\nfun startService(ctx: Context) = runCatching {")
+          t = t.replace("val uiScale: String = \"AUTO\")", "val uiScale: String = \"AUTO\", val apiUrl: String = \"http\" + \"://127.0.0.1:11434\", val apiModel: String = \"\", val apiKey: String = \"\", val temp: Float = 0.5f)")
+          t = t.replace("p.getString(\"ui_scale_mode\", \"AUTO\") ?: \"AUTO\")", "p.getString(\"ui_scale_mode\", \"AUTO\") ?: \"AUTO\", p.getString(\"ai_host_url\", \"http\" + \"://127.0.0.1:11434\") ?: (\"http\" + \"://127.0.0.1:11434\"), p.getString(\"ai_host_model\", \"\") ?: \"\", p.getString(\"ai_host_key\", \"\") ?: \"\", p.getFloat(\"ai_temp\", 0.5f))")
+          t = t.replace(".putString(\"ui_scale_mode\", c.uiScale).apply()", ".putString(\"ui_scale_mode\", c.uiScale).putString(\"ai_host_url\", c.apiUrl.trim()).putString(\"ai_host_model\", c.apiModel.trim()).putString(\"ai_host_key\", c.apiKey.trim()).putFloat(\"ai_temp\", c.temp).apply()")
+          new_http = "\n".join([
+          "fun parseAns(r: String): String? = r.trim().takeIf { it.isNotEmpty() && !it.startsWith(\"<\") }?.let { s ->\nif (!s.startsWith(\"\\u007B\")) s else runCatching {\nval o = JSONObject(s); val c0 = o.optJSONArray(\"choices\")?.optJSONObject(0); val m0 = c0?.optJSONObject(\"message\")",
+          "(m0?.optString(\"content\")?.takeIf { it.isNotBlank() } ?: m0?.optString(\"reasoning_content\")?.takeIf { it.isNotBlank() } ?: c0?.optString(\"text\")?.takeIf { it.isNotBlank() } ?: o.optJSONArray(\"candidates\")?.optJSONObject(0)?.optJSONObject(\"content\")?.optJSONArray(\"parts\")?.optJSONObject(0)?.optString(\"text\")?.takeIf { it.isNotBlank() } ?: o.optJSONObject(\"message\")?.optString(\"content\")?.takeIf { it.isNotBlank() } ?: o.optString(\"response\").takeIf { it.isNotBlank() } ?: o.optString(\"content\").takeIf { it.isNotBlank() })?.trim()\n}.getOrNull()\n}\nfun postApi(u: String, k: String, body: JSONObject): Pair<Int, String> {\nvar c: HttpURLConnection? = null",
+          "return try {\nc = (URL(u).openConnection() as HttpURLConnection).apply { requestMethod = \"POST\"; connectTimeout = 15000; readTimeout = 90000; doOutput = true; setRequestProperty(\"Content-Type\", \"application/json; charset=UTF-8\"); if (k.isNotBlank()) setRequestProperty(\"Authorization\", \"Bearer \" + k.trim()) }\nOutputStreamWriter(c.outputStream, Charsets.UTF_8).use { it.write(body.toString()) }\nval code = c.responseCode\ncode to ((if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: \"\")\n} catch (e: Exception) { -1 to (e.message ?: \"연결 실패\") } finally { c?.disconnect() }\n}",
+          "fun getApi(u: String, k: String = \"\"): String = runCatching {\n(URL(u).openConnection() as HttpURLConnection).apply { connectTimeout = 4000; readTimeout = 5000; setRequestProperty(\"User-Agent\", \"Mozilla/5.0\"); if (k.isNotBlank()) setRequestProperty(\"Authorization\", \"Bearer \" + k.trim()) }.inputStream.bufferedReader().use { it.readText() }\n}.getOrDefault(\"\")\nfun discoverServerModel(base: String, k: String): String {\nfor (ep in listOf(\"$base/api/tags\", \"$base/v1/models\", \"$base/models\")) {\nval s = getApi(ep, k); if (s.isNotEmpty()) runCatching {\nval j = JSONObject(s); val m = j.optJSONArray(\"models\")",
+          "if (m != null && m.length() > 0) m.getJSONObject(0).optString(\"name\", m.getJSONObject(0).optString(\"model\", \"\")).trim().takeIf { it.isNotEmpty() }?.let { return it }\nval d = j.optJSONArray(\"data\")\nif (d != null && d.length() > 0) d.getJSONObject(0).optString(\"id\", \"\").trim().takeIf { it.isNotEmpty() }?.let { return it }\n}\n}\nreturn \"\"\n}\nfun wikiAns(userMsg: String, ragCtx: String): String {\nval q = userMsg.trim()\nval kw = q.replace(Regex(\"[^가-힣a-zA-Z0-9 ]\"), \" \").trim().split(Regex(\"\\\\s+\")).map { it.replace(Regex(\"(이란|란|은|는|이|가|을|를|의|에|대해|에서|무엇|뭔가요|알려줘|설명해줘|뭐야|어떤|나라야|나라)$\"), \"\") }.filter { it.length >= 2 }.lastOrNull() ?: q",
+          "val sb = StringBuilder(); if (ragCtx.isNotBlank()) sb.append(\"📌 [내 메모 검색 결과]\\n$ragCtx\\n\\n\")\nfor (lang in listOf(\"ko\", \"en\")) {\nval enc = URLEncoder.encode(kw.ifEmpty { q }, \"UTF-8\")\nval r1 = getApi(\"https\" + \"://$lang.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&format=json&titles=$enc\")\nif (r1.isNotEmpty()) runCatching {\nval pages = JSONObject(r1).optJSONObject(\"query\")?.optJSONObject(\"pages\")",
+          "if (pages != null) { val ks = pages.keys(); while (ks.hasNext()) { val ext = pages.optJSONObject(ks.next().toString())?.optString(\"extract\", \"\")?.trim() ?: \"\"; if (ext.isNotEmpty()) { sb.append(ext.take(700)); return sb.toString() } } }\n}\n}\nreturn if (sb.isNotEmpty()) sb.toString() else \"⚠️ 답변을 불러오지 못했습니다. [⚙️ AI 세팅]에서 Ollama 또는 로컬 GGUF 모델을 확인해 주세요.\"\n}\nfun callLlmHttp(sysPrompt: String, ragCtx: String, history: List<ChatMsg>, userMsg: String, apiUrl: String = \"\", apiModel: String = \"\", apiKey: String = \"\"): String? {\nval fullSys = if (ragCtx.isBlank()) sysPrompt else \"$sysPrompt\\n\\n[참고 메모]\\n$ragCtx\"",
+          "val combP = if (fullSys.isNotBlank()) \"$fullSys\\n\\n질문: $userMsg\" else userMsg\nAiResidentManager.gemmaLlm?.let { llm -> runCatching { llm.generateResponse(combP)?.trim()?.takeIf { it.isNotEmpty() } }?.getOrNull()?.let { return it } }\nvar rawU = apiUrl.trim(); var k = apiKey.trim(); val m = apiModel.trim()\nif (rawU == \"local_gguf\" || rawU.isBlank()) return wikiAns(userMsg, ragCtx)\nif (!rawU.startsWith(\"http\" + \"://\") && !rawU.startsWith(\"https\" + \"://\")) rawU = \"http\" + \"://$rawU\"\nval cleanU = rawU.removeSuffix(\"/\")",
+          "val base = cleanU.removeSuffix(\"/v1/chat/completions\").removeSuffix(\"/chat/completions\").removeSuffix(\"/v1/completions\").removeSuffix(\"/completion\").removeSuffix(\"/api/chat\").removeSuffix(\"/api/generate\").removeSuffix(\"/v1\").removeSuffix(\"/\")\nval discMod = discoverServerModel(base, k)\nval mods = mutableListOf<String>().apply {\nif (discMod.isNotEmpty()) add(discMod)\nif (m.isNotEmpty() && !contains(m)) add(m)\nval gn = AiResidentManager.gemmaName\nif (gn.isNotBlank() && !gn.contains(\"미연결\") && !contains(gn)) { add(gn); if (gn.endsWith(\".gguf\", true)) add(gn.substringBeforeLast(\".\")) }\nif (isEmpty()) add(\"gemma3:1b\")",
+          "if (!contains(\"default\")) add(\"default\")\nif (!contains(\"\")) add(\"\")\n}\nvar lastCode = 0; var lastErr = \"\"\nfor (ep in linkedSetOf(\"$base/api/chat\", \"$base/v1/chat/completions\", cleanU)) {\nfor (mod in mods) {\nval b1 = JSONObject().apply { if (mod.isNotEmpty()) put(\"model\", mod); put(\"stream\", false); put(\"messages\", JSONArray().put(JSONObject().put(\"role\", \"user\").put(\"content\", combP))) }\nval (c1, r1) = postApi(ep, k, b1); parseAns(r1)?.let { return it }; lastCode = c1; lastErr = r1; if (c1 == -1) break",
+          "val b2 = JSONObject().apply { if (mod.isNotEmpty()) put(\"model\", mod); put(\"stream\", false); put(\"messages\", JSONArray().put(JSONObject().put(\"role\", \"system\").put(\"content\", fullSys)).put(JSONObject().put(\"role\", \"user\").put(\"content\", userMsg))) }\nval (c2, r2) = postApi(ep, k, b2); parseAns(r2)?.let { return it }; if (c2 != 404) { lastCode = c2; lastErr = r2 }\n}\n}\nfor (ep in listOf(\"$base/api/generate\", \"$base/completion\", \"$base/v1/completions\")) {\nval tm = if (discMod.isNotEmpty()) discMod else m",
+          "val b3 = JSONObject().apply { if (tm.isNotEmpty()) put(\"model\", tm); put(\"prompt\", \"<start_of_turn>user\\n$combP<end_of_turn>\\n<start_of_turn>model\\n\"); put(\"stream\", false); put(\"n_predict\", 512) }\nval (c3, r3) = postApi(ep, k, b3); parseAns(r3)?.let { return it }; if (c3 == -1) break; if (c3 != 404) { lastCode = c3; lastErr = r3 }\n}\nif (AiResidentManager.gemmaMb > 0L) return wikiAns(userMsg, ragCtx)\nval errMsg = lastErr.replace(\"\\n\", \" \").take(90)\nreturn if (lastCode == -1) \"⚠️ Ollama / 로컬 서버($base)에 연결할 수 없습니다. Ollama 앱이나 로컬 GGUF 모델을 확인해 주세요.\"",
+          "else \"⚠️ Ollama / API 오류 (HTTP $lastCode\" + (if (discMod.isNotEmpty()) \", 감지모델: $discMod\" else \"\") + \"): \" + errMsg.ifBlank { \"모델 미로드\" } + \"\"\n}"
+          ])
+          idx_h = t.find("fun callLlmHttp(")
+          idx_b = t.find("suspend fun buildAiChatReply(")
+          t = t[:idx_h] + new_http + "\n\n" + t[idx_b:]
+          t = re.sub(r"callLlmHttp\(aiCfg\.sysPrompt, ragContext, history, q\)\?\.let \{[^\n]*\}", "callLlmHttp(aiCfg.sysPrompt, ragContext, history, q, aiCfg.apiUrl, aiCfg.apiModel, aiCfg.apiKey)?.let { return@withContext it }", t)
+          t = t.replace("callLlmHttp(aiCfg.sysPrompt, ragContext, history, q, aiCfg.apiUrl, aiCfg.apiModel)", "callLlmHttp(aiCfg.sysPrompt, ragContext, history, q, aiCfg.apiUrl, aiCfg.apiModel, aiCfg.apiKey)")
+          t = re.sub(r"if \(!useRag\) return@withContext \"🔴.*", "if (!useRag) return@withContext wikiAns(q, ragContext)", t)
+          t = re.sub(r"Text\(\"🔒 1\..*?ChipBtn\(\"📂 Gemma 3 1B 선택\"", "Text(\"🤖 1. 로컬 AI (GGUF) & 임베딩 모델 (\" + AiResidentManager.gemmaName + \" / \" + AiResidentManager.embedName + \")\", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG)\nRow(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {\nChipBtn(\"📂 로컬 AI (GGUF) 올리기\"", t, flags=re.S)
+          t = t.replace("ChipBtn(\"📂 임베딩젬마2 선택\"", "ChipBtn(\"📂 임베딩 모델 올리기\"")
+          t = re.sub(r"ChipBtn\(\"🔍 다운로드 자동스캔\".*?testReport\?\.let", "ChipBtn(\"🗑️ 모델/저장소 비우기\", false, Color(0xFFEF4444)) { testReport = AiResidentManager.clearStorage(ctx) }\n}\ntestReport?.let", t, flags=re.S)
+          api_ui = "Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(\"🦙 2. Ollama (올라마) & API 설정\", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG); Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { ChipBtn(\"🦙 Ollama (11434 자동감지)\", aiCfg.apiUrl.contains(\"11434\"), CG) { val u = aiCfg.copy(apiUrl = \"http\" + \"://127.0.0.1:11434\", apiModel = \"\"); onUpdate(u); saveAiCfg(ctx, u) }; ChipBtn(\"🧠 로컬 GGUF 단독모드\", aiCfg.apiUrl == \"local_gguf\", CG) { val u = aiCfg.copy(apiUrl = \"local_gguf\"); onUpdate(u); saveAiCfg(ctx, u) } }; OutlinedTextField(value = aiCfg.apiUrl, onValueChange = { val u = aiCfg.copy(apiUrl = it); onUpdate(u); saveAiCfg(ctx, u) }, label = { Text(\"Ollama / API 주소 (기본: http\" + \"://127.0.0.1:11434)\") }, singleLine = true, modifier = Modifier.fillMaxWidth()); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { OutlinedTextField(value = aiCfg.apiModel, onValueChange = { val u = aiCfg.copy(apiModel = it); onUpdate(u); saveAiCfg(ctx, u) }, label = { Text(\"모델명 (비워두면 자동감지)\") }, singleLine = true, modifier = Modifier.weight(1f)); OutlinedTextField(value = aiCfg.apiKey, onValueChange = { val u = aiCfg.copy(apiKey = it); onUpdate(u); saveAiCfg(ctx, u) }, label = { Text(\"API Key (올라마는 비워둠)\") }, singleLine = true, modifier = Modifier.weight(1f)) } }; Text(\"⚙️ 3. 프롬프트 & 프리셋\""
+          t = t.replace("Text(\"⚙️ 2. 기본 프롬프트 수정 & 프리셋\"", api_ui)
+          open(kf, "w").write(t)
+          maf = "app/src/main/java/app/prolauncher/ai/MainActivity.kt"; ma = open(maf).read()
+          ma = ma.replace("pageCount = { 3 }", "pageCount = { 4 }")
+          ma = ma.replace("onSaveNotes = { notes = it; repo.saveNotes(it) }, onSaveTodos = { todos = it; repo.saveTodos(it) })", "onSaveNotes = { notes = it; repo.saveNotes(it) }, onSaveTodos = { todos = it; repo.saveTodos(it) }, isAiPage = false)\n3 -> NotesRagView(notes, todos, books, cfg, ai, null, onClearQuote = {}, onSaveNotes = { notes = it; repo.saveNotes(it) }, onSaveTodos = { todos = it; repo.saveTodos(it) }, isAiPage = true)")
+          ma = ma.replace("메모 · AI · 검색 →", "메모장 →  |  AI·세팅(2번) →→")
+          open(maf, "w").write(ma)
+          mf = "app/src/main/AndroidManifest.xml"; m = open(mf).read()
+          for pm in ["FOREGROUND_SERVICE", "POST_NOTIFICATIONS", "WAKE_LOCK", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"]: m = m if pm in m else m.replace("<application", f"<uses-permission android:name=\"android.permission.{pm}\" />\n<application", 1)
+          if "largeHeap" not in m: m = m.replace("<application", "<application android:largeHeap=\"true\"", 1)
+          if "usesCleartextTraffic" not in m: m = m.replace("<application", "<application android:usesCleartextTraffic=\"true\"", 1)
+          if "AiResidentService" not in m: m = m.replace("</application>", "<service android:name=\".AiResidentService\" android:exported=\"false\" /></application>", 1)
+          open(mf, "w").write(m.replace("singleTask", "singleTop"))
+          gf = "app/build.gradle.kts"; g = open(gf).read().replace("0.10.14", "0.10.21").replace("0.10.22", "0.10.21")
+          g = re.sub(r"versionCode\s*=\s*[^\n]+", "versionCode = 9" + os.environ.get("GITHUB_RUN_NUMBER", "85"), g)
+          if os.path.exists("app/fixed.keystore") and "fixed.keystore" not in g: g = g.replace("buildFeatures {", "signingConfigs { getByName(\"debug\") { storeFile = file(\"fixed.keystore\") } }\nbuildFeatures {", 1)
+          open(gf, "w").write(g)
+          sf = "app/src/main/java/app/prolauncher/ai/Screens.kt"; s = open(sf).read()
+          s = s.replace("onSaveNotes: (List<NoteItem>) -> Unit, onSaveTodos: (List<TodoItem>) -> Unit\n)", "onSaveNotes: (List<NoteItem>) -> Unit, onSaveTodos: (List<TodoItem>) -> Unit, isAiPage: Boolean = false\n)")
+          s = s.replace("var cfgOpen by remember { mutableStateOf(true) }", "var cfgOpen by remember { mutableStateOf(false) }")
+          s = s.replace("var mode by remember { mutableStateOf(\"MEMO\") }", "var mode by remember(isAiPage) { mutableStateOf(if (isAiPage) \"AI\" else \"MEMO\") }")
+          s = s.replace("✨ AI 챗봇 (LLM & 전체 메모 RAG)", "🦙 AI 세팅 & 챗봇 (Ollama · 로컬 GGUF)").replace("✅ LLM 챗봇 + 전체 메모 RAG 엔진 활성", "🦙 Ollama(11434) · 로컬 GGUF · 메모장/AI 분리 완료").replace("⚙️ 프롬프트·RAG 설정", "⚙️ AI 세팅").replace("⚙️ 카테고리·배율 설정", "⚙️ 메모 설정")
+          s = re.sub(r"ChipBtn\(\"💬 일반 AI 질문\".*?aiPromptCfgOpen = !aiPromptCfgOpen \}", "", s, flags=re.S)
+          s = re.sub(r"Text\(\"💬 AI에게 질문\".*?\.padding\(4\.dp\)\)", "", s, flags=re.S)
+          s = s.replace("Surface(color = Color(0xFF14161F), shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Color(0xFF2B3042)), modifier = FMW) {", "if (editId == null || isAiPage) Surface(color = Color(0xFF14161F), shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Color(0xFF2B3042)), modifier = FMW) {")
+          s = s.replace("Row(FMW.background(Color(0xFF0B0C10), RoundedCornerShape(10.dp)).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {\nlistOf(\"MEMO\" to \"📝 메모\", \"AI\" to \"✨ AI 챗봇\", \"SEARCH\" to \"🔎 검색\").forEach { (mk, lb) ->", "if (!isAiPage) Row(FMW.background(Color(0xFF0B0C10), RoundedCornerShape(10.dp)).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {\nlistOf(\"MEMO\" to \"📝 메모 작성\", \"SEARCH\" to \"🔎 메모 검색\").forEach { (mk, lb) ->")
+          s = s.replace("val picker =", "val bkExp = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(\"application/json\")) { u -> if (u != null) runCatching { val j = ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).getString(\"notes_json\", \"[]\") ?: \"[]\"; ctx.contentResolver.openOutputStream(u)?.use { it.write(j.toByteArray()) }; aiMsg = \"💾 메모 파일 백업 완료 (\" + notes.size + \"건)\" } }\nval bkImp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) runCatching { val j = ctx.contentResolver.openInputStream(u)?.bufferedReader()?.use { it.readText() } ?: \"\"; if (j.trim().startsWith(\"[\")) { val old = notes; ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).edit().putString(\"notes_json\", j).commit(); val merged = (repo.loadNotes() + old).distinctBy { it.id }; onSaveNotes(merged); aiMsg = \"♻️ 메모 복원 완료 (총 \" + merged.size + \"건)\" } } }\nval picker =")
+          s = s.replace("Text(\"3. 기능버튼 표시 설정\"", "Text(\"💾 메모 백업 & 복원\", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG); Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6) { ChipBtn(\"💾 파일 백업\", false, CG) { bkExp.launch(\"prolauncher_memos_backup.json\") }; ChipBtn(\"📂 파일 복원\", false, CA) { bkImp.launch(arrayOf(\"*/*\")) }; ChipBtn(\"⚡ 즉시 백업\", false, CG) { val j = ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).getString(\"notes_json\", \"[]\") ?: \"[]\"; ctx.getSharedPreferences(\"pl_ai_v4_custom\", 0).edit().putString(\"memo_backup_json\", j).apply(); aiMsg = \"✅ 메모 \" + notes.size + \"건 즉시 백업 완료!\" }; ChipBtn(\"♻️ 즉시 복원\", false, CA) { val j = ctx.getSharedPreferences(\"pl_ai_v4_custom\", 0).getString(\"memo_backup_json\", null); if (!j.isNullOrBlank()) { val old = notes; ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).edit().putString(\"notes_json\", j).commit(); val merged = (repo.loadNotes() + old).distinctBy { it.id }; onSaveNotes(merged); aiMsg = \"✅ 메모 \" + merged.size + \"건 복원 완료!\" } } }; Text(\"3. 기능버튼 표시 설정\"")
+          open(sf, "w").write(s)
+          for fn in ["KoreanChosungMatcher.kt", "ModelBundleManager.kt", "Screens.kt", "MainActivity.kt"]: fp = "app/src/main/java/app/prolauncher/ai/" + fn; c = open(fp).read(); open(fp, "w").write(re.sub(r"ui\.(subSp|bodySp|titleSp)\s*\+\s*(\d+)\.sp", r"(ui.\g<1>.value + \g<2>).sp", c))
+          """.splitlines()))'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "8.7"
+      - run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProLauncherAI-debug-apk
+          path: "app/build/outputs/apk/debug/*.apk"

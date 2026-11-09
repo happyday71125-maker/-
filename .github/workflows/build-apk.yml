@@ -38,7 +38,7 @@ jobs:
           t = re.sub(r"if \(!useRag\) return@withContext \"🔴.*", "if (!useRag) return@withContext fallbackLlmOrChat(aiCfg.sysPrompt, ragContext, history, q)", t)
           open(kf, "w").write(t)
           """.splitlines()))'
-      - name: Upgrade v9.0 UI
+      - name: Upgrade v9 .0 UI
         run: |
           python3 -c 'exec("\n".join(x.strip() for x in r"""
           import os, re

@@ -86,7 +86,7 @@ jobs:
           s = s.replace("Text(\"3. 기능버튼 표시 설정\"", "Text(\"💾 메모 백업 & 복원\", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG); Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6) { ChipBtn(\"💾 파일 백업\", false, CG) { bkExp.launch(\"prolauncher_memos_backup.json\") }; ChipBtn(\"📂 파일 복원\", false, CA) { bkImp.launch(arrayOf(\"*/*\")) }; ChipBtn(\"⚡ 즉시 백업\", false, CG) { val j = ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).getString(\"notes_json\", \"[]\") ?: \"[]\"; ctx.getSharedPreferences(\"pl_ai_v4_custom\", 0).edit().putString(\"memo_backup_json\", j).apply(); aiMsg = \"✅ 메모 \" + notes.size + \"건 즉시 백업 완료!\" }; ChipBtn(\"♻️ 즉시 복원\", false, CA) { val j = ctx.getSharedPreferences(\"pl_ai_v4_custom\", 0).getString(\"memo_backup_json\", null); if (!j.isNullOrBlank()) { val old = notes; ctx.getSharedPreferences(\"pl_ai_v2_prefs\", 0).edit().putString(\"notes_json\", j).commit(); val merged = (repo.loadNotes() + old).distinctBy { it.id }; onSaveNotes(merged); aiMsg = \"✅ 메모 \" + notes.size + \"건 복원 완료!\" } } }; Text(\"3. 기능버튼 표시 설정\"")
           open(sf, "w").write(s)
           for fn in ["KoreanChosungMatcher.kt", "ModelBundleManager.kt", "Screens.kt", "MainActivity.kt"]: fp = "app/src/main/java/app/prolauncher/ai/" + fn; c = open(fp).read(); open(fp, "w").write(re.sub(r"ui\.(subSp|bodySp|titleSp)\s*\+\s*(\d+)\.sp", r"(ui.\g<1>.value + \g<2>).sp", c))
-          """.splitlines()))'
+          """  .splitlines()))'
             - name: Upgrade v9.1 Voice
                       run: |
                        python3 -c 'exec("\\n".join(x.strip() for x in r"""

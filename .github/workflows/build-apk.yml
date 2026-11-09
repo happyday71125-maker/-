@@ -8,7 +8,7 @@ jobs:
       - uses: actions/setup-java@v4
         with: { java-version: "17", distribution: "temurin" }
       - uses: actions/cache@v4
-        with: { path: ~/.android/debug.keystore, key: prolauncher-ai-permanent-keystore-v1 }
+                with: { path: "~/.android/debug.keystore", key: "prolauncher-ai-permanent-keystore-v1" }
       - name: Upgrade v9.0 Engine
         run: |
           python3 -c 'exec("\n".join(x.strip() for x in r"""
@@ -38,7 +38,7 @@ jobs:
           t = re.sub(r"if \(!useRag\) return@withContext \"🔴.*", "if (!useRag) return@withContext fallbackLlmOrChat(aiCfg.sysPrompt, ragContext, history, q)", t)
           open(kf, "w").write(t)
           """.splitlines()))'
-        - name: Upgrade v9 .0 UI
+            -     name: Upgrade v9 .0 UI
             run: |
           python3 -c 'exec("\n".join(x.strip() for x in r"""
           import os, re
@@ -87,7 +87,7 @@ jobs:
           open(sf, "w").write(s)
           for fn in ["KoreanChosungMatcher.kt", "ModelBundleManager.kt", "Screens.kt", "MainActivity.kt"]: fp = "app/src/main/java/app/prolauncher/ai/" + fn; c = open(fp).read(); open(fp, "w").write(re.sub(r"ui\.(subSp|bodySp|titleSp)\s*\+\s*(\d+)\.sp", r"(ui.\g<1>.value + \g<2>).sp", c))
           """  .splitlines()))'
-            - name: Upgrade v9.1 Voice
+          - name: Upgrade v9.1 Voice
                       run: |
                        python3 -c 'exec("\\n".join(x.strip() for x in r"""
                        kf = "app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt"; kt = open(kf).read(); open(kf, "w").write(kt.replace("모델명 (비워두면 GGUF 자동감지)", "로컬 AI 이름 (예: 자비스)"))

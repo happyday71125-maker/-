@@ -35,7 +35,7 @@ jobs:
           load_uri_fn = chr(10).join(_b)
           lf = "app/src/main/java/app/prolauncher/ai/LocalAiNoteEngine.kt"; lt = open(lf).read()
           lt = re.sub(r"import com\.google\.mediapipe\.tasks\.genai[^\n]*\n?", "", lt)
-          lt = lt.replace("package app.prolauncher.ai", "package app.prolauncher.ai\n" + llm_shim, 1)
+          lt = lt.rstrip() + chr(10) * 2 + llm_shim + chr(10)
           lt = re.sub(r"\.set(Temperature|TopK|TopP|RandomSeed)\([^)]*\)", "", lt)
           lt = re.sub(r"LlmInference\.createFromOptions\([^)]+\)", "(null as LlmInference?)", lt)
           lt = re.sub(r"suspend fun loadModelUri\(uri: Uri\): Result<String>.*?(?=(?:private )?fun (?:embedVec|categoryIcon)\()", lambda _: load_uri_fn + "\n\n", lt, count=1, flags=re.S)
@@ -183,7 +183,7 @@ jobs:
           _b += ['return if (ragCtx.isNotBlank()) ragCtx else "안녕하세요! 상단 [⚙️ AI 세팅]에서 텍스트 전용 로컬 AI (.gguf)와 임베딩젬마2 (.gguf) 모델을 올리면 오프라인에서도 실시간 스트리밍으로 답변합니다."', '}', '', 'suspend fun callLlmHttp(sysPrompt: String, ragCtx: String, history: List<ChatMsg>, userMsg: String, apiUrl: String = "", apiModel: String = "", apiKey: String = "", onStream: ((String) -> Unit)? = null, genId: Long = 0L): String? {']
           _b += ['val fullSys = if (ragCtx.isBlank()) sysPrompt else "$sysPrompt\\n\\n[참고 메모]\\n$ragCtx"', 'val chatGf = findLocalGguf()', 'if (chatGf != null && (apiUrl.isBlank() || apiUrl == "local_gguf")) {', 'runLocalGguf(chatGf, fullSys, history, userMsg, onStream, genId)?.let { return it }', '}', 'var rawU = apiUrl.trim(); val k = apiKey.trim(); val m = apiModel.trim()']
           _b += ['if (rawU.isBlank() || rawU == "local_gguf") return fallbackLlmOrChat(sysPrompt, ragCtx, history, userMsg, onStream, genId)', 'if (!rawU.startsWith("http" + "://") && !rawU.startsWith("https" + "://")) rawU = "http" + "://$rawU"', 'val cleanU = rawU.removeSuffix("/")']
-          _b += ['val base = cleanU.removeSuffix("/v1/chat/completions").removeSuffix("/chat/completions").removeSuffix("/v1/completions").removeSuffix("/completions").removeSuffix("/completion").removeSuffix("/api/chat").removeSuffix("/api/generate").removeSuffix("/v1").removeSuffix("/")', 'val discMod = discoverServerModel(base, k)']
+          _b += ['val base = cleanU.removeSuffix("/v1/chat/completions").removeSuffix("/chat/completions").removeSuffix("/v1/completions").removeSuffix("/completion").removeSuffix("/api/chat").removeSuffix("/api/generate").removeSuffix("/v1").removeSuffix("/")', 'val discMod = discoverServerModel(base, k)']
           _b += ['val mods = listOfNotNull(discMod.takeIf { it.isNotEmpty() }, m.takeIf { it.isNotEmpty() }, AiResidentManager.gemmaName.takeIf { it.isNotBlank() && !it.contains("미연결") }, "gemma3:1b", "").distinct()', 'for (ep in linkedSetOf("$base/api/chat", "$base/v1/chat/completions", cleanU)) {', 'for (mod in mods) {']
           _b += ['val b = JSONObject().apply { if (mod.isNotEmpty()) put("model", mod); put("stream", streamOn && onStream != null); if (ep.endsWith("/api/chat")) put("think", thinkOn); put("messages", JSONArray().put(JSONObject().put("role", "system").put("content", fullSys)).put(JSONObject().put("role", "user").put("content", userMsg))) }']
           _b += ['val (c1, r1) = postApi(ep, k, b, 30000, onStream, genId); parseAns(r1)?.let { return it }; if (c1 == -1) break', '}', '}', 'return fallbackLlmOrChat(sysPrompt, ragCtx, history, userMsg, onStream, genId)', '}']
@@ -207,9 +207,9 @@ jobs:
           chip_fn = chr(10).join(_b)
           _b = []
           _b += ['Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {', 'Surface(color = Color(0xFF101624), shape = RoundedCornerShape(50), border = BorderStroke(0.8.dp, Color(0xFF233047)), modifier = Modifier.fillMaxWidth()) {']
-          _b += ['Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = CV) {', 'Text("📖 독서대", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onLeftReader() }.padding(horizontal = 8.dp, vertical = 4.dp))']
-          _b += ['Text("🔼 앱서랍", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.SemiBold, color = CW, modifier = Modifier.clickable { onSwipeUp() }.padding(horizontal = 8.dp, vertical = 4.dp))', 'Text("📝 메모장", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Medium, color = CG, modifier = Modifier.clickable { onRightNotes() }.padding(horizontal = 8.dp, vertical = 4.dp))']
-          _b += ['Text("🦙 AI챗봇", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.SemiBold, color = CA, modifier = Modifier.clickable { onRightAi() }.padding(horizontal = 8.dp, vertical = 4.dp))', '}', '}', '}']
+          _b += ['Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = CV) {', 'Text("📖 독서대", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onLeftReader() }.padding(horizontal = 8.dp, vertical = 4.dp))']
+          _b += ['Text("🔼 앱서랍", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CW, modifier = Modifier.clickable { onSwipeUp() }.padding(horizontal = 8.dp, vertical = 4.dp))', 'Text("📝 메모장", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CG, modifier = Modifier.clickable { onRightNotes() }.padding(horizontal = 8.dp, vertical = 4.dp))']
+          _b += ['Text("🦙 AI챗봇", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CA, modifier = Modifier.clickable { onRightAi() }.padding(horizontal = 8.dp, vertical = 4.dp))', '}', '}', '}']
           home_dock = chr(10).join(_b)
           mbmf = "app/src/main/java/app/prolauncher/ai/ModelBundleManager.kt"; mb = open(mbmf).read()
           mb = re.sub(r"@Composable\s+fun ChipBtn\(.*?\n\s*\}\n\s*\}", lambda _: chip_fn, mb, count=1, flags=re.S)
@@ -365,7 +365,7 @@ jobs:
           _z += 's = s.replace("Text(\\"3. 기능버튼 표시 설정\\"", "Text(\\"💾 메모 백업 & 복원\\", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG); Row(FMW.horizontalScroll(rememberScrollState()), horizont'
           _z += 'alArrangement = HS6) { ChipBtn(\\"💾 파일 백업\\", false, CG) { bkExp.launch(\\"prolauncher_memos_backup.json\\") }; ChipBtn(\\"📂 파일 복원\\", false, CA) { bkImp.launch(arrayOf(\\"*/*\\")) }; ChipBtn(\\"⚡ 즉시 백업\\", fal'
           _z += 'se, CG) { val j = ctx.getSharedPreferences(\\"pl_ai_v2_prefs\\", 0).getString(\\"notes_json\\", \\"[]\\") ?: \\"[]\\"; ctx.getSharedPreferences(\\"pl_ai_v4_custom\\", 0).edit().putString(\\"memo_backup_json\\", j'
-          _z += ').apply(); aiMsg = \\"✅ 메모 \\" + notes.size + \\"건 즉시 백업 완료!\\" }; ChipBtn(\\"♻️ 즉시 복원\\", false, CA) { val j = ctx.getSharedPreferences(\\"pl_ai_v2_prefs\\", 0).getString(\\"notes_json\\", null); if (!j'
+          _z += ').apply(); aiMsg = \\"✅ 메모 \\" + notes.size + \\"건 즉시 백업 완료!\\" }; ChipBtn(\\"♻️ 즉시 복원\\", false, CA) { val j = ctx.getSharedPreferences(\\"pl_ai_v4_custom\\", 0).getString(\\"memo_backup_json\\", null); if (!j'
           _z += '.isNullOrBlank()) { val old = notes; ctx.getSharedPreferences(\\"pl_ai_v2_prefs\\", 0).edit().putString(\\"notes_json\\", j).commit(); val merged = (repo.loadNotes() + old).distinctBy { it.id }; onSaveNot'
           _z += 'es(merged); aiMsg = \\"✅ 메모 \\" + merged.size + \\"건 복원 완료!\\" } } }; Text(\\"3. 기능버튼 표시 설정\\"")'
           exec(_z)

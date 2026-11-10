@@ -38,8 +38,6 @@ jobs:
           t = re.sub(r"if \(!useRag\) return@withContext \".*", "if (!useRag) return@withContext fallbackLlmOrChat(aiCfg.sysPrompt, ragContext, history, q)", t)
           open(kf, "w").write(t)
           """.splitlines()))'
-               -     name: Upgrade v9 .0 UI
-            run: |
           python3 -c 'exec("\n".join(x.strip() for x in r"""
           import os, re
           kf = "app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt"; t = open(kf).read()
@@ -87,8 +85,6 @@ jobs:
           open(sf, "w").write(s)
           for fn in ["KoreanChosungMatcher.kt", "ModelBundleManager.kt", "Screens.kt", "MainActivity.kt"]: fp = "app/src/main/java/app/prolauncher/ai/" + fn; c = open(fp).read(); open(fp, "w").write(re.sub(r"ui\.(subSp|bodySp|titleSp)\s*\+\s*(\d+)\.sp", r"(ui.\g<1>.value + \g<2>).sp", c))
           """  .splitlines()))'
-          - name: Upgrade v9.1 Voice
-                      run: |
                        python3 -c 'exec("\\n".join(x.strip() for x in r"""
                        kf = "app/src/main/java/app/prolauncher/ai/KoreanChosungMatcher.kt"; kt = open(kf).read(); open(kf, "w").write(kt.replace("모델명 (비워두면 GGUF 자동감지)", "로컬 AI 이름 (예: 자비스)"))
                                  mf = "app/src/main/AndroidManifest.xml"; m = open(mf).read(); open(mf, "w").write(m if "RECORD_AUDIO" in m else m.replace("<application", "<uses-permission android:name=\"android.permission.RECORD_AUDIO\" />\\n<application", 1))
@@ -111,6 +107,5 @@ jobs:
                                                                                                                                       - uses: gradle/actions/setup-gradle@v3
                                                                                                                                         with: { gradle-version: "8.7" }
                                                                                                                                       - run: gradle assembleDebug --no-daemon
-                                                                                                                                      - uses: actions/upload-artifact@v4
-                                                                                                                                        with: { name: ProLauncherAI-debug-apk, path: "app/build/outputs/apk/debug/*.apk" }      
-                                                   
+                                                   - uses: actions/upload-artifact@v4
+                                                   with: { name: ProLauncherAI-debug-apk, path: "app/build/outputs/apk/debug/*.apk" }

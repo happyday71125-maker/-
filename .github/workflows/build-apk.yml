@@ -115,15 +115,15 @@ jobs:
           s = s.replace("Row(FMW, verticalAlignment = CV, horizontalArrangement = HS6) {\nOutlinedTextField(value = sharedAiChatIn,", "if (btmOpen) Row(FMW, verticalAlignment = CV, horizontalArrangement = HS6) {\nOutlinedTextField(value = sharedAiChatIn,").replace("ChipBtn(\"🗑️ 대화 초기화\")", "ChipBtn(if (btmOpen) \"🔽창접기\" else \"🔼창열기\", false, CM) { btmOpen = !btmOpen }; ChipBtn(\"🗑️초기화\")")
           open(sf, "w").write(s)
           for fn in ["KoreanChosungMatcher.kt", "ModelBundleManager.kt", "Screens.kt", "MainActivity.kt"]: fp = "app/src/main/java/app/prolauncher/ai/" + fn; c = open(fp).read(); open(fp, "w").write(re.sub(r"ui\.(subSp|bodySp|titleSp)\s*\+\s*(\d+)\.sp", r"(ui.\g<1>.value + \g<2>).sp", c))
-          PYEOF
-          - name: Setup Gradle
-          uses: gradle/actions/setup-gradle@v3
-          with:
-          gradle-version: '8.7'
-          - name: Build Debug APK
-          run: gradle assembleDebug --no-daemon --refresh-dependencies
-          - name: Upload Debug APK
-          uses: actions/upload-artifact@v4
-          with:
-          name: ProLauncherAI-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+      PYEOF
+      - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+      with:
+      gradle-version: '8.7'
+      - name: Build Debug APK
+      run: gradle assembleDebug --no-daemon --refresh-dependencies
+      - name: Upload Debug APK
+      uses: actions/upload-artifact@v4
+      with:
+      name: ProLauncherAI-debug-apk
+      path: app/build/outputs/apk/debug/*.apk

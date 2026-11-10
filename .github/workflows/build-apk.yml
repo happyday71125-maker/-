@@ -6,9 +6,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
-        with: { java-version: "17", distribution: "temurin" }
-      - uses: actions/cache@v4
-               with : { path: "~/.android/debug.keystore", key: "prolauncher-ai-permanent-keystore-v1" }
+        with:
+          java-version: "17"
+          distribution: "temurin"
       - name: Upgrade v9.0 Engine
         run: |
           python3 -c 'exec("\n".join(x.strip() for x in r"""

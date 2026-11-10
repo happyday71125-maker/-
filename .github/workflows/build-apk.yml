@@ -8,7 +8,7 @@ jobs:
       - uses: actions/setup-java@v4
         with: { java-version: "17", distribution: "temurin" }
       - uses: actions/cache@v4
-                with: { path: "~/.android/debug.keystore", key: "prolauncher-ai-permanent-keystore-v1" }
+               with : { path: "~/.android/debug.keystore", key: "prolauncher-ai-permanent-keystore-v1" }
       - name: Upgrade v9.0 Engine
         run: |
           python3 -c 'exec("\n".join(x.strip() for x in r"""
@@ -35,7 +35,7 @@ jobs:
           t = t[:idx_h] + new_http + "\n\n" + t[idx_b:]
           t = t.replace("val useRag = aiCfg.ragOn || (q.contains(\"내 메모\") || q.contains(\"전체 메모\"))", "val useRag = aiCfg.ragOn")
           t = re.sub(r"callLlmHttp\(aiCfg\.sysPrompt, ragContext, history, q\)\?\.let \{[^\n]*\}", "callLlmHttp(aiCfg.sysPrompt, ragContext, history, q, aiCfg.apiUrl, aiCfg.apiModel, aiCfg.apiKey)?.let { return@withContext it }", t)
-          t = re.sub(r"if \(!useRag\) return@withContext \"🔴.*", "if (!useRag) return@withContext fallbackLlmOrChat(aiCfg.sysPrompt, ragContext, history, q)", t)
+          t = re.sub(r"if \(!useRag\) return@withContext \".*", "if (!useRag) return@withContext fallbackLlmOrChat(aiCfg.sysPrompt, ragContext, history, q)", t)
           open(kf, "w").write(t)
           """.splitlines()))'
             -     name: Upgrade v9 .0 UI

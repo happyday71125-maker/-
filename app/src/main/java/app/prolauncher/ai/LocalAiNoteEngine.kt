@@ -1,129 +1,80 @@
 package app.prolauncher.ai
-
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import com.google.mediapipe.tasks.core.BaseOptions
-import com.google.mediapipe.tasks.genai.llminference.LlmInference
-import com.google.mediapipe.tasks.text.textembedder.TextEmbedder
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import androidx.compose.runtime.*
+import kotlinx.coroutines.*
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.sqrt
 
-data class AiParsedNoteResult(
-    val summary: String,
-    val extractedTasks: List<TodoItem>,
-    val tags: List<String>,
-    val engineUsed: String
-)
-
 class LocalAiNoteEngine(private val context: Context) {
-    private var llm: LlmInference? = null
-    private var embedder: TextEmbedder? = null
-    var modelLabel: String = "EmbeddingGemma 2 (MRL 256d) + 온디바이스 AI"
-
-    suspend fun loadModelUri(uri: Uri): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
-            var name = "model.litertlm"
-            context.contentResolver.query(uri, null, null, null, null)?.use { c ->
-                val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (idx >= 0 && c.moveToFirst()) name = c.getString(idx)
-            }
-            val dir = File(context.filesDir, "models").apply { mkdirs() }
-            val dst = File(dir, name)
-            context.contentResolver.openInputStream(uri)?.use { inp ->
-                FileOutputStream(dst).use { out -> inp.copyTo(out) }
-            }
-            runCatching {
-                val opts = TextEmbedder.TextEmbedderOptions.builder()
-                    .setBaseOptions(BaseOptions.builder().setModelAssetPath(dst.absolutePath).build())
-                    .build()
-                embedder = TextEmbedder.createFromOptions(context, opts)
-            }
-            runCatching {
-                val opts = LlmInference.LlmInferenceOptions.builder()
-                    .setModelPath(dst.absolutePath)
-                    .setMaxTokens(512)
-                    .build()
-                llm = LlmInference.createFromOptions(context, opts)
-            }
-            val mb = dst.length() / (1024 * 1024)
-            modelLabel = "로드 완료: $name (${mb}MB)"
-            modelLabel
-        }
-    }
-
-    fun embedVec(text: String): FloatArray {
-        embedder?.let { emb ->
-            runCatching {
-                val arr = emb.embed(text).embeddingResult().embeddings().firstOrNull()?.floatEmbedding()
-                if (arr != null && arr.isNotEmpty()) return arr
-            }
-        }
-        val v = FloatArray(128)
-        val c = text.lowercase()
-        val groups = listOf(
-            listOf("위로","힘들","고난","평안","마음","불안","시편","목자","영혼","잠언","성경","기도"),
-            listOf("동기부여","목표","습관","집중","생각","명상","정원","평온","아우렐리우스"),
-            listOf("장보기","장볼","쇼핑","우유","계란","원두","커피","사기","사야"),
-            listOf("업무","미팅","회의","보고서","제출","마감","기획","시안","피드백"),
-            listOf("시","윤동주","김소월","별","하늘","꽃","길")
-        )
-        groups.forEachIndexed { idx, g -> g.forEach { w -> if (c.contains(w)) v[idx] += 2.5f } }
-        val comb = "$c ${KoreanChosungMatcher.extractChosung(c)}"
-        for (i in comb.indices) v[(comb[i].code * 31) % 128] += 0.6f
-        var norm = 0f
-        for (x in v) norm += x * x
-        norm = sqrt(norm).coerceAtLeast(1e-6f)
-        for (i in v.indices) v[i] /= norm
-        return v
-    }
-
-    fun cosSim(a: FloatArray, b: FloatArray): Float {
-        var d = 0f
-        for (i in 0 until minOf(a.size, b.size)) d += a[i] * b[i]
-        return d.coerceIn(0f, 0.99f)
-    }
-
-    suspend fun analyzeMemo(rawText: String): AiParsedNoteResult = withContext(Dispatchers.IO) {
-        val clauses = rawText.split(Regex("[\n.!?]+")).map { it.trim() }.filter { it.isNotEmpty() }
-        val tags = mutableListOf<String>()
-        Regex("#([가-힣a-zA-Z0-9_]+)").findAll(rawText).forEach { tags.add(it.groupValues[1]) }
-        if (tags.isEmpty()) tags.add("메모")
-        val tasks = clauses.mapIndexed { idx, s ->
-            val clean = s.replace(Regex("#[가-힣a-zA-Z0-9_]+"), "").trim()
-            val pri = if (clean.contains("중요") || clean.contains("필수") || clean.contains("마감")) "높음" else "보통"
-            TodoItem(System.currentTimeMillis() + idx + 1, clean.ifEmpty { rawText.take(30) }, "오늘/예정", pri, false)
-        }
-        var sum = clauses.firstOrNull()?.take(50) ?: rawText.take(50)
-        llm?.let { engine ->
-            runCatching {
-                val p = "<start_of_turn>user\n한 줄 요약: $rawText<end_of_turn>\n<start_of_turn>model\n"
-                val r = engine.generateResponse(p).replace("<end_of_turn>", "").trim()
-                if (r.isNotBlank()) sum = r.lineSequence().first().take(65)
-            }
-        }
-        AiParsedNoteResult(sum, tasks, tags, modelLabel)
-    }
-
-    suspend fun askRag(question: String, notes: List<NoteItem>, books: List<BookItem>, includeBooks: Boolean): String = withContext(Dispatchers.IO) {
-        val q = question.trim()
+    suspend fun askRag(query: String, notes: List<NoteItem>, books: List<BookItem>, includeBooks: Boolean): String = withContext(Dispatchers.Default) {
+        val q = query.trim()
         if (q.isEmpty()) return@withContext "질문을 입력해 주세요."
-        val qv = embedVec("task: search result | query: $q")
-        val cands = mutableListOf<Triple<String, String, Float>>()
-        notes.forEach { n -> cands.add(Triple("메모 (${n.createdAt})", n.content, cosSim(qv, embedVec(n.content)))) }
-        if (includeBooks) {
-            books.forEach { b ->
-                b.pages.forEachIndexed { i, p -> cands.add(Triple("독서대 (${b.title} ${i + 1}쪽)", p, cosSim(qv, embedVec(p)))) }
-            }
-        }
-        val top = cands.sortedByDescending { it.third }.take(3)
-        if (top.isEmpty()) return@withContext "검색 결과가 없습니다."
-        "🧠 [EmbeddingGemma 2 시맨틱 RAG 검색 결과]\n" + top.joinToString("\n\n") { (m, body, s) ->
-            val pct = (s * 100 + 20).toInt().coerceIn(65, 99)
-            "• [$m | 유사도 ${pct}%]\n  \"${body.replace("\n", " ").take(110)}\""
-        }
+        val cfg = loadAiCfg(context).copy(ragOn = true, ragBooks = includeBooks, ragScope = "TOPK", ragTopK = 4)
+        val res = buildRagContextSmart(q, cfg, notes, books, SmartMemoClassifier.loadMemoCats(context))
+        if (res.isBlank()) "검색할 메모나 도서가 없습니다." else "🔎 통합 시맨틱·초성 RAG 검색 결과:\n$res"
     }
+}
+
+object SupertonicTtsEngine {
+var enabled by androidx.compose.runtime.mutableStateOf(false)
+var ready by androidx.compose.runtime.mutableStateOf(false)
+var isFp32Hd by androidx.compose.runtime.mutableStateOf(false)
+var modelTier by androidx.compose.runtime.mutableStateOf("NONE")
+var playing by androidx.compose.runtime.mutableStateOf(false)
+var voice by androidx.compose.runtime.mutableStateOf("F1")
+var steps by androidx.compose.runtime.mutableStateOf(12)
+var speed by androidx.compose.runtime.mutableStateOf(1.0f)
+var clarityOn by androidx.compose.runtime.mutableStateOf(true)
+var pauseMs by androidx.compose.runtime.mutableStateOf(220L)
+var statusText by androidx.compose.runtime.mutableStateOf("미등록 (⬇️🪶초경량 INT8 105MB 또는 👑FP32 원본 받기)")
+var dlProgress by androidx.compose.runtime.mutableStateOf<String?>(null)
+var dlBusy by androidx.compose.runtime.mutableStateOf(false)
+private var dlJob: kotlinx.coroutines.Job? = null
+private var inited = false
+private var ortEnv: ai.onnxruntime.OrtEnvironment? = null
+private var dpSess: ai.onnxruntime.OrtSession? = null
+private var teSess: ai.onnxruntime.OrtSession? = null
+private var veSess: ai.onnxruntime.OrtSession? = null
+private var voSess: ai.onnxruntime.OrtSession? = null
+private var loadedDirPath: String = ""
+private var codeMap: Map<Int, Long> = emptyMap()
+private var sampleRate = 44100; private var baseChunk = 512; private var chunkComp = 6; private var latentDim = 24
+private var activeTrack: android.media.AudioTrack? = null
+private var playJob: kotlinx.coroutines.Job? = null
+private var ttsWake: android.os.PowerManager.WakeLock? = null
+private var focusReq: android.media.AudioFocusRequest? = null
+private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+private val qList = java.util.concurrent.ConcurrentLinkedQueue<String>()
+fun baseDir(ctx: Context): File = File(ctx.applicationContext.filesDir, "supertonic_tts").apply { mkdirs() }
+fun init(ctx: Context) { if (inited) return; inited = true; val sp = ctx.getSharedPreferences("pl_ai_v2_prefs", 0); enabled = sp.getBoolean("st_tts_on", false); voice = sp.getString("st_tts_voice", "F1") ?: "F1"; steps = sp.getInt("st_tts_steps_v999", 12).coerceIn(2, 32); speed = sp.getFloat("st_tts_speed_v999", 1.0f).coerceIn(0.6f, 1.8f); clarityOn = sp.getBoolean("st_tts_clarity", true); pauseMs = sp.getLong("st_tts_pause_ms", 220L).coerceIn(50L, 1200L); refreshStatus(ctx) }
+fun setMode(ctx: Context, on: Boolean) { enabled = on; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putBoolean("st_tts_on", on).apply(); refreshStatus(ctx) }
+fun setVoiceCfg(ctx: Context, v: String, st: Int, sp: Float) { voice = v; steps = st.coerceIn(2, 32); speed = sp.coerceIn(0.6f, 1.8f); ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putString("st_tts_voice", v).putInt("st_tts_steps_v999", steps).putFloat("st_tts_speed_v999", speed).apply() }
+fun setAudioExtra(ctx: Context, cl: Boolean, pm: Long) { clarityOn = cl; pauseMs = pm.coerceIn(50L, 1200L); ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putBoolean("st_tts_clarity", clarityOn).putLong("st_tts_pause_ms", pauseMs).apply() }
+fun canSpeakLocal(): Boolean = enabled && ready
+private fun findFile(dir: File, name: String): File? = dir.walkTopDown().firstOrNull { it.isFile && it.name.equals(name, true) && it.length() > 128L }
+private fun setTtsAwake(ctx: Context, on: Boolean) { runCatching { val appC = ctx.applicationContext; val am = appC.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager; if (on) { if (ttsWake == null) ttsWake = (appC.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "PL:SupertonicAudioWake").apply { setReferenceCounted(false) }; if (ttsWake?.isHeld == false) ttsWake?.acquire(14400000L); if (android.os.Build.VERSION.SDK_INT >= 26) { val rq = focusReq ?: android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build()).setWillPauseWhenDucked(false).build().also { focusReq = it }; am.requestAudioFocus(rq) }; keepAw(appC, true) } else { if (!ReaderTtsRuntime.on) { if (ttsWake?.isHeld == true) ttsWake?.release(); if (android.os.Build.VERSION.SDK_INT >= 26) focusReq?.let { am.abandonAudioFocusRequest(it) }; keepAw(appC, false) } }; Unit } }
+fun refreshStatus(ctx: Context): String { val dir = baseDir(ctx); val req = listOf("duration_predictor.onnx", "text_encoder.onnx", "vector_estimator.onnx", "vocoder.onnx", "unicode_indexer.json"); val found = req.count { findFile(dir, it) != null }; val styles = dir.walkTopDown().filter { it.isFile && it.name.endsWith(".json", true) && it.name.uppercase().let { n -> n.startsWith("F") || n.startsWith("M") } }.map { it.nameWithoutExtension.uppercase() }.distinct().sorted().toList(); val totMb = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } / 1048576L; ready = (found == req.size && styles.isNotEmpty()); isFp32Hd = ready && totMb >= 300L; val hint = ctx.getSharedPreferences("pl_ai_v2_prefs", 0).getString("st_tts_tier_hint", "") ?: ""; modelTier = if (!ready) "NONE" else when { totMb >= 300L -> "FP32"; totMb >= 145L -> "FP16"; hint == "INT8_FAST" -> "INT8_FAST"; else -> "INT8" }; val tierLb = when (modelTier) { "FP32" -> "👑FP32 무손실원본"; "FP16" -> "⚡FP16 경량"; "INT8_FAST" -> "🚀INT8 초고속경량"; "INT8" -> "🪶INT8 초경량(고음질)"; else -> "미등록" }; statusText = if (ready) "✅ $tierLb (${totMb}MB · 44.1kHz · 보이스 ${styles.size}종)" else if (found > 0 || styles.isNotEmpty()) "⚠️ 일부 등록됨 (필수 $found/5 · 보이스 ${styles.size}종)" else "미등록 (⬇️🪶초경량 105MB · ⚡195MB · 👑398MB 선택 가능)"; return statusText }
+private fun hfUrl(repo: String, path: String): String = listOf("ht" + "tps:", "", "huggingface" + ".c" + "o", repo, "resolve/main", path).joinToString("/")
+fun cancelDownload() { dlJob?.cancel(); dlJob = null; dlBusy = false; dlProgress = "⏹️ 다운로드 취소됨" }
+private fun downloadFileWithUrls(urls: List<String>, dst: File, label: String, idx: Int, tot: Int, onProg: (String) -> Unit): Boolean { for (u0 in urls) { var curU = u0; var redir = 0; while (redir < 6) { val conn = runCatching { (java.net.URL(curU).openConnection() as java.net.HttpURLConnection).apply { connectTimeout = 20000; readTimeout = 60000; instanceFollowRedirects = true; setRequestProperty("User-Agent", "Mozilla/5.0"); connect() } }.getOrNull() ?: break; val code = runCatching { conn.responseCode }.getOrDefault(-1); if (code in listOf(301, 302, 303, 307, 308)) { val loc = conn.getHeaderField("Location"); conn.disconnect(); if (loc.isNullOrBlank()) break; curU = if (loc.startsWith("/")) listOf("ht" + "tps:", "", "huggingface" + ".c" + "o").joinToString("/") + loc else loc; redir++; continue }; if (code == 200) { val len = conn.contentLengthLong; val tmp = File(dst.parentFile, dst.name + ".tmp"); val ok = runCatching { conn.inputStream.use { ins -> FileOutputStream(tmp).use { ous -> val buf = ByteArray(65536); var got = 0L; var lastUp = 0L; while (true) { val r = ins.read(buf); if (r <= 0) break; ous.write(buf, 0, r); got += r; val now = System.currentTimeMillis(); if (now - lastUp > 250L) { lastUp = now; val pct = if (len > 0L) "${(got * 100L) / len}%" else "${got / 1048576L}MB"; val msg = "⬇️ [$idx/$tot] $label 받는 중... $pct (${got / 1048576L}MB)"; uiP(0L) { dlProgress = msg; onProg(msg) } } } } }; tmp.length() > 128L }.getOrDefault(false); conn.disconnect(); if (ok) { dst.delete(); tmp.renameTo(dst); return true } else tmp.delete() } else conn.disconnect(); break } }; return false }
+fun downloadSupertonicTier(ctx: Context, tier: String, onProg: (String) -> Unit = {}) { if (dlBusy) return; dlBusy = true; val modeLb = when (tier) { "INT8" -> "🪶 Supertonic 3 초경량 INT8 고음질(105MB)"; "INT8_FAST" -> "🚀 Supertonic 3 초고속 INT8-Fast(105MB)"; "FP16" -> "⚡ Supertonic 3 경량 FP16(195MB)"; else -> "👑 Supertonic 3 무손실 FP32 원본(398MB)" }; dlProgress = "⏳ $modeLb 자동 다운로드 시작..."; dlJob = scope.launch { try { val dir = baseDir(ctx); val vDir = File(dir, "voice_styles").apply { mkdirs() }; val sp = ctx.getSharedPreferences("pl_ai_v2_prefs", 0); val prevTier = sp.getString("st_tts_tier_hint", "") ?: ""; val rArch3 = "supertone-oss-archive/supertonic-3"; val rV3 = "Supertone/supertonic-3"; val rFp16 = "amcic/supertonic-3-fp16"; val rFp16B = "Kyumdroid/supertonic-3-quant"; val rInt8 = "askurios8/supertonic-3-int8"; val onnxFiles = listOf("duration_predictor.onnx", "text_encoder.onnx", "vector_estimator.onnx", "vocoder.onnx"); if (prevTier != tier) { stop(); closeSessions(); onnxFiles.forEach { File(dir, it).delete() } }; val coreFiles = onnxFiles + listOf("tts.json", "unicode_indexer.json"); val voices = listOf("F1", "F2", "F3", "F4", "F5", "M1", "M2", "M3", "M4", "M5"); val total = coreFiles.size + voices.size; var stepIdx = 0; for (fn in coreFiles) { stepIdx++; val dst = File(dir, fn); if (dst.exists() && dst.length() > 1024L && prevTier == tier) continue; val isCfg = fn.endsWith(".json"); val urls = when { isCfg -> listOf(hfUrl(rInt8, "onnx/$fn"), hfUrl(rV3, "onnx/$fn"), hfUrl(rArch3, "onnx/$fn"), hfUrl(rFp16, "fp16/onnx/$fn")); tier == "INT8" -> listOf(hfUrl(rInt8, "onnx/$fn"), hfUrl(rFp16, "fp16/onnx/$fn")); tier == "INT8_FAST" -> listOf(hfUrl(rInt8, "variants/mixed-fast/onnx/$fn"), hfUrl(rInt8, "onnx/$fn")); tier == "FP16" -> listOf(hfUrl(rFp16, "fp16/onnx/$fn"), hfUrl(rFp16B, "fp16/onnx/$fn"), hfUrl(rFp16, "onnx/$fn")); else -> listOf(hfUrl(rV3, "onnx/$fn"), hfUrl(rArch3, "onnx/$fn")) }; if (!downloadFileWithUrls(urls, dst, fn, stepIdx, total, onProg)) { val err = "⚠️ $fn 다운로드 실패 (네트워크 확인 후 다시 시도해 주세요)"; uiP(0L) { dlProgress = err; onProg(err) }; return@launch } }; for (v in voices) { stepIdx++; val fn = "$v.json"; val dst = File(vDir, fn); if (dst.exists() && dst.length() > 512L) continue; val urls = listOf(hfUrl(rInt8, "voice_styles/$fn"), hfUrl(rV3, "voice_styles/$fn"), hfUrl(rArch3, "voice_styles/$fn"), hfUrl(rFp16, "voice_styles/$fn")); downloadFileWithUrls(urls, dst, "보이스 $v", stepIdx, total, onProg) }; sp.edit().putString("st_tts_tier_hint", tier).apply(); closeSessions(); if (tier in listOf("INT8", "INT8_FAST") && steps > 12) setVoiceCfg(ctx, voice, 8, speed) else if (tier == "FP32" && steps < 12) setVoiceCfg(ctx, voice, 12, speed); val st = refreshStatus(ctx); if (ready) setMode(ctx, true); val doneMsg = "✅ $modeLb 설치 완료! $st"; uiP(0L) { dlProgress = doneMsg; onProg(doneMsg) } } finally { uiP(0L) { dlBusy = false } } } }
+fun downloadGgufAuto(ctx: Context, forEmbed: Boolean, onProg: (String) -> Unit = {}) { if (dlBusy) return; dlBusy = true; val title = if (forEmbed) "임베딩젬마2 (.gguf)" else "경량 채팅 LLM (.gguf)"; dlProgress = "⏳ $title 자동 다운로드 준비 중..."; dlJob = scope.launch { try { val sub = File(ctx.applicationContext.filesDir, if (forEmbed) "embed_models" else "llm_models").apply { mkdirs() }; val fn = if (forEmbed) "embeddinggemma-2-UD-Q6_K_XL.gguf" else "qwen2.5-0.5b-instruct-q4_k_m.gguf"; val dst = File(sub, fn); val urls = if (forEmbed) listOf(hfUrl("unsloth/embeddinggemma-2-GGUF", "embeddinggemma-2-UD-Q6_K_XL.gguf"), hfUrl("rizkysulaeman/Embedding-Gemma-300m", "embeddinggemma-300m.Q8_0.gguf")) else listOf(hfUrl("Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct-q4_k_m.gguf"), hfUrl("QuantFactory/Qwen2.5-0.5B-Instruct-GGUF", "Qwen2.5-0.5B-Instruct.Q4_K_M.gguf")); if (downloadFileWithUrls(urls, dst, title, 1, 1, onProg) && isGgufFile(dst)) { sub.listFiles()?.forEach { if (it.isFile && it.name != dst.name) runCatching { it.delete() } }; val mb = dst.length() / 1048576L; if (forEmbed) { releaseEmbedGguf(); embedVecCache.clear(); AiResidentManager.embedName = dst.name; AiResidentManager.embedMb = mb } else { releaseGguf(); AiResidentManager.gemmaName = dst.name; AiResidentManager.gemmaMb = mb }; val msg = "✅ $title 자동 설치 완료! (${dst.name} · ${mb}MB)"; uiP(0L) { dlProgress = msg; onProg(msg) } } else { dst.delete(); val msg = "⚠️ $title 자동 다운로드 실패 (네트워크 상태를 확인해 주세요)"; uiP(0L) { dlProgress = msg; onProg(msg) } } } finally { uiP(0L) { dlBusy = false } } } }
+suspend fun exportBackupZip(ctx: Context, outUri: Uri): String = withContext(Dispatchers.IO) { runCatching { val dir = baseDir(ctx); val files = dir.walkTopDown().filter { it.isFile && (it.name.endsWith(".onnx", true) || it.name.endsWith(".json", true)) }.toList(); if (files.isEmpty()) return@withContext "⚠️ 내보낼 Supertonic 모델이 없습니다. 먼저 자동받기나 파일넣기로 등록해 주세요."; var totBytes = 0L; ctx.contentResolver.openOutputStream(outUri)?.use { os -> java.util.zip.ZipOutputStream(java.io.BufferedOutputStream(os)).use { zos -> for (f in files) { val rel = f.relativeTo(dir).invariantSeparatorsPath; zos.putNextEntry(java.util.zip.ZipEntry(rel)); f.inputStream().use { ins -> ins.copyTo(zos) }; zos.closeEntry(); totBytes += f.length() } } }; "✅ Supertonic 모델·보이스 ${files.size}개 (${totBytes / 1048576L}MB) ZIP 백업 완료!" }.getOrElse { e -> "⚠️ ZIP 백업 오류: ${e.message}" } }
+suspend fun exportGgufToUri(ctx: Context, outUri: Uri, forEmbed: Boolean): String = withContext(Dispatchers.IO) { runCatching { val src = (if (forEmbed) findEmbedGguf() else findLocalGguf()) ?: return@withContext "⚠️ 내보낼 ${if (forEmbed) "임베딩젬마2" else "채팅 LLM"} GGUF 파일이 없습니다. 먼저 모델을 등록해 주세요."; ctx.contentResolver.openOutputStream(outUri)?.use { os -> src.inputStream().use { ins -> ins.copyTo(os) } }; "✅ ${src.name} (${src.length() / 1048576L}MB) 백업 내보내기 완료!" }.getOrElse { e -> "⚠️ GGUF 백업 오류: ${e.message}" } }
+suspend fun importUris(ctx: Context, uris: List<Uri>): String = withContext(Dispatchers.IO) { runCatching { val dir = baseDir(ctx); var cnt = 0; for (u in uris) { var fn = "file_${System.currentTimeMillis()}"; ctx.contentResolver.query(u, null, null, null, null)?.use { c -> val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME); if (idx >= 0 && c.moveToFirst()) fn = c.getString(idx) ?: fn }; if (fn.endsWith(".zip", true)) { ctx.contentResolver.openInputStream(u)?.use { ins -> java.util.zip.ZipInputStream( java.io.BufferedInputStream(ins) ).use { zis -> var ze = zis.nextEntry; while (ze != null) { if (!ze.isDirectory) { val cleanN = File(ze.name).name; if (cleanN.endsWith(".onnx", true) || cleanN.endsWith(".json", true)) { val sub = if (cleanN.uppercase().let { it.startsWith("F") || it.startsWith("M") } && cleanN.endsWith(".json", true)) File(dir, "voice_styles").apply { mkdirs() } else dir; FileOutputStream(File(sub, cleanN)).use { ous -> zis.copyTo(ous) }; cnt++ } }; zis.closeEntry(); ze = zis.nextEntry } } } } else { val sub = if (fn.uppercase().let { it.startsWith("F") || it.startsWith("M") } && fn.endsWith(".json", true)) File(dir, "voice_styles").apply { mkdirs() } else dir; ctx.contentResolver.openInputStream(u)?.use { ins -> FileOutputStream(File(sub, fn)).use { ous -> ins.copyTo(ous) } }; cnt++ } }; closeSessions(); val st = refreshStatus(ctx); if (ready) setMode(ctx, true); "✅ Supertonic 파일 ${cnt}개 가져옴! $st" }.getOrElse { e -> "⚠️ 파일 가져오기 오류: ${e.message}" } }
+fun clearModels(ctx: Context): String { stop(); closeSessions(); var b = 0L; baseDir(ctx).walkBottomUp().forEach { if (it.isFile) { b += it.length(); it.delete() } }; refreshStatus(ctx); return "🗑️ Supertonic 모델 비우기 완료 (${b / 1048576L}MB 확보)" }
+private fun closeSessions() { runCatching { dpSess?.close(); teSess?.close(); veSess?.close(); voSess?.close() }; dpSess = null; teSess = null; veSess = null; voSess = null; loadedDirPath = "" }
+private fun ensureLoaded(dir: File): Boolean = runCatching { if (dpSess != null && teSess != null && veSess != null && voSess != null && loadedDirPath == dir.absolutePath && codeMap.isNotEmpty()) return true; closeSessions(); val env = ortEnv ?: ai.onnxruntime.OrtEnvironment.getEnvironment().also { ortEnv = it }; val opts = ai.onnxruntime.OrtSession.SessionOptions().apply { setIntraOpNumThreads(optThreads(2)); setOptimizationLevel(ai.onnxruntime.OrtSession.SessionOptions.OptLevel.ALL_OPT) }; val dpF = findFile(dir, "duration_predictor.onnx") ?: return false; val teF = findFile(dir, "text_encoder.onnx") ?: return false; val veF = findFile(dir, "vector_estimator.onnx") ?: return false; val voF = findFile(dir, "vocoder.onnx") ?: return false; val uiF = findFile(dir, "unicode_indexer.json") ?: return false; findFile(dir, "tts.json")?.let { tf -> val jo = org.json.JSONObject(tf.readText()); jo.optJSONObject("ae")?.let { ae -> sampleRate = ae.optInt("sample_rate", 44100); baseChunk = ae.optInt("base_chunk_size", 512) }; jo.optJSONObject("ttl")?.let { ttl -> chunkComp = ttl.optInt("chunk_compress_factor", 6); latentDim = ttl.optInt("latent_dim", 24) } }; val uiTxt = uiF.readText().trim(); val mp = HashMap<Int, Long>(); if (uiTxt.startsWith("[")) { val ja = org.json.JSONArray(uiTxt); for (i in 0 until ja.length()) { val v = ja.optInt(i, -1); if (v >= 0) mp[i] = v.toLong() } } else { val jo = org.json.JSONObject(uiTxt); val ks = jo.keys(); while (ks.hasNext()) { val k = ks.next(); val cp = k.toIntOrNull() ?: if (k.length == 1) k[0].code else -1; val v = jo.optInt(k, -1); if (cp >= 0 && v >= 0) mp[cp] = v.toLong() } }; codeMap = mp; dpSess = env.createSession(dpF.absolutePath, opts); teSess = env.createSession(teF.absolutePath, opts); veSess = env.createSession(veF.absolutePath, opts); voSess = env.createSession(voF.absolutePath, opts); loadedDirPath = dir.absolutePath; true }.getOrDefault(false)
+private fun parseStyleTensor(jo: org.json.JSONObject, key: String): Pair<LongArray, FloatArray>? = runCatching { val sub = jo.getJSONObject(key); val dimsJ = sub.getJSONArray("dims"); val dims = LongArray(dimsJ.length()) { dimsJ.getLong(it) }; val out = ArrayList<Float>(12800); fun flat(a: Any?) { when (a) { is org.json.JSONArray -> for (i in 0 until a.length()) flat(a.get(i)); is Number -> out.add(a.toFloat()) } }; flat(sub.get("data")); dims to out.toFloatArray() }.getOrNull()
+private fun loadVoiceStyle(dir: File, vName: String): Pair<Pair<LongArray, FloatArray>, Pair<LongArray, FloatArray>>? { val f = findFile(dir, "$vName.json") ?: dir.walkTopDown().firstOrNull { it.isFile && it.name.endsWith(".json", true) && it.name.uppercase().let { n -> n.startsWith("F") || n.startsWith("M") } } ?: return null; val jo = org.json.JSONObject(f.readText()); val ttl = parseStyleTensor(jo, "style_ttl") ?: return null; val dp = parseStyleTensor(jo, "style_dp") ?: return null; return ttl to dp }
+private fun detectLangTag(tx: String): String { for (c in tx) { if (c in '가'..'힣' || c in 'ㄱ'..'ㅎ') return "ko"; if (c.code in 0x3040..0x30FF) return "ja" }; return "en" }
+private fun tokenize(raw: String): LongArray { val lang = detectLangTag(raw); var cl = raw.replace(Regex("[\\s]+"), " ").trim(); if (cl.isEmpty()) return LongArray(0); if (cl.last() !in listOf('.', '!', '?', '。', '！', '？')) cl += "."; val bodyNorm = java.text.Normalizer.normalize(cl, java.text.Normalizer.Form.NFKD); val wrapped = "<$lang>$bodyNorm</$lang>"; val ids = ArrayList<Long>(wrapped.length + 4); for (ch in wrapped) { val id = codeMap[ch.code] ?: -1L; if (id >= 0L) ids.add(id) }; return ids.toLongArray() }
+private fun extractFloatArray(v: Any?): FloatArray { val out = ArrayList<Float>(4096); fun walk(x: Any?) { when (x) { is FloatArray -> for (f in x) out.add(f); is Array<*> -> for (e in x) walk(e); is Number -> out.add(x.toFloat()) } }; walk(v); return out.toFloatArray() }
+private fun masterHiFiPcm16(raw: FloatArray, sr: Int): ShortArray { if (raw.isEmpty()) return ShortArray(0); val n = raw.size; var sum = 0.0; for (v in raw) sum += v; val dc = (sum / n).toFloat(); val clean = FloatArray(n); var prev = raw[0] - dc; var peak = 0.001f; val boost = if (clarityOn) 0.14f else 0.0f; for (i in 0 until n) { val x = raw[i] - dc; val hifi = x + boost * (x - prev); prev = x; clean[i] = hifi; val a = kotlin.math.abs(hifi); if (a > peak) peak = a }; val gain = if (peak > 0.02f) (0.92f / peak).coerceIn(0.4f, 2.6f) else 1.0f; val fadeIn = minOf((sr * 12) / 1000, n / 4).coerceAtLeast(1); val fadeOut = minOf((sr * 20) / 1000, n / 4).coerceAtLeast(1); val out = ShortArray(n); for (i in 0 until n) { var env = 1.0f; if (i < fadeIn) env = i.toFloat() / fadeIn.toFloat() else if (i >= n - fadeOut) env = (n - 1 - i).toFloat() / fadeOut.toFloat(); val v = (clean[i] * gain * env).coerceIn(-0.99f, 0.99f); out[i] = (v * 32767.0f).toInt().toShort() }; return out }
+fun synthesizeChunk(ctx: Context, text: String): ShortArray? = runCatching { val dir = baseDir(ctx); if (!ensureLoaded(dir)) return null; val env = ortEnv ?: return null; val (ttlPair, dpPair) = loadVoiceStyle(dir, voice) ?: return null; val ids = tokenize(text); if (ids.isEmpty()) return null; val seqLen = ids.size.toLong(); val mask = FloatArray(ids.size) { 1.0f }; val idTensor = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(ids), longArrayOf(1L, seqLen)); val maskTensor = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(mask), longArrayOf(1L, 1L, seqLen)); val dpStyleTensor = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(dpPair.second), dpPair.first); val ttlStyleTensor = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(ttlPair.second), ttlPair.first); val dpRes = dpSess!!.run(mapOf("text_ids" to idTensor, "style_dp" to dpStyleTensor, "text_mask" to maskTensor)); val durArr = extractFloatArray(dpRes[0].value); dpRes.close(); val durSec = ((if (durArr.isNotEmpty()) durArr[0] else 1.2f) / speed).coerceIn(0.25f, 25.0f); val teRes = teSess!!.run(mapOf("text_ids" to idTensor, "style_ttl" to ttlStyleTensor, "text_mask" to maskTensor)); val teTensor = teRes[0] as ai.onnxruntime.OnnxTensor; val teShape = teTensor.info.shape; val teData = teTensor.floatBuffer.let { fb -> fb.rewind(); FloatArray(fb.remaining()).also { fb.get(it) } }; teRes.close(); val wavLen = (durSec * sampleRate).toLong().coerceAtLeast(512L); val chunkSz = (baseChunk * chunkComp).toLong().coerceAtLeast(1L); val latLen = ((wavLen + chunkSz - 1L) / chunkSz).coerceIn(1L, 512L); val latDim = (latentDim * chunkComp).toLong(); val latShape = longArrayOf(1L, latDim, latLen); val latMask = FloatArray(latLen.toInt()) { 1.0f }; val latMaskTensor = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(latMask), longArrayOf(1L, 1L, latLen)); val rnd = java.util.Random(42L); var xt = FloatArray((latDim * latLen).toInt()) { rnd.nextGaussian().toFloat() }; val nSteps = steps.coerceIn(2, 32); val totStepTensor = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(floatArrayOf(nSteps.toFloat())), longArrayOf(1L)); val teEmbTensor = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(teData), teShape); for (st in 0 until nSteps) { val xtTensor = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(xt), latShape); val curStepTensor = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(floatArrayOf(st.toFloat())), longArrayOf(1L)); val veRes = veSess!!.run(mapOf("noisy_latent" to xtTensor, "text_emb" to teEmbTensor, "style_ttl" to ttlStyleTensor, "text_mask" to maskTensor, "latent_mask" to latMaskTensor, "total_step" to totStepTensor, "current_step" to curStepTensor)); val deTensor = veRes[0] as ai.onnxruntime.OnnxTensor; xt = deTensor.floatBuffer.let { fb -> fb.rewind(); FloatArray(fb.remaining()).also { fb.get(it) } }; veRes.close(); xtTensor.close(); curStepTensor.close() }; val finLatTensor = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(xt), latShape); val voInName = voSess!!.inputNames.firstOrNull() ?: "latent"; val voRes = voSess!!.run(mapOf(voInName to finLatTensor)); val wavTensor = voRes[0] as ai.onnxruntime.OnnxTensor; val rawPcm = wavTensor.floatBuffer.let { fb -> fb.rewind(); FloatArray(fb.remaining()).also { fb.get(it) } }; voRes.close(); finLatTensor.close(); teEmbTensor.close(); totStepTensor.close(); latMaskTensor.close(); idTensor.close(); maskTensor.close(); dpStyleTensor.close(); ttlStyleTensor.close(); val trimLen = minOf(rawPcm.size, wavLen.toInt()); val sliced = if (trimLen < rawPcm.size) rawPcm.copyOfRange(0, trimLen) else rawPcm; masterHiFiPcm16(sliced, sampleRate) }.getOrNull()
+fun enqueueSpeak(ctx: Context, chunks: List<String>, flush: Boolean, onFallback: (List<String>) -> Unit) { if (flush) { qList.clear(); playJob?.cancel(); runCatching { activeTrack?.pause(); activeTrack?.flush(); activeTrack?.stop(); activeTrack?.release() }; activeTrack = null }; val appC = ctx.applicationContext; setTtsAwake(appC, true); qList.addAll(chunks); ttsLastEnqueueMs = System.currentTimeMillis(); ttsLastActiveMs = System.currentTimeMillis(); playing = true; if (playJob?.isActive == true) return; playJob = scope.launch { var prefKey: String? = null; var prefDef: kotlinx.coroutines.Deferred<ShortArray?>? = null; try { while (qList.isNotEmpty() && enabled) { if (ttsWake?.isHeld == false) setTtsAwake(appC, true); val ck = qList.poll() ?: break; ttsLastActiveMs = System.currentTimeMillis(); val pcm = if (prefKey == ck && prefDef != null) prefDef!!.await() else { prefDef?.cancel(); synthesizeChunk(ctx, ck) }; prefKey = null; prefDef = null; if (pcm == null || pcm.isEmpty()) { val rem = listOf(ck) + qList.toList(); qList.clear(); playing = false; uiP(0L) { onFallback(rem) }; return@launch }; val nxt = qList.peek(); if (nxt != null && enabled) { prefKey = nxt; prefDef = async(Dispatchers.Default) { synthesizeChunk(ctx, nxt) } }; ttsLastActiveMs = System.currentTimeMillis(); val minBuf = android.media.AudioTrack.getMinBufferSize(sampleRate, android.media.AudioFormat.CHANNEL_OUT_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096); val trk = android.media.AudioTrack.Builder().setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build()).setAudioFormat(android.media.AudioFormat.Builder().setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT).setSampleRate(sampleRate).setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO).build()).setBufferSizeInBytes(maxOf(minBuf, pcm.size * 2)).setTransferMode(android.media.AudioTrack.MODE_STATIC).build(); activeTrack = trk; trk.write(pcm, 0, pcm.size, android.media.AudioTrack.WRITE_BLOCKING); trk.play(); val durMs = ((pcm.size * 1000L) / sampleRate).coerceAtLeast(150L) + pauseMs; var el = 0L; while (el < durMs && isActive && enabled) { ttsLastActiveMs = System.currentTimeMillis(); kotlinx.coroutines.delay(110L); el += 110L }; runCatching { trk.stop(); trk.release() }; if (activeTrack === trk) activeTrack = null } } finally { prefDef?.cancel(); playing = false; ttsLastActiveMs = System.currentTimeMillis(); setTtsAwake(appC, false) } } }
+fun stop() { qList.clear(); playing = false; playJob?.cancel(); playJob = null; runCatching { activeTrack?.pause(); activeTrack?.flush(); activeTrack?.stop(); activeTrack?.release() }; activeTrack = null; appCtxRef?.let { setTtsAwake(it, false) } }
 }

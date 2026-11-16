@@ -14,6 +14,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -24,7 +28,6 @@ import kotlinx.coroutines.*
 import org.json.*
 import java.text.SimpleDateFormat
 import java.util.*
-
 val SB = Arrangement.SpaceBetween
 val CV = Alignment.CenterVertically
 val CW = Color(0xFFF1F5F9)
@@ -33,7 +36,6 @@ val CA = Color(0xFFFBBF24)
 val CM = Color(0xFF94A3B8)
 val CD = Color(0xFF64748B)
 val CS = Color(0xFF101624)
-
 data class QuickBtnConfig(
 val showCheck: Boolean = true,
 val showBullet: Boolean = true,
@@ -44,26 +46,20 @@ val autoSumLong: Boolean = false,
 val customLabel: String = "📌 템플릿",
 val customText: String = "[제목]\n☐ 항목: "
 )
-
 object SmartMemoClassifier {
 val DEF_MEMO_CATS = listOf("일상", "업무", "할일", "아이디어", "독서")
 val DEF_BOOK_CATS = listOf("에세이", "인문/교양", "시/문학", "업무/문서")
 private fun prefs(ctx: Context) = ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE)
-
 fun loadMemoCats(ctx: Context): List<String> =
 prefs(ctx).getString("memo_cats", null)?.split("|")?.map { it.trim() }?.filter { it.isNotEmpty() }?.ifEmpty { DEF_MEMO_CATS } ?: DEF_MEMO_CATS
-
 fun saveMemoCats(ctx: Context, cats: List<String>) {
 prefs(ctx).edit().putString("memo_cats", cats.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString("|")).apply()
 }
-
 fun loadBookCats(ctx: Context): List<String> =
 prefs(ctx).getString("book_cats", null)?.split("|")?.map { it.trim() }?.filter { it.isNotEmpty() }?.ifEmpty { DEF_BOOK_CATS } ?: DEF_BOOK_CATS
-
 fun saveBookCats(ctx: Context, cats: List<String>) {
 prefs(ctx).edit().putString("book_cats", cats.map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString("|")).apply()
 }
-
 fun loadBtnCfg(ctx: Context): QuickBtnConfig {
 val p = prefs(ctx)
 return QuickBtnConfig(
@@ -72,13 +68,11 @@ p.getBoolean("b_div", true), p.getBoolean("b_nl", true), p.getBoolean("b_autosum
 p.getString("b_clabel", "📌 템플릿") ?: "📌 템플릿", p.getString("b_ctext", "[메모]\n☐ 항목: ") ?: "[메모]\n☐ 항목: "
 )
 }
-
 fun saveBtnCfg(ctx: Context, c: QuickBtnConfig) {
 prefs(ctx).edit().putBoolean("b_check", c.showCheck).putBoolean("b_bullet", c.showBullet).putBoolean("b_date", c.showDate)
 .putBoolean("b_div", c.showDivider).putBoolean("b_nl", c.showNewline).putBoolean("b_autosum", c.autoSumLong)
 .putString("b_clabel", c.customLabel).putString("b_ctext", c.customText).apply()
 }
-
 fun sanitizeNotes(notes: List<NoteItem>, repo: LauncherRepository): List<NoteItem> {
 var chg = false
 val res = notes.map { n ->
@@ -102,7 +96,6 @@ if (nt != n.tags || ns != n.summary) n.copy(tags = nt, summary = ns) else n
 if (chg) repo.saveNotes(res)
 return res
 }
-
 fun sanitizeBooks(books: List<BookItem>, repo: LauncherRepository): List<BookItem> {
 var chg = false
 val res = books.map { b ->
@@ -117,7 +110,6 @@ BookItem(b.id, "미니멀 집중과 생각 정리 가이드", "베이직 독서 
 if (chg) repo.saveBooks(res)
 return res
 }
-
 fun guessCategory(text: String, cats: List<String>): String {
 val low = text.lowercase()
 val rules = mapOf(
@@ -133,20 +125,16 @@ if (sc > maxSc) { maxSc = sc; best = c }
 }
 return best
 }
-
 fun categoryOf(n: NoteItem, cats: List<String>): String {
 for (c in cats) if (n.tags.contains(c)) return c
 return n.tags.firstOrNull { it !in listOf("중요","일반","메모","할일") } ?: guessCategory(n.content, cats)
 }
-
 fun isImportant(n: NoteItem) = !n.tags.contains("일반") && (n.tags.contains("중요") || n.summary.contains("★중요") || n.content.contains("[중요]"))
-
 fun toggleImportant(n: NoteItem): NoteItem {
 val next = !isImportant(n)
 val base = n.tags.filterNot { it == "중요" || it == "일반" }
 return n.copy(tags = if (next) listOf("중요") + base else base + listOf("일반"))
 }
-
 fun toggleCheckLine(n: NoteItem, idx: Int): NoteItem {
 val ls = n.content.lines().toMutableList()
 if (idx in ls.indices) {
@@ -161,7 +149,6 @@ else -> l
 }
 return n.copy(content = ls.joinToString("\n"))
 }
-
 fun summarizeByLength(raw: String, force: Boolean = false): String {
 val clean = raw.lines().map { it.replace(Regex("#[^\\s#]+"), "").replace("☐", "").replace("☑", "").replace("•", "").trim() }.filter { it.isNotEmpty() }
 val chars = clean.sumOf { it.length }
@@ -177,9 +164,7 @@ val cut = if (s.length > 46) s.take(46) + "…" else s
 if (target == 1) cut else "• $cut"
 }
 }
-
 }
-
 class MainActivity : ComponentActivity() {
 override fun onResume() { super.onResume(); mainActRef = this; appInFg = true; JarvisRuntime.onActivityResume() }
 override fun onPause() { appInFg = false; super.onPause() }
@@ -194,12 +179,32 @@ ProLauncherRoot(repo, ai)
 }
 }
 }
-
+fun appendOrCreateBookNote(notes: List<NoteItem>, bookTitle: String, entryBody: String): List<NoteItem> {
+val cleanTitle = bookTitle.trim().ifEmpty { "독서" }
+val headerPrefix = "📚 『$cleanTitle』 독서노트"
+val stamp = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date())
+val newEntry = "[$stamp]\n${entryBody.trim()}"
+val existing = notes.firstOrNull { n ->
+n.content.trimStart().startsWith(headerPrefix) || (n.tags.contains("독서") && n.content.lines().firstOrNull()?.contains("『$cleanTitle』") == true)
+}
+return if (existing != null) {
+val strippedOld = existing.content.trim().lines().dropLastWhile { ln ->
+ln.trim().let { it.isNotEmpty() && it.split(" ").filter { w -> w.isNotBlank() }.all { w -> w.startsWith("#") } }
+}.joinToString("\n").trimEnd()
+val mergedRaw = if (strippedOld.startsWith("📚")) "$strippedOld\n\n────────────\n$newEntry" else "$headerPrefix\n\n$strippedOld\n\n────────────\n$newEntry"
+val updatedNote = existing.copy(content = makeHashtags(mergedRaw, "독서"), summary = "", createdAt = stamp)
+listOf(updatedNote) + notes.filterNot { it.id == existing.id }
+} else {
+val freshRaw = "$headerPrefix\n\n$newEntry"
+val created = NoteItem(nextId(), makeHashtags(freshRaw, "독서"), "", listOf("독서", "일반"), stamp, "LocalAI")
+listOf(created) + notes
+}
+}
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ProLauncherRoot(repo: LauncherRepository, ai: LocalAiNoteEngine) {
 val rootCtx = LocalContext.current; val scope = rememberCoroutineScope()
-val pager = rememberPagerState(initialPage = 1, pageCount = { 4 })
+val pager = rememberPagerState(initialPage = 2, pageCount = { 5 })
 var apps by remember { mutableStateOf(repo.loadInstalledApps()) }
 var notes by remember { mutableStateOf(SmartMemoClassifier.sanitizeNotes(repo.loadNotes(), repo)) }
 var books by remember { mutableStateOf(SmartMemoClassifier.sanitizeBooks(repo.loadBooks(), repo)) }
@@ -212,27 +217,49 @@ var quotedText by remember { mutableStateOf<String?>(null) }
 val homeRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { isDefHome = repo.isDefaultHomeApp() }
 fun askDefaultHome() { runCatching { homeRoleLauncher.launch(repo.buildRequestDefaultHomeIntent()) }.onFailure { repo.openSystemDefaultAppsSettings() } }
 fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
-BackHandler(enabled = drawerOpen || settingsOpen || interruptApp != null || pager.currentPage != 1) {
+BackHandler(enabled = drawerOpen || settingsOpen || interruptApp != null || pager.currentPage != 2) {
 when {
 interruptApp != null -> interruptApp = null
 settingsOpen -> settingsOpen = false
 drawerOpen -> drawerOpen = false
-else -> scope.launch { pager.animateScrollToPage(1) }
+else -> scope.launch { pager.animateScrollToPage(2) }
 }
 }
-SideEffect { JarvisRuntime.bindCallbacks(rootCtx, { pg -> scope.launch { pager.scrollToPage(pg.coerceIn(0, 3)) } }, { raw -> val mc = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = SmartMemoClassifier.guessCategory(raw, mc); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "✅ [$c0] 저장 + ⏰알림 ${sc}건 예약됨" else "✅ [$c0] 메모 즉시 저장됨" }, { notes }) }
+SideEffect { JarvisRuntime.bindCallbacks(rootCtx, { pg -> scope.launch { pager.scrollToPage(pg.coerceIn(0, 4)) } }, { raw -> val mc = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = SmartMemoClassifier.guessCategory(raw, mc); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "✅ [$c0] 저장 + ⏰알림 ${sc}건 예약됨" else "✅ [$c0] 메모 즉시 저장됨" }, { notes }) }
 val bgCol = when (cfg.themeName) { "SLATE" -> Color(0xFF0B1120); "FOREST" -> Color(0xFF07120E); else -> Color(0xFF07090E) }
 Box(Modifier.fillMaxSize().background(bgCol).systemBarsPadding().imePadding()) {
 HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
 when (page) {
-0 -> ReaderView(books, cfg, repo, onSaveBooks = { books = it; repo.saveBooks(it) }, onCfg = { cfg = it; repo.saveConfig(it) },
-onQuote = { q -> quotedText = q; scope.launch { pager.animateScrollToPage(2) } }, onHome = { scope.launch { pager.animateScrollToPage(1) } }, onQuickAddNote = { raw -> val nx = listOf(NoteItem(nextId(), makeHashtags(raw, "독서"), "", listOf("독서", "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx) })
-1 -> HomeView(apps.filter { it.isFavorite }.take(12), notes.filter { SmartMemoClassifier.isImportant(it) }.take(3), isDefHome, cfg,
+0 -> MarkdownWriterView(
+onGoReader = { scope.launch { pager.animateScrollToPage(1) } },
+onGoHome = { scope.launch { pager.animateScrollToPage(2) } },
+onSaveToMemo = { raw -> val nx = listOf(NoteItem(nextId(), makeHashtags(raw, "문서"), "", listOf("문서", "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx) }
+)
+1 -> ReaderView(
+books, cfg, repo,
+onSaveBooks = { books = it; repo.saveBooks(it) },
+onCfg = { cfg = it; repo.saveConfig(it) },
+onQuote = { q -> quotedText = q; scope.launch { pager.animateScrollToPage(3) } },
+onHome = { scope.launch { pager.animateScrollToPage(2) } },
+onQuickAddNote = { raw -> val nx = appendOrCreateBookNote(notes, "독서", raw); notes = nx; repo.saveNotes(nx) },
+onBookNote = { bTitle, body, goMemo -> val nx = appendOrCreateBookNote(notes, bTitle, body); notes = nx; repo.saveNotes(nx); if (goMemo) scope.launch { pager.animateScrollToPage(3) } }
+)
+2 -> HomeView(
+apps.filter { it.isFavorite }.take(12), notes.filter { SmartMemoClassifier.isImportant(it) }.take(3), isDefHome, cfg,
 onAskHome = ::askDefaultHome, onLaunch = ::launchOrInterrupt, onSwipeUp = { drawerOpen = true },
-onLeftReader = { scope.launch { pager.animateScrollToPage(0) } }, onRightNotes = { scope.launch { pager.animateScrollToPage(2) } }, onSettings = { settingsOpen = true }, onRightAi = { scope.launch { pager.animateScrollToPage(3) } }, onQuickMemo = { raw -> val mc = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = SmartMemoClassifier.guessCategory(raw, mc); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "✅ [" + c0 + "] 메모 저장 + ⏰일정알림 " + sc + "건 예약됨" else "✅ [" + c0 + "] 메모 즉시 저장됨" }, onQuickAi = { q -> pendingHomeAiQuery = q; scope.launch { pager.scrollToPage(3) } }, allNotes = notes, onNavTab = { pg -> scope.launch { pager.animateScrollToPage(pg.coerceIn(0, 3)) } }, onToggleCheck = { nid, lIdx -> val nx = notes.map { if (it.id == nid) SmartMemoClassifier.toggleCheckLine(it, lIdx) else it }; notes = nx; repo.saveNotes(nx) })
-2 -> NotesRagView(notes, books, cfg, ai, quotedText, onClearQuote = { quotedText = null },
-onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = false)
-3 -> NotesRagView(notes, books, cfg, ai, null, onClearQuote = {}, onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = true)
+onLeftReader = { scope.launch { pager.animateScrollToPage(1) } },
+onRightNotes = { scope.launch { pager.animateScrollToPage(3) } },
+onSettings = { settingsOpen = true },
+onRightAi = { scope.launch { pager.animateScrollToPage(4) } },
+onQuickMemo = { raw -> val mc = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = SmartMemoClassifier.guessCategory(raw, mc); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "✅ [" + c0 + "] 메모 저장 + ⏰일정알림 " + sc + "건 예약됨" else "✅ [" + c0 + "] 메모 즉시 저장됨" },
+onQuickAi = { q -> pendingHomeAiQuery = q; scope.launch { pager.scrollToPage(4) } },
+allNotes = notes,
+onNavTab = { pg -> scope.launch { pager.animateScrollToPage(pg.coerceIn(0, 4)) } },
+onToggleCheck = { nid, lIdx -> val nx = notes.map { if (it.id == nid) SmartMemoClassifier.toggleCheckLine(it, lIdx) else it }; notes = nx; repo.saveNotes(nx) },
+onLeftWriter = { scope.launch { pager.animateScrollToPage(0) } }
+)
+3 -> NotesRagView(notes, books, cfg, ai, quotedText, onClearQuote = { quotedText = null }, onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = false)
+4 -> NotesRagView(notes, books, cfg, ai, null, onClearQuote = {}, onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = true)
 }
 }
 AnimatedVisibility(visible = drawerOpen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
@@ -249,7 +276,6 @@ InterruptModal(app, cfg.interruptSeconds, onCancel = { interruptApp = null }, on
 }
 }
 }
-
 @Composable
 fun HomeAppTileItem(a: AppEntry, appGapMode: Int, subSp: TextUnit, alignEnd: Boolean, onLaunch: (AppEntry) -> Unit) {
 if (appGapMode == 0) {
@@ -266,31 +292,63 @@ if (a.isInterruptEnabled) Text(" ⏳", fontSize = subSp, color = CA)
 }
 }
 }
-
 @Composable
 fun HomeView(
 favs: List<AppEntry>, importantNotes: List<NoteItem>, isDefHome: Boolean, cfg: LauncherConfig,
 onAskHome: () -> Unit, onLaunch: (AppEntry) -> Unit, onSwipeUp: () -> Unit,
 onLeftReader: () -> Unit, onRightNotes: () -> Unit, onSettings: () -> Unit,
-onRightAi: () -> Unit = {}, onQuickMemo: (String) -> String = { "" }, onQuickAi: (String) -> Unit = {}, allNotes: List<NoteItem> = emptyList(), onNavTab: (Int) -> Unit = {}, onToggleCheck: (Long, Int) -> Unit = { _, _ -> }
+onRightAi: () -> Unit = {}, onQuickMemo: (String) -> String = { "" }, onQuickAi: (String) -> Unit = {}, allNotes: List<NoteItem> = emptyList(), onNavTab: (Int) -> Unit = {}, onToggleCheck: (Long, Int) -> Unit = { _, _ -> }, onLeftWriter: () -> Unit = {}
 ) {
 val homeCtx = androidx.compose.ui.platform.LocalContext.current; val ctx = homeCtx; val aiCfg = remember { loadAiCfg(homeCtx) }; val ui = rememberUi(aiCfg.uiScale); val memoCats = remember { SmartMemoClassifier.loadMemoCats(homeCtx) }; var now by remember { mutableStateOf(Date()) }; var dragY by remember { mutableStateOf(0f) }; var aiFolded by remember { mutableStateOf(false) }
 var appColMode by remember { mutableStateOf(homeCtx.getSharedPreferences("pl_ai_v2_prefs", 0).getInt("home_app_col_mode", 1)) }
 var appGapMode by remember { mutableStateOf(homeCtx.getSharedPreferences("pl_ai_v2_prefs", 0).getInt("home_app_gap_mode", 0)) }
 var cpuPct by remember { mutableStateOf(12) }; var ramPct by remember { mutableStateOf(45) }; var ramTxt by remember { mutableStateOf("0.0/0.0G") }
-var cpuHist by remember { mutableStateOf(listOf(10, 14, 12, 15, 11, 13, 12, 14)) }; var ramHist by remember { mutableStateOf(listOf(44, 45, 45, 46, 45, 45, 46, 45)) }
-fun sparkBar(hist: List<Int>): String { val b = "▁▂▃▄▅▆▇█"; return hist.takeLast(8).joinToString("") { v -> b[((v.coerceIn(0, 100) * 7) / 100).coerceIn(0, 7)].toString() } }
 SideEffect { JarvisRuntime.bindCallbacks(homeCtx, onNavTab, onQuickMemo) { allNotes.ifEmpty { importantNotes } }; SupertonicTtsEngine.init(homeCtx) }; EmojiHelpDialog()
-LaunchedEffect(Unit) { var lastCpu = android.os.Process.getElapsedCpuTime(); var lastWall = android.os.SystemClock.elapsedRealtime(); val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1); while (true) { now = Date(); val curCpu = android.os.Process.getElapsedCpuTime(); val curWall = android.os.SystemClock.elapsedRealtime(); val dWall = (curWall - lastWall).coerceAtLeast(1L); val rawC = (((curCpu - lastCpu) * 100L) / (dWall * cores.coerceAtMost(4))).toInt(); val activeBoost = if (isAiBusy || streamActive || SupertonicTtsEngine.playing || SupertonicTtsEngine.dlBusy) 28 else 6; val cVal = (rawC + activeBoost).coerceIn(4, 98); lastCpu = curCpu; lastWall = curWall; val am = homeCtx.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager; val mi = android.app.ActivityManager.MemoryInfo(); am.getMemoryInfo(mi); val totG = mi.totalMem.toFloat() / 1073741824f; val usedG = (mi.totalMem - mi.availMem).toFloat() / 1073741824f; val rVal = (((mi.totalMem - mi.availMem) * 100L) / mi.totalMem.coerceAtLeast(1L)).toInt().coerceIn(5, 99); cpuPct = cVal; ramPct = rVal; ramTxt = String.format(Locale.US, "%.1f/%.1fG", usedG, totG); cpuHist = (cpuHist + cVal).takeLast(8); ramHist = (ramHist + rVal).takeLast(8); delay(2000L) } }
+LaunchedEffect(Unit) { var lastCpu = android.os.Process.getElapsedCpuTime(); var lastWall = android.os.SystemClock.elapsedRealtime(); val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1); while (true) { now = Date(); val curCpu = android.os.Process.getElapsedCpuTime(); val curWall = android.os.SystemClock.elapsedRealtime(); val dWall = (curWall - lastWall).coerceAtLeast(1L); val rawC = (((curCpu - lastCpu) * 100L) / (dWall * cores.coerceAtMost(4))).toInt(); val activeBoost = if (isAiBusy || streamActive || SupertonicTtsEngine.playing || SupertonicTtsEngine.dlBusy) 28 else 6; val cVal = (rawC + activeBoost).coerceIn(4, 98); lastCpu = curCpu; lastWall = curWall; val am = homeCtx.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager; val mi = android.app.ActivityManager.MemoryInfo(); am.getMemoryInfo(mi); val totG = mi.totalMem.toFloat() / 1073741824f; val usedG = (mi.totalMem - mi.availMem).toFloat() / 1073741824f; val rVal = (((mi.totalMem - mi.availMem) * 100L) / mi.totalMem.coerceAtLeast(1L)).toInt().coerceIn(5, 99); cpuPct = cVal; ramPct = rVal; ramTxt = String.format(Locale.US, "%.1f/%.1fG", usedG, totG); delay(2000L) } }
 val tf = remember { SimpleDateFormat("HH:mm", Locale.KOREA) }; val df = remember { SimpleDateFormat("M월 d일 EEEE", Locale.KOREA) }
 val align = when (cfg.textAlign) { "CENTER" -> Alignment.CenterHorizontally; "RIGHT" -> Alignment.End; else -> Alignment.Start }
 val hFallbackLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res -> if (res.resultCode == android.app.Activity.RESULT_OK) { val spk = res.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim() ?: ""; if (spk.isNotEmpty()) JarvisRuntime.processUtterance(homeCtx, spk, false) } }
 val hMicP = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) JarvisRuntime.start(homeCtx) { runCatching { hFallbackLauncher.launch(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")) } } else JarvisRuntime.status = "⚠️ 마이크 권한을 허용해 주세요." }
-Column(Modifier.fillMaxSize().pointerInput(Unit) { detectVerticalDragGestures(onDragStart = { dragY = 0f }, onVerticalDrag = { _, d -> dragY += d; if (dragY < -90f) { dragY = 0f; onSwipeUp() } }) }.padding(horizontal = ui.hPad + 6.dp, vertical = ui.vPad + 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+val upNested = remember {
+object : NestedScrollConnection {
+var pullUp = 0f
+override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+if (source == NestedScrollSource.Drag) {
+if (available.y < 0f) {
+pullUp += -available.y
+if (pullUp > 105f) { pullUp = 0f; onSwipeUp() }
+} else if (consumed.y > 0f) pullUp = 0f
+}
+return Offset.Zero
+}
+}
+}
+Column(Modifier.fillMaxSize().nestedScroll(upNested).pointerInput(Unit) { detectVerticalDragGestures(onDragStart = { dragY = 0f }, onVerticalDrag = { _, d -> dragY += d; if (dragY < -75f) { dragY = 0f; onSwipeUp() } }) }.padding(horizontal = ui.hPad + 6.dp, vertical = ui.vPad + 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
 Row(Modifier.fillMaxWidth(), SB, Alignment.CenterVertically) {
-Column { Text(tf.format(now), fontSize = 40.sp, fontWeight = FontWeight.ExtraLight, letterSpacing = (-1.5).sp, color = CW); Text(df.format(now), fontSize = ui.subSp, color = CM) }
-Surface(color = Color(0xFF0E1626), shape = RoundedCornerShape(12.dp), border = BorderStroke(0.8.dp, Color(0xFF23324B)), modifier = Modifier.padding(horizontal = 4.dp)) { Column(Modifier.padding(horizontal = 8.dp, vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) { Row(verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(4.dp)) { Text("⚡CPU ${cpuPct}% ${sparkBar(cpuHist)}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = if (cpuPct > 75) Color(0xFFF87171) else CG); Text("🧹", fontSize = 10.sp, modifier = Modifier.clickable { releaseEmbedGguf(); System.gc(); JarvisRuntime.status = "🧹 메모리 최적화 완료 (RAM ${ramTxt})" }) }; Row(verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(4.dp)) { Text("💾RAM ${ramPct}% (${ramTxt}) ${sparkBar(ramHist)}", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = CA) } } }
-Row(verticalAlignment = CV) { TextButton(onClick = { val bf = ScheduleBriefingManager.buildBriefingSummary(allNotes.ifEmpty { importantNotes }); JarvisRuntime.status = bf; speakOneShot(ctx, bf) }) { Text("🔊", fontSize = ui.subSp, color = CG) }; TextButton(onClick = onSettings) { Text("⚙️", fontSize = ui.bodySp, color = CM) } }
+Column(Modifier.weight(1f)) {
+Text(tf.format(now), fontSize = 36.sp, fontWeight = FontWeight.ExtraLight, letterSpacing = (-1.2).sp, color = CW, maxLines = 1)
+Text(df.format(now), fontSize = ui.subSp, color = CM, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+Surface(
+color = Color(0xFF0E1626),
+shape = RoundedCornerShape(10.dp),
+border = BorderStroke(0.8.dp, Color(0xFF23324B)),
+modifier = Modifier.padding(horizontal = 4.dp).clickable { releaseEmbedGguf(); System.gc(); JarvisRuntime.status = "🧹 메모리 정리 완료 (RAM ${ramTxt})" }
+) {
+Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+Text("CPU ${cpuPct}%", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (cpuPct > 75) Color(0xFFF87171) else CG, maxLines = 1, softWrap = false)
+Text("·", fontSize = 11.sp, color = CD)
+Text("RAM ${ramPct}%", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CA, maxLines = 1, softWrap = false)
+}
+}
+Row(verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+Surface(color = Color(0xFF101827), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, Color(0xFF24324A)), modifier = Modifier.clickable { val bf = ScheduleBriefingManager.buildBriefingSummary(allNotes.ifEmpty { importantNotes }); JarvisRuntime.status = bf; speakOneShot(ctx, bf) }) {
+Text("🔊", fontSize = 14.sp, color = CG, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+}
+Surface(color = Color(0xFF101827), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, Color(0xFF24324A)), modifier = Modifier.clickable { onSettings() }) {
+Text("⚙️", fontSize = 14.sp, color = CW, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+}
+}
 }
 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
 Surface(color = Color(0xFF0E1525), shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, if (JarvisRuntime.on) CG else Color(0xFF25344E)), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Row(Modifier.fillMaxWidth(), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Surface(color = if (JarvisRuntime.on) (if (JarvisController.sleeping || (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil)) Color(0xFF1E293B) else Color(0xFF0F3D3E)) else Color(0xFF172236), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, if (JarvisRuntime.on) CG else Color(0xFF2E4057)), modifier = Modifier.clickable { if (JarvisRuntime.on) JarvisRuntime.stop(homeCtx) else if (homeCtx.checkSelfPermission("android.permission.RECORD_AUDIO") == 0) JarvisRuntime.start(homeCtx) { runCatching { hFallbackLauncher.launch(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")) } } else hMicP.launch("android.permission.RECORD_AUDIO") }) { Text(if (JarvisRuntime.on) (if (JarvisController.sleeping) "🌙" else if (wakeOnly) "👂🎙️" else "🤖🎙️") else "🎙️", fontSize = 14.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) }; OutlinedTextField(value = JarvisRuntime.input, onValueChange = { JarvisRuntime.input = it; dictAccumText = it }, placeholder = { Text(if (JarvisRuntime.on) (if (wakeOnly) "👂 [${wakeWord}] 호출 대기 중 (화면 꺼져도 유지)..." else "🤖 자비스 상시 경청 중 (유튜브 틀어줘 / 질문)...") else "메모·일정·명령 또는 AI 질문 (🎙️자비스)...", fontSize = 12.sp, color = CD) }, singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)); if (JarvisRuntime.input.isNotBlank()) { Surface(color = CG, shape = RoundedCornerShape(12.dp), modifier = Modifier.clickable { val t = JarvisRuntime.input.trim(); if (t.isNotEmpty()) { JarvisRuntime.input = ""; JarvisRuntime.processUtterance(homeCtx, t, false) } }) { Text("⏎", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF07090E), modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) } } }; Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) { ChipBtn("📝", JarvisRuntime.input.isNotBlank(), CG) { val t = JarvisRuntime.input.trim(); if (t.isNotEmpty()) { JarvisRuntime.status = onQuickMemo(t); JarvisRuntime.input = "" } else onRightNotes() }; ChipBtn("⚡", JarvisRuntime.input.isNotBlank(), CA) { val t = JarvisRuntime.input.trim(); if (t.isNotEmpty()) { JarvisRuntime.input = ""; JarvisRuntime.processUtterance(homeCtx, t, false) } else onRightAi() }; ChipBtn("🦙", JarvisRuntime.input.isNotBlank(), CW) { val t = JarvisRuntime.input.trim(); if (t.isNotEmpty()) { JarvisRuntime.input = ""; onQuickAi(t) } else onRightAi() }; ChipBtn(if (wakeOnly) "👂" else "🎙️", wakeOnly, CA) { setWakeOnly(homeCtx, !wakeOnly); JarvisRuntime.status = if (wakeOnly) "👂 호출어 대기 ON: [${wakeWord}]라고 부를 때만 반응합니다 (화면 OFF 유지)" else "🎙️ 상시 반응 모드: 호출어 없이 모든 말에 즉시 반응합니다" }; ChipBtn("🔦", JarvisController.torchOn, CA) { JarvisRuntime.status = JarvisController.setTorch(homeCtx, !JarvisController.torchOn) }; ChipBtn("🤖", ProJarvisAccessibilityService.inst != null, CG) { if (ProJarvisAccessibilityService.inst != null) JarvisRuntime.status = "✅ 자비스 접근성 제어 활성화됨 (스크롤·뒤로가기·잠금·캡처 가능)" else { runCatching { homeCtx.startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }; JarvisRuntime.status = "⚙️ 접근성 설정에서 [Pro Launcher 자비스 음성제어]를 켜주세요." } }; ChipBtn("🔊", false, CG) { val bf = ScheduleBriefingManager.buildBriefingSummary(allNotes.ifEmpty { importantNotes }); JarvisRuntime.status = bf; speakOneShot(homeCtx, bf) }; ChipBtn("❓", false, CM) { showEmojiHelp = true }; if (JarvisRuntime.status != null) { ChipBtn(if (aiFolded) "🔼" else "🔽", false, CA) { aiFolded = !aiFolded }; ChipBtn("✕", false, CM) { JarvisRuntime.status = null; stopOneShotTts() } } }; JarvisRuntime.status?.let { st -> if (!aiFolded) Box(Modifier.fillMaxWidth().heightIn(max = 105.dp).verticalScroll(rememberScrollState())) { Text(st, fontSize = 12.sp, lineHeight = 17.sp, color = CG) } } } }
@@ -328,6 +386,6 @@ rightApps.forEach { a -> HomeAppTileItem(a, appGapMode, ui.subSp, appColMode == 
 }
 }
 }
-Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Surface(color = Color(0xFF101624), shape = RoundedCornerShape(50), border = BorderStroke(0.8.dp, Color(0xFF233047)), modifier = Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = CV) { Text("📖", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onLeftReader() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🔼", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CW, modifier = Modifier.clickable { onSwipeUp() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📝", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CG, modifier = Modifier.clickable { onRightNotes() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🦙", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CA, modifier = Modifier.clickable { onRightAi() }.padding(horizontal = 8.dp, vertical = 4.dp)) } } }
+Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Surface(color = Color(0xFF101624), shape = RoundedCornerShape(50), border = BorderStroke(0.8.dp, Color(0xFF233047)), modifier = Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = CV) { Text("✍️", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CW, modifier = Modifier.clickable { onLeftWriter() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📖", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onLeftReader() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🔼앱서랍", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CW, modifier = Modifier.clickable { onSwipeUp() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📝", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CG, modifier = Modifier.clickable { onRightNotes() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🦙", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CA, modifier = Modifier.clickable { onRightAi() }.padding(horizontal = 8.dp, vertical = 4.dp)) } } }
 }
 }

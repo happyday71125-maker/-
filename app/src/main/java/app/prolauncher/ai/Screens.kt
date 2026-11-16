@@ -383,3 +383,4 @@ else ai.askRag(q, notes, books, cfg.ragIncludeBooks)
 }
 }
 }
+}

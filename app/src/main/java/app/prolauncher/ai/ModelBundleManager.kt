@@ -1,6 +1,12 @@
 package app.prolauncher.ai
 import android.content.Context
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -138,13 +144,49 @@ fun DrawerSheet(apps: List<AppEntry>, onClose: () -> Unit, onLaunch: (AppEntry) 
 val ctx = LocalContext.current
 val ui = rememberUi(loadAiCfg(ctx).uiScale)
 var q by remember { mutableStateOf("") }
+var pullDown by remember { mutableStateOf(0f) }
+val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+val downNested = remember(listState) {
+object : NestedScrollConnection {
+var overDown = 0f
+override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+if (available.y < 0f) overDown = 0f
+return Offset.Zero
+}
+override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+if (source == NestedScrollSource.Drag && available.y > 0f && listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) {
+overDown += available.y
+if (overDown > 85f) { overDown = 0f; onClose() }
+}
+return Offset.Zero
+}
+}
+}
 val flt = remember(apps, q) { apps.filter { KoreanChosungMatcher.matches(it.label, q) } }
 LaunchedEffect(flt, q) { if (q.trim().isNotEmpty() && !q.startsWith(" ") && flt.size == 1 && !flt.first().isInterruptEnabled) { val a = flt.first(); q = ""; onLaunch(a) } }
-Column(Modifier.fillMaxSize().background(Color(0xFA07090E)).padding(horizontal = ui.hPad + 4.dp, vertical = ui.vPad + 4.dp)) {
-Row(Modifier.fillMaxWidth(), SB, CV) { Text("↑ 앱 서랍 (초성 검색)", fontSize = ui.titleSp, fontWeight = FontWeight.Bold, color = CW); TextButton(onClick = onClose) { Text("✕", color = CM) } }
+Column(
+Modifier
+.fillMaxSize()
+.background(Color(0xFA07090E))
+.nestedScroll(downNested)
+.pointerInput(Unit) {
+detectVerticalDragGestures(
+onDragStart = { pullDown = 0f },
+onVerticalDrag = { _, d ->
+pullDown += d
+if (pullDown > 75f) { pullDown = 0f; onClose() }
+}
+)
+}
+.padding(horizontal = ui.hPad + 4.dp, vertical = ui.vPad + 4.dp)
+) {
+Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+Box(Modifier.width(44.dp).height(4.dp).background(Color(0xFF334155), RoundedCornerShape(50)))
+}
+Row(Modifier.fillMaxWidth(), SB, CV) { Text("▼ 앱 서랍 (아래로 내려 닫기)", fontSize = ui.titleSp, fontWeight = FontWeight.Bold, color = CW); TextButton(onClick = onClose) { Text("✕", color = CM) } }
 OutlinedTextField(value = q, onValueChange = { q = it }, placeholder = { Text("초성 검색 (예: ㅋㅋㅇㅌ)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 Spacer(Modifier.height(8.dp))
-LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
 items(flt, key = { it.packageName }) { a ->
 Row(Modifier.fillMaxWidth().combinedClickable(onClick = { onLaunch(a) }, onLongClick = { onFav(a) }).padding(vertical = 8.dp), SB, CV) {
 Text(a.label + (if (a.isFavorite) " ★" else ""), fontSize = (ui.bodySp.value + 3).sp, color = Color(0xFFE5E7EB))
@@ -185,8 +227,8 @@ ChipBtn(l, aiCfg.uiScale == k, CG) { aiCfg = aiCfg.copy(uiScale = k); saveAiCfg(
 }
 Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1C2940)))
 Text("🎨 배경 컬러 테마 & 정렬", fontWeight = FontWeight.Bold, fontSize = ui.bodySp, color = CA)
-Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("AMOLED" to "🌑 아몰레드 블랙", "SLATE" to "🌌 슬레이트 네이비", "FOREST" to "🌲 포레스트 그린").forEach { (k, l) -> ChipBtn(l, cfg.themeName == k, CA) { onCfg(cfg.copy(themeName = k)) } } }
-Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("LEFT" to "왼쪽 정렬", "CENTER" to "가운데 정렬", "RIGHT" to "오른쪽 정렬").forEach { (k, l) -> ChipBtn(l, cfg.textAlign == k, CW) { onCfg(cfg.copy(textAlign = k)) } } }
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("AMOLED" to "🌑 아몰레드 블랙", "SLATE" to "🌌 슬레이트 네이비", "FOREST" to "🌲 포레스트 그린").forEach { (k, l) -> ChipBtn(l, cfg.themeName == k, CA) { onCfg(cfg.copy(themeName = k)) } } }
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("LEFT" to "왼쪽 정렬", "CENTER" to "가운데 정렬", "RIGHT" to "오른쪽 정렬").forEach { (k, l) -> ChipBtn(l, cfg.textAlign == k, CW) { onCfg(cfg.copy(textAlign = k)) } } }
 }
 }
 Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, Color(0xFF23324B)), modifier = Modifier.fillMaxWidth()) {

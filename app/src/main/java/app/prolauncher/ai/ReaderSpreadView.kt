@@ -69,7 +69,7 @@ return if (out.isEmpty()) listOf(raw.trim()) else out
 fun ReaderView(
 books: List<BookItem>, cfg: LauncherConfig, repo: LauncherRepository,
 onSaveBooks: (List<BookItem>) -> Unit, onCfg: (LauncherConfig) -> Unit,
-onQuote: (String) -> Unit, onHome: () -> Unit, onQuickAddNote: (String) -> Unit = {}
+onQuote: (String) -> Unit, onHome: () -> Unit, onQuickAddNote: (String) -> Unit = {}, onBookNote: (String, String, Boolean) -> Unit = { _, _, _ -> }
 ) {
 val ctx = LocalContext.current
 val aiCfg = remember { loadAiCfg(ctx) }
@@ -89,6 +89,7 @@ var shelf by remember { mutableStateOf(false) }
 var cfgOpen by remember { mutableStateOf(false) }
 var rCfgTab by remember { mutableStateOf(0) }
 var ttsBarMin by remember { mutableStateOf(false) }
+var sliderOpen by remember { mutableStateOf(false) }
 var sortMode by remember { mutableStateOf(ctx.getSharedPreferences("pl_ai_v2_prefs", 0).getString("reader_book_sort", "CUSTOM") ?: "CUSTOM") }
 var reorderMode by remember { mutableStateOf(false) }
 var bookQuery by remember { mutableStateOf("") }
@@ -486,6 +487,9 @@ Text("해제", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { 
 }
 }
 }
+val overlayOpen = cfgOpen || readerAiOpen || bmOpen || catBarOpen
+var lockedColWPx by remember(act.id, twoPageMode) { mutableStateOf(0) }
+var lockedTextHPx by remember(act.id, twoPageMode) { mutableStateOf(0f) }
 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp)) {
 val density = LocalDensity.current
 val totalW = this.maxWidth
@@ -496,10 +500,18 @@ val colW = if (twoPageMode) ((totalW - outerPad * 2 - spineW) / 2f).coerceAtLeas
 val textH = (totalH - 56.dp).coerceAtLeast(60.dp)
 val colWPx = with(density) { colW.roundToPx() }
 val textHPx = with(density) { textH.toPx() } - 2f
-LaunchedEffect(act.id, reflowSrc.fullText, colWPx, textHPx, curPt, cfg.readerUseSerif, selectMode) {
-if (!selectMode && colWPx > 40 && textHPx > 40f) {
+SideEffect {
+if (!overlayOpen && !selectMode && colWPx > 40 && textHPx > 40f) {
+lockedColWPx = colWPx
+lockedTextHPx = textHPx
+}
+}
+val effColWPx = if (lockedColWPx > 40) lockedColWPx else colWPx
+val effTextHPx = if (lockedTextHPx > 40f) lockedTextHPx else textHPx
+LaunchedEffect(act.id, reflowSrc.fullText, effColWPx, effTextHPx, curPt, cfg.readerUseSerif) {
+if (effColWPx > 40 && effTextHPx > 40f) {
 val pagesComputed = withContext(Dispatchers.Default) {
-runCatching { paginateBookReflow(reflowSrc.fullText, colWPx, textHPx, pageTextStyle, textMeasurer) }.getOrElse { listOf(PageSlice(0, reflowSrc.fullText.length)) }
+runCatching { paginateBookReflow(reflowSrc.fullText, effColWPx, effTextHPx, pageTextStyle, textMeasurer) }.getOrElse { listOf(PageSlice(0, reflowSrc.fullText.length)) }
 }
 vPages = pagesComputed
 }
@@ -592,7 +604,7 @@ askPageAi("선택한 이 구절의 핵심 의미와 맥락을 쉽게 해설해�
 }
 ReaderPointBtn("📝 메모 발췌", false, CA, Modifier.weight(1f)) {
 val target = commitDraftIfEditing().ifBlank { spreadText }
-quoteConfirmText = "『${act.title}』 ($pgLabel) 발췌:\n\"${target.take(400)}\"\n\n메모: "
+quoteConfirmText = "[$pgLabel 발췌]\n\"${target.take(450)}\"\n\n메모: "
 }
 ReaderPointBtn("🔈 구절 낭독", false, CW, Modifier.weight(1f)) {
 val target = commitDraftIfEditing().ifBlank { spreadText }
@@ -625,14 +637,39 @@ Text(seg, style = pageTextStyle.copy(color = CW), modifier = Modifier.weight(1f)
 }
 }
 } else {
-// Clean reading surface: NO screen tap or swipe page-turn gestures (bottom buttons & slider only)
 Surface(
 color = pageSurf,
 shape = RoundedCornerShape(12.dp),
 border = BorderStroke(0.8.dp, mut.copy(alpha = 0.28f)),
 modifier = Modifier.fillMaxSize()
 ) {
+if (overlayOpen) {
+// When Settings/AI/Bookmark panel is open, keep exact same page frozen and allow smooth vertical scrolling!
+val ovScroll = rememberScrollState()
 if (twoPageMode) {
+Row(Modifier.fillMaxSize().verticalScroll(ovScroll).padding(horizontal = outerPad, vertical = 8.dp), verticalAlignment = Alignment.Top) {
+Column(Modifier.width(colW), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+Text("${act.title} · ${vIdx + 1}쪽", fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+Text(leftPageTx, style = pageTextStyle)
+}
+Box(Modifier.width(spineW), contentAlignment = Alignment.Center) {
+Box(Modifier.width(1.dp).height(180.dp).background(mut.copy(alpha = 0.26f)))
+}
+Column(Modifier.width(colW), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+Text(if (hasRightPage) "${vIdx + 2}쪽 · ${progressPct}%" else "마지막 페이지", fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1)
+if (hasRightPage) Text(rightPageTx, style = pageTextStyle)
+}
+}
+} else {
+Column(Modifier.fillMaxSize().verticalScroll(ovScroll).padding(horizontal = outerPad, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+Row(Modifier.fillMaxWidth(), SB, CV) {
+Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+Text("${vIdx + 1} / ${vPages.size} (${progressPct}%)", fontSize = 10.sp, color = mut.copy(alpha = 0.8f))
+}
+Text(leftPageTx, style = pageTextStyle)
+}
+}
+} else if (twoPageMode) {
 Row(Modifier.fillMaxSize().padding(horizontal = outerPad), verticalAlignment = Alignment.Top) {
 Column(Modifier.width(colW).fillMaxHeight().padding(top = 8.dp, bottom = 6.dp)) {
 Box(Modifier.fillMaxWidth().height(16.dp), contentAlignment = Alignment.CenterStart) {
@@ -731,14 +768,14 @@ ReaderTtsRuntime.start(ctx, act, curRawIdx, startEx)
 }
 if (readerAiOpen && readerAiAns.isNotBlank() && !readerAiBusy) {
 ChipBtn("💾해설저장", false, CA) {
-onQuickAddNote("📖 『${act.title}』 ($pgLabel${if (hasSel) "·선택구절" else ""}) 해설\n${readerAiAns.removeSuffix(" ▍")}")
-readerAiNotice = "✅ 메모장에 저장됨!"
+onBookNote(act.title, "[$pgLabel${if (hasSel) " · 선택구절" else ""} AI 해설]\n${readerAiAns.removeSuffix(" ▍").trim()}", false)
+readerAiNotice = "✅ 『${act.title}』 독서노트에 이어서 저장됨!"
 }
 }
 ChipBtn("📝발췌메모", false, CW) {
 val chosen = commitDraftIfEditing()
 val body = if (chosen.isNotBlank()) chosen else spreadText
-quoteConfirmText = "『${act.title}』 ($pgLabel) 발췌:\n\"${body.take(400)}\"\n\n메모: "
+quoteConfirmText = "[$pgLabel 발췌]\n\"${body.take(450)}\"\n\n메모: "
 }
 }
 if (readerAiOpen) {
@@ -764,13 +801,26 @@ Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t = commi
 }
 }
 }
-if (vPages.size > stepPg) {
+if (sliderOpen && vPages.size > stepPg) {
+Surface(
+color = Color(0xFF0E1626),
+shape = RoundedCornerShape(10.dp),
+border = BorderStroke(0.9.dp, CG.copy(alpha = 0.65f)),
+modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+) {
+Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+Row(Modifier.fillMaxWidth(), SB, CV) {
+Text("🎚️ 빠른 페이지 이동 (${pgLabel})", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG)
+Text("✕ 닫기", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { sliderOpen = false }.padding(2.dp))
+}
 Slider(
 value = vIdx.toFloat(),
 onValueChange = { goToVPage(it.toInt()) },
 valueRange = 0f..(vPages.size - 1).coerceAtLeast(1).toFloat(),
-modifier = Modifier.fillMaxWidth().height(20.dp)
+modifier = Modifier.fillMaxWidth().height(24.dp)
 )
+}
+}
 }
 val canPrev = vIdx > 0
 val canNext = if (twoPageMode) (vIdx + 2 < vPages.size) else (vIdx + 1 < vPages.size)
@@ -778,19 +828,13 @@ Row(Modifier.fillMaxWidth(), SB, CV) {
 OutlinedButton(
 onClick = { goToVPage(vIdx - stepPg) },
 enabled = canPrev,
-contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
 ) {
 Text("◀ 이전", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (canPrev) fg else mut.copy(alpha = 0.35f))
 }
-Row(verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-Text(
-(if (isBm) "🔖 " else "") + (if (ttsHere) "🔊 " else "") + pgLabel,
-fontSize = (ui.subSp.value + 0.5f).sp,
-fontWeight = if (isBm || ttsHere) FontWeight.Bold else FontWeight.Medium,
-color = if (ttsHere) CG else if (isBm) CA else mut,
-modifier = Modifier.clickable { if (ReaderTtsRuntime.on) ttsBarMin = !ttsBarMin }
-)
-if (ReaderTtsRuntime.on && ttsBarMin) ChipBtn("🔼낭독바", false, CG) { ttsBarMin = false }
+Row(verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+ChipBtn(if (sliderOpen) "🎚️닫기" else "🎚️${vIdx + 1}/${vPages.size}", sliderOpen, CG) { sliderOpen = !sliderOpen }
+if (ReaderTtsRuntime.on && ttsBarMin) ChipBtn("🔼낭독", false, CG) { ttsBarMin = false }
 ChipBtn(if (twoPageMode) "📖2쪽" else "📄1쪽", twoPageMode, CA) {
 twoPageMode = !twoPageMode
 ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putBoolean("reader_two_page", twoPageMode).apply()
@@ -802,7 +846,7 @@ if (cfgOpen && rCfgTab == 0) cfgOpen = false else { rCfgTab = 0; cfgOpen = true 
 OutlinedButton(
 onClick = { goToVPage(vIdx + stepPg) },
 enabled = canNext,
-contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
 ) {
 Text("다음 ▶", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (canNext) fg else mut.copy(alpha = 0.35f))
 }
@@ -810,16 +854,22 @@ Text("다음 ▶", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if
 }
 quoteConfirmText?.let { draft ->
 var edDraft by remember(draft) { mutableStateOf(TextFieldValue(draft, TextRange(draft.length))) }
+val bTitle = act?.title ?: "도서"
 AlertDialog(
 onDismissRequest = { quoteConfirmText = null },
-title = { Text("📝 메모장에 기록하시겠습니까?", fontSize = ui.titleSp) },
+title = { Text("📚 『$bTitle』 독서노트 이어쓰기", fontSize = ui.titleSp) },
 text = {
 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-Text("선택·수정한 독서대 구절을 메모장으로 가져갑니다. 내용을 확인한 뒤 [💾 저장] 버튼을 눌러야 기록됩니다.", fontSize = (ui.subSp.value + 1).sp, color = CM)
+Text("같은 책에서 작성한 메모는 새 메모를 어지럽게 늘리지 않고 『$bTitle』 전용 독서노트 하나에 차곡차곡 이어서 기록됩니다.", fontSize = (ui.subSp.value + 0.5f).sp, color = CM)
 OutlinedTextField(value = edDraft, onValueChange = { edDraft = it }, singleLine = false, minLines = 4, maxLines = 8, modifier = Modifier.fillMaxWidth())
 }
 },
-confirmButton = { Button(onClick = { val q = edDraft.text; quoteConfirmText = null; onQuote(q) }) { Text("💾 저장") } },
+confirmButton = {
+Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+OutlinedButton(onClick = { val q = edDraft.text.trim(); quoteConfirmText = null; if (q.isNotEmpty()) onBookNote(bTitle, q, true) }) { Text("📝 저장+메모열기", fontSize = ui.subSp) }
+Button(onClick = { val q = edDraft.text.trim(); quoteConfirmText = null; if (q.isNotEmpty()) { onBookNote(bTitle, q, false); ReaderTtsRuntime.status = "✅ 『$bTitle』 독서노트에 이어서 기록되었습니다!" } }) { Text("💾 이어저장", fontSize = ui.subSp) }
+}
+},
 dismissButton = { TextButton(onClick = { quoteConfirmText = null }) { Text("✕ 취소") } }
 )
 }

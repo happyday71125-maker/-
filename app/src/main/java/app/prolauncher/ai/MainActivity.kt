@@ -245,7 +245,7 @@ onHome = { scope.launch { pager.animateScrollToPage(2) } },
 onQuickAddNote = { raw -> val nx = appendOrCreateBookNote(notes, "독서", raw); notes = nx; repo.saveNotes(nx) },
 onBookNote = { bTitle, body, goMemo -> val nx = appendOrCreateBookNote(notes, bTitle, body); notes = nx; repo.saveNotes(nx); if (goMemo) scope.launch { pager.animateScrollToPage(3) } }
 )
-2 -> HomeView(
+2 -> (
 apps.filter { it.isFavorite }.take(12), notes.filter { SmartMemoClassifier.isImportant(it) }.take(3), isDefHome, cfg,
 onAskHome = ::askDefaultHome, onLaunch = ::launchOrInterrupt, onSwipeUp = { drawerOpen = true },
 onLeftReader = { scope.launch { pager.animateScrollToPage(1) } },
@@ -304,6 +304,13 @@ val homeCtx = androidx.compose.ui.platform.LocalContext.current; val ctx = homeC
 var appColMode by remember { mutableStateOf(homeCtx.getSharedPreferences("pl_ai_v2_prefs", 0).getInt("home_app_col_mode", 1)) }
 var appGapMode by remember { mutableStateOf(homeCtx.getSharedPreferences("pl_ai_v2_prefs", 0).getInt("home_app_gap_mode", 0)) }
 var cpuPct by remember { mutableStateOf(12) }; var ramPct by remember { mutableStateOf(45) }; var ramTxt by remember { mutableStateOf("0.0/0.0G") }
+var briefCfg by remember { mutableStateOf(ScheduleBriefingManager.loadBriefCfg(homeCtx)) }
+var briefPanelOpen by remember { mutableStateOf(false) }
+fun openSlotTimePicker(initialH: Int, initialM: Int, onPicked: (Int, Int) -> Unit) {
+runCatching {
+android.app.TimePickerDialog(homeCtx, { _, h, m -> onPicked(h, m) }, initialH.coerceIn(0, 23), initialM.coerceIn(0, 59), false).show()
+}
+}
 SideEffect { JarvisRuntime.bindCallbacks(homeCtx, onNavTab, onQuickMemo) { allNotes.ifEmpty { importantNotes } }; SupertonicTtsEngine.init(homeCtx) }; EmojiHelpDialog()
 LaunchedEffect(Unit) { var lastCpu = android.os.Process.getElapsedCpuTime(); var lastWall = android.os.SystemClock.elapsedRealtime(); val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1); while (true) { now = Date(); val curCpu = android.os.Process.getElapsedCpuTime(); val curWall = android.os.SystemClock.elapsedRealtime(); val dWall = (curWall - lastWall).coerceAtLeast(1L); val rawC = (((curCpu - lastCpu) * 100L) / (dWall * cores.coerceAtMost(4))).toInt(); val activeBoost = if (isAiBusy || streamActive || SupertonicTtsEngine.playing || SupertonicTtsEngine.dlBusy) 28 else 6; val cVal = (rawC + activeBoost).coerceIn(4, 98); lastCpu = curCpu; lastWall = curWall; val am = homeCtx.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager; val mi = android.app.ActivityManager.MemoryInfo(); am.getMemoryInfo(mi); val totG = mi.totalMem.toFloat() / 1073741824f; val usedG = (mi.totalMem - mi.availMem).toFloat() / 1073741824f; val rVal = (((mi.totalMem - mi.availMem) * 100L) / mi.totalMem.coerceAtLeast(1L)).toInt().coerceIn(5, 99); cpuPct = cVal; ramPct = rVal; ramTxt = String.format(Locale.US, "%.1f/%.1fG", usedG, totG); delay(2000L) } }
 val tf = remember { SimpleDateFormat("HH:mm", Locale.KOREA) }; val df = remember { SimpleDateFormat("M월 d일 EEEE", Locale.KOREA) }
@@ -361,7 +368,7 @@ Text("RAM ${ramPct}%", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color
 }
 }
 Row(verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-Surface(color = Color(0xFF101827), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, Color(0xFF24324A)), modifier = Modifier.clickable { val bf = ScheduleBriefingManager.buildBriefingSummary(allNotes.ifEmpty { importantNotes }); JarvisRuntime.status = bf; speakOneShot(ctx, bf) }) {
+Surface(color = Color(0xFF101827), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, Color(0xFF24324A)), modifier = Modifier.clickable { val py = ScheduleBriefingManager.buildVoiceBriefingPayload(allNotes.ifEmpty { importantNotes }); JarvisRuntime.status = py.visualSummary; speakOneShot(ctx, py.spokenScript) }) {
 Text("🔊", fontSize = 14.sp, color = CG, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
 }
 Surface(color = Color(0xFF101827), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, Color(0xFF24324A)), modifier = Modifier.clickable { onSettings() }) {
@@ -370,7 +377,290 @@ Text("⚙️", fontSize = 14.sp, color = CW, modifier = Modifier.padding(horizon
 }
 }
 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-Surface(color = Color(0xFF0E1525), shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, if (JarvisRuntime.on) CG else Color(0xFF25344E)), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Row(Modifier.fillMaxWidth(), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Surface(color = if (JarvisRuntime.on) (if (JarvisController.sleeping || (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil)) Color(0xFF1E293B) else Color(0xFF0F3D3E)) else Color(0xFF172236), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, if (JarvisRuntime.on) CG else Color(0xFF2E4057)), modifier = Modifier.clickable { if (JarvisRuntime.on) JarvisRuntime.stop(homeCtx) else if (homeCtx.checkSelfPermission("android.permission.RECORD_AUDIO") == 0) JarvisRuntime.start(homeCtx) { runCatching { hFallbackLauncher.launch(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")) } } else hMicP.launch("android.permission.RECORD_AUDIO") }) { Text(if (JarvisRuntime.on) (if (JarvisController.sleeping) "🌙" else if (wakeOnly) "👂🎙️" else "🤖🎙️") else "🎙️", fontSize = 14.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) }; OutlinedTextField(value = JarvisRuntime.input, onValueChange = { JarvisRuntime.input = it; dictAccumText = it }, placeholder = { Text(if (JarvisRuntime.on) (if (wakeOnly) "👂 [${wakeWord}] 호출 대기 중 (화면 꺼져도 유지)..." else "🤖 자비스 상시 경청 중 (유튜브 틀어줘 / 질문)...") else "메모·일정·명령 또는 AI 질문 (🎙️자비스)...", fontSize = 12.sp, color = CD) }, singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)); if (JarvisRuntime.input.isNotBlank()) { Surface(color = CG, shape = RoundedCornerShape(12.dp), modifier = Modifier.clickable { val t = JarvisRuntime.input.trim(); if (t.isNotEmpty()) { JarvisRuntime.input = ""; JarvisRuntime.processUtterance(homeCtx, t, false) } }) { Text("⏎", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF07090E), modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) } } }; Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) { ChipBtn("📝", JarvisRuntime.input.isNotBlank(), CG) { val t = JarvisRuntime.input.trim(); if (t.isNotEmpty()) { JarvisRuntime.status = onQuickMemo(t); JarvisRuntime.input = "" } else onRightNotes() }; ChipBtn("⚡", JarvisRuntime.input.isNotBlank(), CA) { val t = JarvisRuntime.input.trim(); if (t.isNotEmpty()) { JarvisRuntime.input = ""; JarvisRuntime.processUtterance(homeCtx, t, false) } else onRightAi() }; ChipBtn("🦙", JarvisRuntime.input.isNotBlank(), CW) { val t = JarvisRuntime.input.trim(); if (t.isNotEmpty()) { JarvisRuntime.input = ""; onQuickAi(t) } else onRightAi() }; ChipBtn(if (wakeOnly) "👂" else "🎙️", wakeOnly, CA) { setWakeOnly(homeCtx, !wakeOnly); JarvisRuntime.status = if (wakeOnly) "👂 호출어 대기 ON: [${wakeWord}]라고 부를 때만 반응합니다 (화면 OFF 유지)" else "🎙️ 상시 반응 모드: 호출어 없이 모든 말에 즉시 반응합니다" }; ChipBtn("🔦", JarvisController.torchOn, CA) { JarvisRuntime.status = JarvisController.setTorch(homeCtx, !JarvisController.torchOn) }; ChipBtn("🤖", ProJarvisAccessibilityService.inst != null, CG) { if (ProJarvisAccessibilityService.inst != null) JarvisRuntime.status = "✅ 자비스 접근성 제어 활성화됨 (스크롤·뒤로가기·잠금·캡처 가능)" else { runCatching { homeCtx.startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }; JarvisRuntime.status = "⚙️ 접근성 설정에서 [Pro Launcher 자비스 음성제어]를 켜주세요." } }; ChipBtn("🔊", false, CG) { val bf = ScheduleBriefingManager.buildBriefingSummary(allNotes.ifEmpty { importantNotes }); JarvisRuntime.status = bf; speakOneShot(homeCtx, bf) }; ChipBtn("❓", false, CM) { showEmojiHelp = true }; if (JarvisRuntime.status != null) { ChipBtn(if (aiFolded) "🔼" else "🔽", false, CA) { aiFolded = !aiFolded }; ChipBtn("✕", false, CM) { JarvisRuntime.status = null; stopOneShotTts() } } }; JarvisRuntime.status?.let { st -> if (!aiFolded) Box(Modifier.fillMaxWidth().heightIn(max = 105.dp).verticalScroll(rememberScrollState())) { Text(st, fontSize = 12.sp, lineHeight = 17.sp, color = CG) } } } }
+Surface(
+    color = Color(0xFF0E1525),
+    shape = RoundedCornerShape(16.dp),
+    border = BorderStroke(1.dp, if (JarvisRuntime.on) CG else Color(0xFF25344E)),
+    modifier = Modifier.fillMaxWidth()
+) {
+    Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Surface(
+                color = if (JarvisRuntime.on) (if (JarvisController.sleeping || (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil)) Color(0xFF1E293B) else Color(0xFF0F3D3E)) else Color(0xFF172236),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, if (JarvisRuntime.on) CG else Color(0xFF2E4057)),
+                modifier = Modifier.clickable {
+                    if (JarvisRuntime.on) JarvisRuntime.stop(homeCtx)
+                    else if (homeCtx.checkSelfPermission("android.permission.RECORD_AUDIO") == 0) {
+                        JarvisRuntime.start(homeCtx) {
+                            runCatching {
+                                hFallbackLauncher.launch(
+                                    android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                                        .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                        .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+                                )
+                            }
+                        }
+                    } else hMicP.launch("android.permission.RECORD_AUDIO")
+                }
+            ) {
+                Text(
+                    if (JarvisRuntime.on) (if (JarvisController.sleeping) "🌙" else if (wakeOnly) "👂🎙️" else "🤖🎙️") else "🎙️",
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)
+                )
+            }
+            OutlinedTextField(
+                value = JarvisRuntime.input,
+                onValueChange = { JarvisRuntime.input = it; dictAccumText = it },
+                placeholder = {
+                    Text(
+                        if (JarvisRuntime.on) (if (wakeOnly) "👂 [${wakeWord}] 호출 대기 중..." else "🤖 자비스 경청 중...")
+                        else "메모·일정 기록 또는 AI 질문...",
+                        fontSize = 12.sp,
+                        color = CD
+                    )
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.weight(1f)
+            )
+            if (JarvisRuntime.input.isNotBlank()) {
+                Surface(
+                    color = CG,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.clickable {
+                        val t = JarvisRuntime.input.trim()
+                        if (t.isNotEmpty()) {
+                            JarvisRuntime.input = ""
+                            JarvisRuntime.processUtterance(homeCtx, t, false)
+                        }
+                    }
+                ) {
+                    Text("⏎", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF07090E), modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp))
+                }
+            }
+        }
+        if (JarvisRuntime.input.isNotBlank()) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                ChipBtn("📝 메모로 저장", true, CG) {
+                    val t = JarvisRuntime.input.trim()
+                    if (t.isNotEmpty()) {
+                        JarvisRuntime.status = onQuickMemo(t)
+                        JarvisRuntime.input = ""
+                    }
+                }
+                ChipBtn("🦙 AI 채팅으로 질문", false, CA) {
+                    val t = JarvisRuntime.input.trim()
+                    if (t.isNotEmpty()) {
+                        JarvisRuntime.input = ""
+                        onQuickAi(t)
+                    }
+                }
+                ChipBtn("✕ 비우기", false, CM) { JarvisRuntime.input = "" }
+            }
+        }
+        val activeSlotCnt = briefCfg.slots.count { it.enabled }
+        val isAutoActive = briefCfg.enabled && activeSlotCnt > 0
+        val nextBadge = ScheduleBriefingManager.nextSummaryBadge(briefCfg, now.time)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+            ChipBtn(
+                text = if (isAutoActive) "⏰ 자동브리핑 ON · $nextBadge" else "🔕 자동브리핑 OFF",
+                sel = isAutoActive,
+                col = if (isAutoActive) CG else CM
+            ) {
+                if (briefCfg.enabled) {
+                    briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(enabled = false))
+                    ScheduleBriefingManager.stopBriefingPlayback(homeCtx)
+                    JarvisRuntime.status = "🔕 자동 일정 브리핑 알람을 껐습니다. (설정하기 전에는 자동 낭독하지 않습니다)"
+                } else {
+                    if (briefCfg.slots.isEmpty()) {
+                        val seed = BriefingSlot(System.currentTimeMillis(), 8, 0, "DAILY", true)
+                        briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(enabled = true, slots = listOf(seed)))
+                        briefPanelOpen = true
+                        JarvisRuntime.status = "⏰ 자동 브리핑 ON! 아래 [시간 설정]에서 원하는 시각을 자유롭게 변경·추가하세요."
+                    } else {
+                        val ensuredSlots = if (activeSlotCnt == 0) briefCfg.slots.mapIndexed { i, s -> if (i == 0) s.copy(enabled = true) else s } else briefCfg.slots
+                        briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(enabled = true, slots = ensuredSlots))
+                        JarvisRuntime.status = "⏰ 자동 일정 브리핑 ON (${ScheduleBriefingManager.nextSummaryBadge(briefCfg)})"
+                    }
+                }
+            }
+            ChipBtn(
+                text = if (briefCfg.slots.isEmpty()) "🕒 시간 설정" else "🕒 시간 설정 (${briefCfg.slots.size}개)",
+                sel = briefPanelOpen,
+                col = CA
+            ) {
+                briefPanelOpen = !briefPanelOpen
+            }
+            if (briefingSpeakingNow || SupertonicTtsEngine.playing) {
+                ChipBtn("⏹️ 중지", false, Color(0xFFF87171)) {
+                    ScheduleBriefingManager.stopBriefingPlayback(homeCtx)
+                }
+            }
+            if (JarvisRuntime.status != null) {
+                ChipBtn(if (aiFolded) "🔼 펼침" else "🔽 접기", false, CM) { aiFolded = !aiFolded }
+                ChipBtn("✕", false, CM) { JarvisRuntime.status = null; ScheduleBriefingManager.stopBriefingPlayback(homeCtx) }
+            }
+        }
+        if (briefPanelOpen) {
+            Surface(
+                color = Color(0xFF09101D),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(0.9.dp, CA.copy(alpha = 0.65f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.fillMaxWidth(), SB, CV) {
+                        Text("⏰ 스마트 일정 브리핑 시간 설정 (하루 다회 가능)", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CA)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
+                            Text(
+                                "▶️ 미리듣기",
+                                fontSize = ui.subSp,
+                                fontWeight = FontWeight.Bold,
+                                color = CG,
+                                modifier = Modifier.clickable {
+                                    val py = ScheduleBriefingManager.buildVoiceBriefingPayload(allNotes.ifEmpty { importantNotes })
+                                    JarvisRuntime.status = py.visualSummary
+                                    speakOneShot(homeCtx, py.spokenScript)
+                                }
+                            )
+                            Text("✕", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { briefPanelOpen = false }.padding(2.dp))
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                        ChipBtn("➕ 시:분 직접 추가", true, CG) {
+                            openSlotTimePicker(8, 0) { h, m ->
+                                val exists = briefCfg.slots.any { it.hour == h && it.minute == m }
+                                val nxSlots = if (exists) briefCfg.slots.map { if (it.hour == h && it.minute == m) it.copy(enabled = true) else it }
+                                else briefCfg.slots + BriefingSlot(System.currentTimeMillis(), h, m, "DAILY", true)
+                                briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(enabled = true, slots = nxSlots))
+                                JarvisRuntime.status = "⏰ [${ScheduleBriefingManager.formatSlotTime(h, m)}] 브리핑 알람이 등록·활성화되었습니다."
+                            }
+                        }
+                        listOf(7 to 30, 9 to 0, 13 to 0, 21 to 30).forEach { (ph, pm) ->
+                            val lbl = "+%02d:%02d".format(ph, pm)
+                            ChipBtn(lbl, false, CW) {
+                                val exists = briefCfg.slots.any { it.hour == ph && it.minute == pm }
+                                val nxSlots = if (exists) briefCfg.slots.map { if (it.hour == ph && it.minute == pm) it.copy(enabled = true) else it }
+                                else briefCfg.slots + BriefingSlot(System.currentTimeMillis(), ph, pm, "DAILY", true)
+                                briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(enabled = true, slots = nxSlots))
+                            }
+                        }
+                    }
+                    if (briefCfg.slots.isEmpty()) {
+                        Text(
+                            "등록된 시간이 없습니다. 위 [➕ 시:분 직접 추가]를 눌러 원하는 시각을 등록할 때만 자동 브리핑이 작동합니다.",
+                            fontSize = ui.subSp,
+                            color = CM
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            briefCfg.slots.forEach { slot ->
+                                Surface(
+                                    color = if (slot.enabled && briefCfg.enabled) Color(0xFF102027) else Color(0xFF111827),
+                                    shape = RoundedCornerShape(9.dp),
+                                    border = BorderStroke(0.7.dp, if (slot.enabled && briefCfg.enabled) CG.copy(alpha = 0.6f) else Color(0xFF24324A)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), SB, CV) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
+                                            Text(
+                                                if (slot.enabled) "🔔" else "🔕",
+                                                fontSize = 13.sp,
+                                                modifier = Modifier.clickable {
+                                                    val nx = briefCfg.slots.map { if (it.id == slot.id) it.copy(enabled = !it.enabled) else it }
+                                                    val anyOn = nx.any { it.enabled }
+                                                    briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(enabled = if (!anyOn) false else briefCfg.enabled, slots = nx))
+                                                }
+                                            )
+                                            Text(
+                                                ScheduleBriefingManager.formatSlotTime(slot.hour, slot.minute),
+                                                fontSize = (ui.bodySp.value + 1f).sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (slot.enabled && briefCfg.enabled) CW else CM,
+                                                modifier = Modifier.clickable {
+                                                    openSlotTimePicker(slot.hour, slot.minute) { nh, nm ->
+                                                        val nx = briefCfg.slots.map { if (it.id == slot.id) it.copy(hour = nh, minute = nm, enabled = true) else it }
+                                                        briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(enabled = true, slots = nx))
+                                                    }
+                                                }
+                                            )
+                                            Surface(
+                                                color = CA.copy(alpha = 0.16f),
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = BorderStroke(0.7.dp, CA.copy(alpha = 0.6f)),
+                                                modifier = Modifier.clickable {
+                                                    val nx = briefCfg.slots.map { if (it.id == slot.id) it.copy(daysMode = ScheduleBriefingManager.nextDaysMode(it.daysMode)) else it }
+                                                    briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(slots = nx))
+                                                }
+                                            ) {
+                                                Text(
+                                                    ScheduleBriefingManager.daysLabel(slot.daysMode),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = CA,
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = CV) {
+                                            Text(
+                                                "시간변경",
+                                                fontSize = 10.sp,
+                                                color = CG,
+                                                modifier = Modifier.clickable {
+                                                    openSlotTimePicker(slot.hour, slot.minute) { nh, nm ->
+                                                        val nx = briefCfg.slots.map { if (it.id == slot.id) it.copy(hour = nh, minute = nm, enabled = true) else it }
+                                                        briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(enabled = true, slots = nx))
+                                                    }
+                                                }
+                                            )
+                                            Text(
+                                                "🗑️",
+                                                fontSize = 12.sp,
+                                                color = Color(0xFFEF4444),
+                                                modifier = Modifier.clickable {
+                                                    val nx = briefCfg.slots.filterNot { it.id == slot.id }
+                                                    val keepOn = briefCfg.enabled && nx.any { it.enabled }
+                                                    briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(enabled = keepOn, slots = nx))
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth().height(0.7.dp).background(Color(0xFF1E2C45)))
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                        ChipBtn(
+                            text = if (briefCfg.forceOnSilent) "🔔 무음이어도 알람음량 낭독" else "📳 무음·진동 시 매너보호(알림만)",
+                            sel = !briefCfg.forceOnSilent,
+                            col = if (briefCfg.forceOnSilent) CA else CG
+                        ) {
+                            briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(forceOnSilent = !briefCfg.forceOnSilent))
+                        }
+                        ChipBtn(
+                            text = if (briefCfg.skipIfEmpty) "📭 할 일 0건이면 생략 ON" else "📭 할 일 0건이어도 읽기",
+                            sel = briefCfg.skipIfEmpty,
+                            col = CW
+                        ) {
+                            briefCfg = ScheduleBriefingManager.saveAndSync(homeCtx, briefCfg.copy(skipIfEmpty = !briefCfg.skipIfEmpty))
+                        }
+                    }
+                }
+            }
+        }
+        JarvisRuntime.status?.let { st ->
+            if (!aiFolded) {
+                Box(Modifier.fillMaxWidth().heightIn(max = 105.dp).verticalScroll(rememberScrollState())) {
+                    Text(st, fontSize = 12.sp, lineHeight = 17.sp, color = CG)
+                }
+            }
+        }
+    }
+}
 if (!isDefHome) { Surface(color = Color(0xFF14261F), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().clickable { onAskHome() }) { Row(Modifier.padding(ui.cardPad), SB, CV) { Column(Modifier.weight(1f)) { Text("🏠 기본 홈 화면(런처) 권한 지정하기", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG); Text("탭하여 기본 홈 앱으로 설정하세요", fontSize = ui.subSp, color = Color(0xFFA7F3D0)) }; Text("→", fontSize = (ui.subSp.value + 1).sp, color = CG) } } }
 Surface(color = Color(0xFF0F1624), shape = RoundedCornerShape(16.dp), border = BorderStroke(0.8.dp, Color(0xFF222E44)), modifier = Modifier.fillMaxWidth().clickable { onRightNotes() }) { Column(Modifier.padding(ui.cardPad), verticalArrangement = Arrangement.spacedBy(4.dp)) { Row(Modifier.fillMaxWidth(), SB, CV) { Text("📌 중요 메모 (${importantNotes.size})", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA); Text("→", fontSize = ui.subSp, color = CM) }; if (importantNotes.isEmpty()) { Text("메모에서 ★ 중요 표시를 켜면 홈 화면에서 바로 확인됩니다.", fontSize = (ui.subSp.value + 1).sp, color = CD) } else importantNotes.forEach { n -> val cat = SmartMemoClassifier.categoryOf(n, memoCats); Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) { val ls = n.content.lines().filter { !it.trim().startsWith("#") && it.isNotBlank() }; ls.take(3).forEachIndexed { idx, ln -> val tr = ln.trimStart(); val isChk = tr.startsWith("☐") || tr.startsWith("☑"); val done = tr.startsWith("☑"); val origIdx = n.content.lines().indexOf(ln).coerceAtLeast(idx); Row(Modifier.fillMaxWidth().clickable { if (isChk) onToggleCheck(n.id, origIdx) else onRightNotes() }.padding(vertical = 1.dp), verticalAlignment = CV) { if (idx == 0) Text("[$cat] ", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG); Text(ln, fontSize = (ui.subSp.value + 1).sp, color = if (done) CD else Color(0xFFE5E7EB), textDecoration = if (done) TextDecoration.LineThrough else null, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)) } } } } } }
 }

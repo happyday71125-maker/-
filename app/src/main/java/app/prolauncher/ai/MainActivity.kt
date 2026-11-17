@@ -245,7 +245,7 @@ onHome = { scope.launch { pager.animateScrollToPage(2) } },
 onQuickAddNote = { raw -> val nx = appendOrCreateBookNote(notes, "독서", raw); notes = nx; repo.saveNotes(nx) },
 onBookNote = { bTitle, body, goMemo -> val nx = appendOrCreateBookNote(notes, bTitle, body); notes = nx; repo.saveNotes(nx); if (goMemo) scope.launch { pager.animateScrollToPage(3) } }
 )
-2 -> (
+2 -> HomeView(
 apps.filter { it.isFavorite }.take(12), notes.filter { SmartMemoClassifier.isImportant(it) }.take(3), isDefHome, cfg,
 onAskHome = ::askDefaultHome, onLaunch = ::launchOrInterrupt, onSwipeUp = { drawerOpen = true },
 onLeftReader = { scope.launch { pager.animateScrollToPage(1) } },

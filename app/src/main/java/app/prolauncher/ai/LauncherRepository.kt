@@ -227,7 +227,7 @@ else -> context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it
 }
 val clean = text.replace("\r\n", "\n").trim()
 if (clean.isEmpty()) return null
-val pages = clean.chunked(520).map { it.trim() }.filter { it.isNotEmpty() }
+val pages = splitBookIntoNaturalSections(clean, 1100)
 val cat = when {
 lower.endsWith(".pdf") -> "PDF 문서"
 lower.endsWith(".epub") -> "전자책"
@@ -235,6 +235,38 @@ else -> "텍스트북"
 }
 BookItem(System.currentTimeMillis(), name.substringBeforeLast("."), "내 서재 파일", cat, pages, 0)
 }.getOrNull()
+}
+
+private fun splitBookIntoNaturalSections(clean: String, targetLen: Int = 1100): List<String> {
+val out = mutableListOf<String>()
+var rem = clean.trim()
+while (rem.isNotEmpty()) {
+if (rem.length <= targetLen) {
+out.add(rem)
+break
+}
+val lim = minOf(rem.length, targetLen)
+val minCut = (targetLen / 2).coerceAtLeast(300)
+var cut = rem.lastIndexOf("\n\n", lim).takeIf { it >= minCut }?.let { it + 2 } ?: -1
+if (cut == -1) {
+for (i in lim - 1 downTo minCut) {
+val c = rem[i]
+if ((c == '.' || c == '!' || c == '?' || c == '。') && (i + 1 >= rem.length || rem[i + 1].isWhitespace() || rem[i + 1] in charArrayOf('"', '\'', '”', '’', ')'))) {
+cut = i + 1
+break
+}
+}
+}
+if (cut == -1) {
+cut = rem.lastIndexOf('\n', lim).takeIf { it >= minCut }?.let { it + 1 }
+?: rem.lastIndexOf(' ', lim).takeIf { it >= minCut }?.let { it + 1 }
+?: lim
+}
+val part = rem.substring(0, cut).trim()
+if (part.isNotEmpty()) out.add(part)
+rem = rem.substring(cut).trimStart()
+}
+return out.ifEmpty { listOf(clean) }
 }
 
 private fun extractPdfText(uri: Uri): String {

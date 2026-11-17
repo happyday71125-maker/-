@@ -684,11 +684,11 @@ fun ReaderView(
                                 }
                             }
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
-                                ReaderPointBtn("🦙 AI 해설", false, CG, Modifier.weight(1f)) {
-                                    val target = commitDraftIfEditing().ifBlank { spreadText }
+                                ReaderPointBtn("🦙 AI 창 열기", false, CG, Modifier.weight(1f)) {
+                                    commitDraftIfEditing()
                                     selectMode = false
                                     readerAiOpen = true
-                                    askPageAi("선택한 이 구절의 핵심 의미와 맥락을 쉽게 해설해줘.", act.title, pgLabel, target, true)
+                                    readerAiNotice = "🎯 구절이 준비되었습니다. 아래 요약·해설 버튼을 누르거나 질문을 입력하세요."
                                 }
                                 ReaderPointBtn("📝 메모 발췌", false, CA, Modifier.weight(1f)) {
                                     val target = commitDraftIfEditing().ifBlank { spreadText }
@@ -843,18 +843,8 @@ fun ReaderView(
 
             Row(Modifier.fillMaxWidth().padding(bottom = 2.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                 ChipBtn(if (hasSel) "🦙선택해설(${activeExcerpt.length}자)" else "🦙페이지해설", readerAiOpen, CG) {
-                    val chosen = commitDraftIfEditing()
+                    commitDraftIfEditing()
                     readerAiOpen = !readerAiOpen
-                    if (readerAiOpen && readerAiAns.isBlank()) {
-                        val useSel = chosen.isNotBlank()
-                        askPageAi(
-                            if (useSel) "선택한 구절의 핵심 의미와 포인트를 쉽게 해설해줘." else "현재 펼쳐진 페이지 핵심을 3줄로 요약하고 쉽게 해설해줘.",
-                            act.title,
-                            pgLabel,
-                            if (useSel) chosen else spreadText,
-                            useSel
-                        )
-                    }
                 }
                 ChipBtn(if (selectMode) "✂️본문보기" else if (hasSel) "✂️구절편집" else "✂️구절선택", selectMode || hasSel, CA) { toggleScissorsButton() }
                 ChipBtn(if (ttsHere) "⏹️낭독중지" else "🔊낭독", ttsHere, CG) {
@@ -895,11 +885,11 @@ fun ReaderView(
                         }
                         readerAiNotice?.let { nt -> Text(nt, fontSize = ui.subSp, color = CG, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                            Text(readerAiAns.ifBlank { if (hasSel) "🎯 선택한 구절만 AI에게 전달됩니다! 위 [📌요약/💡해설/✨핵심문장] 버튼을 누르거나 질문을 입력해 주세요." else "💡 [✂️구절선택] 버튼을 눌러 원하는 문장만 골라 다듬은 뒤 질문할 수 있습니다." }, fontSize = ui.bodySp, color = CW)
+                            Text(readerAiAns.ifBlank { if (hasSel) "🎯 선택한 구절(${activeExcerpt.length}자) 대기 중입니다. 위 [📌요약 / 💡해설 / ✨핵심문장] 버튼을 누르거나 아래에 질문을 입력해 [↑]를 누르면 AI가 시작됩니다." else "📖 자동 실행이 꺼져 있습니다. 위 [📌요약 / 💡해설 / ✨핵심문장] 버튼을 누르거나 아래에 질문을 입력하면 그때 AI가 진행됩니다." }, fontSize = ui.bodySp, color = CW)
                         }
                         Row(Modifier.fillMaxWidth(), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedTextField(value = readerAiQ, onValueChange = { readerAiQ = it }, placeholder = { Text(if (hasSel) "선택한 구절에 대해 질문..." else "현재 펼쳐진 페이지 질문...", fontSize = ui.subSp) }, singleLine = true, modifier = Modifier.weight(1f))
-                            Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t = commitDraftIfEditing(); readerAiQ = ""; askPageAi(q, act.title, pgLabel, t.ifBlank { spreadText }, t.isNotBlank()) } }, enabled = !readerAiBusy) { Text("↑", fontSize = ui.subSp) }
+                            OutlinedTextField(value = readerAiQ, onValueChange = { readerAiQ = it }, placeholder = { Text(if (hasSel) "선택한 구절 질문 입력 후 ↑..." else "페이지 질문 입력 후 ↑...", fontSize = ui.subSp) }, singleLine = true, modifier = Modifier.weight(1f))
+                            if (readerAiBusy) { Button(onClick = { activeGenId++; readerAiJob?.cancel(); if (ProLlamaJni.ready) runCatching { ProLlamaJni.abortGeneration() }; readerAiBusy = false; readerAiAns = readerAiAns.removeSuffix(" ▍") }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))) { Text("⏹️", fontSize = ui.subSp) } } else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t = commitDraftIfEditing(); readerAiQ = ""; askPageAi(q, act.title, pgLabel, t.ifBlank { spreadText }, t.isNotBlank()) } }) { Text("↑", fontSize = ui.subSp) } }
                         }
                     }
                 }

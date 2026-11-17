@@ -231,11 +231,7 @@ ChipBtn("── 구분선", bCfg.showDivider) { bCfg = bCfg.copy(showDivider = !
 ChipBtn("↵ 줄바꿈", bCfg.showNewline) { bCfg = bCfg.copy(showNewline = !bCfg.showNewline); SMC.saveBtnCfg(ctx, bCfg) }
 }
 Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1C2940)))
-Text("⏰ 모닝 일정 브리핑 자동 알림", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CA)
-Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6) {
-listOf(-1 to "🔕 알림 끔", 7 to "🌅 오전 7시", 8 to "🌅 오전 8시", 9 to "🌅 오전 9시").forEach { (hr, lb) -> ChipBtn(lb, briefHour == hr, CA) { briefHour = hr; aiMsg = ScheduleBriefingManager.setMorningHour(ctx, hr) } }
-ChipBtn("🔊 지금 브리핑 듣기", false, CG) { val bf = ScheduleBriefingManager.buildBriefingSummary(notes); sOut = bf; speakOneShot(ctx, bf); aiMsg = "🔊 오늘 할일·일정 브리핑 재생" }
-}
+Text("⏰ 자동 음성 일정 브리핑: 홈 탭 마이크 아래 [🕒 시간 설정]에서 하루 여러 번 원하는 시:분으로 관리할 수 있습니다.", fontSize = ui.subSp, color = CM)
 }
 }
 }

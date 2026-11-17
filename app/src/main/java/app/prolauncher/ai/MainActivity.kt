@@ -21,6 +21,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.*
 import androidx.compose.ui.text.style.*
 import androidx.compose.ui.unit.*
@@ -323,12 +324,30 @@ return Offset.Zero
 }
 }
 }
-Column(Modifier.fillMaxSize().nestedScroll(upNested).pointerInput(Unit) { detectVerticalDragGestures(onDragStart = { dragY = 0f }, onVerticalDrag = { _, d -> dragY += d; if (dragY < -75f) { dragY = 0f; onSwipeUp() } }) }.padding(horizontal = ui.hPad + 6.dp, vertical = ui.vPad + 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+BoxWithConstraints(Modifier.fillMaxSize()) {
+val homeMaxH = this.maxHeight
+val density = LocalDensity.current
+val conf = LocalConfiguration.current
+val imeBottomPx = WindowInsets.ime.getBottom(density)
+val isKeyboardOpen = imeBottomPx > with(density) { 72.dp.toPx() } || homeMaxH < (conf.screenHeightDp.dp * 0.72f)
+val favMaxH = (homeMaxH * 0.36f).coerceIn(96.dp, 256.dp)
+Column(
+Modifier
+.fillMaxSize()
+.then(if (isKeyboardOpen) Modifier else Modifier.nestedScroll(upNested).pointerInput(Unit) { detectVerticalDragGestures(onDragStart = { dragY = 0f }, onVerticalDrag = { _, d -> dragY += d; if (dragY < -75f) { dragY = 0f; onSwipeUp() } }) })
+.padding(horizontal = ui.hPad + 6.dp, vertical = ui.vPad + 2.dp),
+verticalArrangement = Arrangement.spacedBy(6.dp)
+) {
 Row(Modifier.fillMaxWidth(), SB, Alignment.CenterVertically) {
 Column(Modifier.weight(1f)) {
+if (isKeyboardOpen) {
+Text("${tf.format(now)} · ${df.format(now)}", fontSize = (ui.bodySp.value + 1f).sp, fontWeight = FontWeight.SemiBold, color = CW, maxLines = 1, overflow = TextOverflow.Ellipsis)
+} else {
 Text(tf.format(now), fontSize = 36.sp, fontWeight = FontWeight.ExtraLight, letterSpacing = (-1.2).sp, color = CW, maxLines = 1)
 Text(df.format(now), fontSize = ui.subSp, color = CM, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
+}
+
 Surface(
 color = Color(0xFF0E1626),
 shape = RoundedCornerShape(10.dp),
@@ -355,8 +374,9 @@ Surface(color = Color(0xFF0E1525), shape = RoundedCornerShape(16.dp), border = B
 if (!isDefHome) { Surface(color = Color(0xFF14261F), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().clickable { onAskHome() }) { Row(Modifier.padding(ui.cardPad), SB, CV) { Column(Modifier.weight(1f)) { Text("🏠 기본 홈 화면(런처) 권한 지정하기", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG); Text("탭하여 기본 홈 앱으로 설정하세요", fontSize = ui.subSp, color = Color(0xFFA7F3D0)) }; Text("→", fontSize = (ui.subSp.value + 1).sp, color = CG) } } }
 Surface(color = Color(0xFF0F1624), shape = RoundedCornerShape(16.dp), border = BorderStroke(0.8.dp, Color(0xFF222E44)), modifier = Modifier.fillMaxWidth().clickable { onRightNotes() }) { Column(Modifier.padding(ui.cardPad), verticalArrangement = Arrangement.spacedBy(4.dp)) { Row(Modifier.fillMaxWidth(), SB, CV) { Text("📌 중요 메모 (${importantNotes.size})", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA); Text("→", fontSize = ui.subSp, color = CM) }; if (importantNotes.isEmpty()) { Text("메모에서 ★ 중요 표시를 켜면 홈 화면에서 바로 확인됩니다.", fontSize = (ui.subSp.value + 1).sp, color = CD) } else importantNotes.forEach { n -> val cat = SmartMemoClassifier.categoryOf(n, memoCats); Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) { val ls = n.content.lines().filter { !it.trim().startsWith("#") && it.isNotBlank() }; ls.take(3).forEachIndexed { idx, ln -> val tr = ln.trimStart(); val isChk = tr.startsWith("☐") || tr.startsWith("☑"); val done = tr.startsWith("☑"); val origIdx = n.content.lines().indexOf(ln).coerceAtLeast(idx); Row(Modifier.fillMaxWidth().clickable { if (isChk) onToggleCheck(n.id, origIdx) else onRightNotes() }.padding(vertical = 1.dp), verticalAlignment = CV) { if (idx == 0) Text("[$cat] ", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG); Text(ln, fontSize = (ui.subSp.value + 1).sp, color = if (done) CD else Color(0xFFE5E7EB), textDecoration = if (done) TextDecoration.LineThrough else null, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)) } } } } } }
 }
-Column(Modifier.fillMaxWidth().heightIn(min = 88.dp, max = 272.dp).padding(horizontal = 4.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-Row(Modifier.fillMaxWidth(), SB, CV) {
+if (!isKeyboardOpen) {
+Column(Modifier.fillMaxWidth().heightIn(min = 84.dp, max = favMaxH).padding(horizontal = 4.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+  Row(Modifier.fillMaxWidth(), SB, CV) {
 Text("★ 즐겨찾기 앱 (${favs.size}) · 편집 ↑", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onSwipeUp() }.padding(vertical = 2.dp))
 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = CV) {
 Text(when (appGapMode) { 0 -> "🫧 카드(넓게)"; 1 -> "🌿 텍스트(넓게)"; else -> "▫ 기본간격" }, fontSize = 11.sp, color = CG, modifier = Modifier.clickable { val ng = (appGapMode + 1) % 3; appGapMode = ng; homeCtx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putInt("home_app_gap_mode", ng).apply() }.padding(vertical = 2.dp))
@@ -387,5 +407,7 @@ rightApps.forEach { a -> HomeAppTileItem(a, appGapMode, ui.subSp, appColMode == 
 }
 }
 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Surface(color = Color(0xFF101624), shape = RoundedCornerShape(50), border = BorderStroke(0.8.dp, Color(0xFF233047)), modifier = Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = CV) { Text("✍️", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CW, modifier = Modifier.clickable { onLeftWriter() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📖", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onLeftReader() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🔼앱서랍", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CW, modifier = Modifier.clickable { onSwipeUp() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📝", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CG, modifier = Modifier.clickable { onRightNotes() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🦙", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CA, modifier = Modifier.clickable { onRightAi() }.padding(horizontal = 8.dp, vertical = 4.dp)) } } }
+}
+}
 }
 }

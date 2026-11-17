@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.*
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -256,13 +256,458 @@ return if (ragCtx.isNotBlank()) ragCtx else "안녕하세요! 상단 [⚙️ AI 
 }
 
 suspend fun callLlmHttp(sysPrompt: String, ragCtx: String, history: List<ChatMsg>, userMsg: String, apiUrl: String = "", apiModel: String = "", apiKey: String = "", onStream: ((String) -> Unit)? = null, genId: Long = 0L, temp: Float = 0.5f, ctxSize: Int = 2048, maxTok: Int = 512, cpuMode: Int = 2, histTurns: Int = 2): String? { val fullSys = if (ragCtx.isBlank()) sysPrompt else "$sysPrompt\n\n[참고 메모]\n$ragCtx"; val chatGf = findLocalGguf(); if (chatGf != null && (apiUrl.isBlank() || apiUrl == "local_gguf")) { runLocalGguf(chatGf, fullSys, history, userMsg, onStream, genId, temp, ctxSize, maxTok.coerceAtLeast(512), cpuMode, histTurns)?.let { return it } }; var rawU = apiUrl.trim(); if (rawU.isBlank() || rawU == "local_gguf") return fallbackLlmOrChat(sysPrompt, ragCtx, history, userMsg, onStream, genId); if (!rawU.startsWith("ht" + "tp://") && !rawU.startsWith("ht" + "tps://")) rawU = "ht" + "tp://$rawU"; val cleanU = rawU.removeSuffix("/"); val base = cleanU.removeSuffix("/v1/chat/completions").removeSuffix("/api/chat").removeSuffix("/v1").removeSuffix("/"); val isDirect = cleanU.endsWith("/chat/completions") || cleanU.contains("googleapis"); val mod = apiModel.trim().ifEmpty { if (isDirect) "gemini-2.5-flash" else discoverServerModel(base, apiKey.trim()).ifEmpty { "gemma3:1b" } }; val eps = if (isDirect) linkedSetOf(cleanU, "$base/v1/chat/completions") else linkedSetOf("$base/api/chat", "$base/v1/chat/completions", cleanU); for (ep in eps) { val b = JSONObject().put("model", mod).put("stream", streamOn && onStream != null).put("temperature", temp.toDouble()).put("max_tokens", maxTok).put("messages", JSONArray().put(JSONObject().put("role", "system").put("content", fullSys)).put(JSONObject().put("role", "user").put("content", userMsg))); parseAns(postApi(ep, apiKey.trim(), b, 30000, onStream, genId).second)?.let { return it } }; return fallbackLlmOrChat(sysPrompt, ragCtx, history, userMsg, onStream, genId) }
-object ScheduleBriefingManager { private const val CH_ID = "pl_briefing_ch"; private val mdRx = Regex("(\\d{1,2})\\s*월\\s*(\\d{1,2})\\s*일"); private val tmRx = Regex("(오전|오후|아침|점심|저녁|밤)?\\s*(\\d{1,2})\\s*시(?:\\s*(\\d{1,2})\\s*분|\\s*(반))?")
-fun parseLineSchedule(line: String, nowMs: Long = System.currentTimeMillis()): Pair<Long, String>? { val tr = line.trim(); if (tr.isEmpty() || tr.startsWith("☑") || tr.startsWith("#")) return null; val tm = tmRx.find(tr) ?: return null; val ap = tm.groupValues[1]; var hr = tm.groupValues[2].toIntOrNull() ?: return null; val mn = if (tm.groupValues[4] == "반") 30 else (tm.groupValues[3].toIntOrNull() ?: 0); if (hr !in 0..24 || mn !in 0..59) return null; if ((ap == "오후" || ap == "저녁" || ap == "밤") && hr in 1..11) hr += 12 else if (ap == "점심" && hr in 1..3) hr += 12 else if (ap == "오전" && hr == 12) hr = 0; val cal = java.util.Calendar.getInstance().apply { timeInMillis = nowMs; set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0) }; val md = mdRx.find(tr); var dTag = "오늘"; if (md != null) { val mo = (md.groupValues[1].toIntOrNull() ?: 1) - 1; val dy = md.groupValues[2].toIntOrNull() ?: 1; cal.set(java.util.Calendar.MONTH, mo.coerceIn(0, 11)); cal.set(java.util.Calendar.DAY_OF_MONTH, dy.coerceIn(1, 31)); dTag = "${mo + 1}/${dy}" } else if (tr.contains("모레")) { cal.add(java.util.Calendar.DAY_OF_YEAR, 2); dTag = "모레" } else if (tr.contains("내일")) { cal.add(java.util.Calendar.DAY_OF_YEAR, 1); dTag = "내일" }; cal.set(java.util.Calendar.HOUR_OF_DAY, hr.coerceIn(0, 23)); cal.set(java.util.Calendar.MINUTE, mn); if (md == null && !tr.contains("내일") && !tr.contains("모레") && !tr.contains("오늘") && cal.timeInMillis <= nowMs) { cal.add(java.util.Calendar.DAY_OF_YEAR, 1); dTag = "내일" }; return cal.timeInMillis to "$dTag %02d:%02d".format(hr.coerceIn(0, 23), mn) }
-fun detectNoteScheduleLabel(n: NoteItem): String? { val now = System.currentTimeMillis(); for (ln in n.content.lines()) { val p = parseLineSchedule(ln, now); if (p != null && p.first > now - 3600000L) return p.second }; return null }
-fun loadMorningHour(ctx: Context): Int = ctx.getSharedPreferences("pl_ai_v4_custom", 0).getInt("brief_morning_hr", -1)
-fun setMorningHour(ctx: Context, hr: Int): String { ctx.getSharedPreferences("pl_ai_v4_custom", 0).edit().putInt("brief_morning_hr", hr).apply(); scheduleMorningAlarm(ctx, hr); return if (hr < 0) "🔕 모닝 브리핑 알림 해제됨" else "🌅 매일 오전 ${hr}:00 모닝 브리핑 예약됨" }
-private fun setSafe(am: android.app.AlarmManager, atMs: Long, pi: android.app.PendingIntent) { if (android.os.Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, atMs, pi) else runCatching { am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, atMs, pi) }.onFailure { am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, atMs, pi) } }
-fun scheduleMorningAlarm(ctx: Context, hr: Int = loadMorningHour(ctx)) = runCatching { val am = ctx.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager; val pi = android.app.PendingIntent.getBroadcast(ctx, 7700, android.content.Intent(ctx, BriefingReceiver::class.java).putExtra("mode", "MORNING"), android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE); am.cancel(pi); if (hr in 5..11) { val cal = java.util.Calendar.getInstance().apply { set(java.util.Calendar.HOUR_OF_DAY, hr); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); if (timeInMillis <= System.currentTimeMillis() + 5000L) add(java.util.Calendar.DAY_OF_YEAR, 1) }; setSafe(am, cal.timeInMillis, pi) } }
-fun syncNoteAlarms(ctx: Context, notes: List<NoteItem>): Int = runCatching { val am = ctx.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager; for (s in 0 until 12) { android.app.PendingIntent.getBroadcast(ctx, 7800 + s, android.content.Intent(ctx, BriefingReceiver::class.java), android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE)?.let { am.cancel(it) } }; val now = System.currentTimeMillis(); val up = notes.flatMap { n -> n.content.lines().mapNotNull { ln -> parseLineSchedule(ln, now)?.let { (ms, lb) -> if (ms > now + 15000L) Triple(ms, lb, ln.replace("☐", "").trim().take(48)) else null } } }.sortedBy { it.first }.take(12); up.forEachIndexed { idx, (ms, lb, bd) -> val pi = android.app.PendingIntent.getBroadcast(ctx, 7800 + idx, android.content.Intent(ctx, BriefingReceiver::class.java).putExtra("mode", "ITEM").putExtra("title", "⏰ 일정 알림 ($lb)").putExtra("body", bd), android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE); setSafe(am, ms, pi) }; scheduleMorningAlarm(ctx); up.size }.getOrDefault(0)
-fun buildBriefingSummary(notes: List<NoteItem>): String { val now = System.currentTimeMillis(); val timed = notes.flatMap { n -> n.content.lines().mapNotNull { ln -> parseLineSchedule(ln, now)?.let { (ms, lb) -> if (ms > now - 7200000L) Triple(ms, lb, ln.replace("☐", "").trim()) else null } } }.sortedBy { it.first }.take(5); val checks = notes.flatMap { n -> n.content.lines().filter { it.trimStart().startsWith("☐ ") }.map { it.trim().removePrefix("☐ ").trim() } }.take(6); return buildString { append("📋 오늘의 일정·체크리스트 브리핑\n"); if (timed.isNotEmpty()) { append("⏰ 시간 일정 (${timed.size}건):\n"); timed.forEach { (_, lb, tx) -> append("• [$lb] ${tx.take(42)}\n") } }; if (checks.isNotEmpty()) { append("☑ 미완료 할 일 (${checks.size}건):\n"); checks.forEach { tx -> append("• ${tx.take(42)}\n") } }; if (timed.isEmpty() && checks.isEmpty()) append("예정된 시간 일정이나 미완료 할 일이 없습니다.") }.trim() }
-fun postBriefingNotification(ctx: Context, title: String, body: String, notifId: Int = 7701) = runCatching { val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager; if (android.os.Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(android.app.NotificationChannel(CH_ID, "일정 브리핑", android.app.NotificationManager.IMPORTANCE_HIGH)); val cPi = android.app.PendingIntent.getActivity(ctx, notifId, android.content.Intent(ctx, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP), android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE); val b = if (android.os.Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(ctx, CH_ID) else android.app.Notification.Builder(ctx); nm.notify(notifId, b.setSmallIcon(android.R.drawable.ic_popup_reminder).setContentTitle(title).setContentText(body.lines().firstOrNull() ?: body).setStyle(android.app.Notification.BigTextStyle().bigText(body)).setContentIntent(cPi).setAutoCancel(true).build()) } }
+data class BriefingSlot(
+    val id: Long,
+    val hour: Int,
+    val minute: Int,
+    val daysMode: String = "DAILY",
+    val enabled: Boolean = true
+)
+
+data class SmartBriefingConfig(
+    val enabled: Boolean = false,
+    val slots: List<BriefingSlot> = emptyList(),
+    val forceOnSilent: Boolean = false,
+    val skipIfEmpty: Boolean = true
+)
+
+data class VoiceBriefingPayload(
+    val hasItems: Boolean,
+    val visualSummary: String,
+    val spokenScript: String
+)
+
+object ScheduleBriefingManager {
+    private const val CH_ID = "pl_briefing_ch"
+    private const val PREF_KEY = "smart_brief_cfg_v1"
+    private val mdRx = Regex("(\d{1,2})\s*월\s*(\d{1,2})\s*일")
+    private val tmRx = Regex("(오전|오후|아침|점심|저녁|밤)?\s*(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분|\s*(반))?")
+    private val monitorScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+    private var monitorJob: kotlinx.coroutines.Job? = null
+
+    fun parseLineSchedule(line: String, nowMs: Long = System.currentTimeMillis()): Pair<Long, String>? {
+        val tr = line.trim()
+        if (tr.isEmpty() || tr.startsWith("☑") || tr.startsWith("#")) return null
+        val tm = tmRx.find(tr) ?: return null
+        val ap = tm.groupValues[1]
+        var hr = tm.groupValues[2].toIntOrNull() ?: return null
+        val mn = if (tm.groupValues[4] == "반") 30 else (tm.groupValues[3].toIntOrNull() ?: 0)
+        if (hr !in 0..24 || mn !in 0..59) return null
+        if ((ap == "오후" || ap == "저녁" || ap == "밤") && hr in 1..11) hr += 12
+        else if (ap == "점심" && hr in 1..3) hr += 12
+        else if (ap == "오전" && hr == 12) hr = 0
+        val cal = java.util.Calendar.getInstance().apply {
+            timeInMillis = nowMs
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val md = mdRx.find(tr)
+        var dTag = "오늘"
+        if (md != null) {
+            val mo = (md.groupValues[1].toIntOrNull() ?: 1) - 1
+            val dy = md.groupValues[2].toIntOrNull() ?: 1
+            cal.set(java.util.Calendar.MONTH, mo.coerceIn(0, 11))
+            cal.set(java.util.Calendar.DAY_OF_MONTH, dy.coerceIn(1, 31))
+            dTag = "${mo + 1}/${dy}"
+        } else if (tr.contains("모레")) {
+            cal.add(java.util.Calendar.DAY_OF_YEAR, 2)
+            dTag = "모레"
+        } else if (tr.contains("내일")) {
+            cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+            dTag = "내일"
+        }
+        cal.set(java.util.Calendar.HOUR_OF_DAY, hr.coerceIn(0, 23))
+        cal.set(java.util.Calendar.MINUTE, mn)
+        if (md == null && !tr.contains("내일") && !tr.contains("모레") && !tr.contains("오늘") && cal.timeInMillis <= nowMs) {
+            cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+            dTag = "내일"
+        }
+        return cal.timeInMillis to "$dTag %02d:%02d".format(hr.coerceIn(0, 23), mn)
+    }
+
+    fun detectNoteScheduleLabel(n: NoteItem): String? {
+        val now = System.currentTimeMillis()
+        for (ln in n.content.lines()) {
+            val p = parseLineSchedule(ln, now)
+            if (p != null && p.first > now - 3600000L) return p.second
+        }
+        return null
+    }
+
+    fun formatSlotTime(hour: Int, minute: Int): String {
+        val ampm = if (hour < 12) "오전" else "오후"
+        val h12 = when {
+            hour == 0 -> 12
+            hour > 12 -> hour - 12
+            else -> hour
+        }
+        return "%s %d:%02d".format(ampm, h12, minute)
+    }
+
+    fun daysLabel(daysMode: String): String = when (daysMode) {
+        "WEEKDAY" -> "평일"
+        "WEEKEND" -> "주말"
+        else -> "매일"
+    }
+
+    fun nextDaysMode(cur: String): String = when (cur) {
+        "DAILY" -> "WEEKDAY"
+        "WEEKDAY" -> "WEEKEND"
+        else -> "DAILY"
+    }
+
+    fun loadBriefCfg(ctx: Context): SmartBriefingConfig = runCatching {
+        val sp = ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE)
+        val raw = sp.getString(PREF_KEY, null)
+        if (raw.isNullOrBlank()) {
+            return SmartBriefingConfig(enabled = false, slots = emptyList(), forceOnSilent = false, skipIfEmpty = true)
+        }
+        val jo = org.json.JSONObject(raw)
+        val arr = jo.optJSONArray("slots") ?: org.json.JSONArray()
+        val list = buildList {
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                add(
+                    BriefingSlot(
+                        id = o.optLong("id", i + 1L),
+                        hour = o.optInt("h", 8).coerceIn(0, 23),
+                        minute = o.optInt("m", 0).coerceIn(0, 59),
+                        daysMode = o.optString("days", "DAILY"),
+                        enabled = o.optBoolean("on", true)
+                    )
+                )
+            }
+        }.sortedBy { it.hour * 60 + it.minute }
+        SmartBriefingConfig(
+            enabled = jo.optBoolean("enabled", false),
+            slots = list,
+            forceOnSilent = jo.optBoolean("forceSilent", false),
+            skipIfEmpty = jo.optBoolean("skipEmpty", true)
+        )
+    }.getOrDefault(SmartBriefingConfig())
+
+    fun saveAndSync(ctx: Context, cfg: SmartBriefingConfig): SmartBriefingConfig {
+        val sorted = cfg.slots.sortedBy { it.hour * 60 + it.minute }.take(16)
+        val normalized = cfg.copy(slots = sorted)
+        runCatching {
+            val arr = org.json.JSONArray()
+            sorted.forEach { s ->
+                arr.put(
+                    org.json.JSONObject()
+                        .put("id", s.id)
+                        .put("h", s.hour)
+                        .put("m", s.minute)
+                        .put("days", s.daysMode)
+                        .put("on", s.enabled)
+                )
+            }
+            val jo = org.json.JSONObject()
+                .put("enabled", normalized.enabled)
+                .put("forceSilent", normalized.forceOnSilent)
+                .put("skipEmpty", normalized.skipIfEmpty)
+                .put("slots", arr)
+            ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE)
+                .edit()
+                .putString(PREF_KEY, jo.toString())
+                .putInt("brief_morning_hr", -1)
+                .apply()
+        }
+        rescheduleAllBriefingAlarms(ctx, normalized)
+        return normalized
+    }
+
+    fun loadMorningHour(ctx: Context): Int {
+        val c = loadBriefCfg(ctx)
+        return if (c.enabled) (c.slots.firstOrNull { it.enabled }?.hour ?: -1) else -1
+    }
+
+    fun setMorningHour(ctx: Context, hr: Int): String {
+        val cur = loadBriefCfg(ctx)
+        return if (hr < 0) {
+            saveAndSync(ctx, cur.copy(enabled = false))
+            "🔕 자동 일정 브리핑 해제됨"
+        } else {
+            val nxSlots = if (cur.slots.any { it.hour == hr && it.minute == 0 }) cur.slots else (cur.slots + BriefingSlot(System.currentTimeMillis(), hr, 0, "DAILY", true))
+            saveAndSync(ctx, cur.copy(enabled = true, slots = nxSlots))
+            "⏰ ${formatSlotTime(hr, 0)} 자동 브리핑 예약됨"
+        }
+    }
+
+    private fun matchesDayOfWeek(calDayOfWeek: Int, daysMode: String): Boolean = when (daysMode) {
+        "WEEKDAY" -> calDayOfWeek in java.util.Calendar.MONDAY..java.util.Calendar.FRIDAY
+        "WEEKEND" -> calDayOfWeek == java.util.Calendar.SATURDAY || calDayOfWeek == java.util.Calendar.SUNDAY
+        else -> true
+    }
+
+    fun computeNextSlotMillis(slot: BriefingSlot, nowMs: Long = System.currentTimeMillis()): Long? {
+        if (!slot.enabled) return null
+        for (offset in 0..7) {
+            val cal = java.util.Calendar.getInstance().apply {
+                timeInMillis = nowMs
+                add(java.util.Calendar.DAY_OF_YEAR, offset)
+                set(java.util.Calendar.HOUR_OF_DAY, slot.hour.coerceIn(0, 23))
+                set(java.util.Calendar.MINUTE, slot.minute.coerceIn(0, 59))
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+            if (matchesDayOfWeek(cal.get(java.util.Calendar.DAY_OF_WEEK), slot.daysMode) && cal.timeInMillis > nowMs + 4000L) {
+                return cal.timeInMillis
+            }
+        }
+        return null
+    }
+
+    fun nextSummaryBadge(cfg: SmartBriefingConfig, nowMs: Long = System.currentTimeMillis()): String {
+        if (!cfg.enabled) return "OFF"
+        val active = cfg.slots.filter { it.enabled }
+        if (active.isEmpty()) return "시간 미지정"
+        val nextPair = active.mapNotNull { s -> computeNextSlotMillis(s, nowMs)?.let { ms -> ms to s } }.minByOrNull { it.first }
+        val nextSlot = nextPair?.second ?: active.first()
+        val extra = if (active.size > 1) " 외 ${active.size - 1}회" else ""
+        return "${formatSlotTime(nextSlot.hour, nextSlot.minute)}$extra"
+    }
+
+    private fun setSafe(am: android.app.AlarmManager, atMs: Long, pi: android.app.PendingIntent) {
+        if (android.os.Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
+            am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, atMs, pi)
+        } else {
+            runCatching { am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, atMs, pi) }
+                .onFailure { am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, atMs, pi) }
+        }
+    }
+
+    fun rescheduleAllBriefingAlarms(ctx: Context, cfg: SmartBriefingConfig = loadBriefCfg(ctx)) = runCatching {
+        val am = ctx.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        android.app.PendingIntent.getBroadcast(
+            ctx, 7700, android.content.Intent(ctx, BriefingReceiver::class.java),
+            android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+        )?.let { am.cancel(it); it.cancel() }
+        for (i in 0 until 20) {
+            android.app.PendingIntent.getBroadcast(
+                ctx, 7710 + i, android.content.Intent(ctx, BriefingReceiver::class.java),
+                android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+            )?.let { am.cancel(it); it.cancel() }
+        }
+        if (!cfg.enabled) return@runCatching
+        val nowMs = System.currentTimeMillis()
+        cfg.slots.filter { it.enabled }.take(16).forEachIndexed { idx, slot ->
+            val nextMs = computeNextSlotMillis(slot, nowMs) ?: return@forEachIndexed
+            val itn = android.content.Intent(ctx, BriefingReceiver::class.java)
+                .putExtra("mode", "AUTO_BRIEF")
+                .putExtra("slot_id", slot.id)
+                .putExtra("slot_label", formatSlotTime(slot.hour, slot.minute))
+            val pi = android.app.PendingIntent.getBroadcast(
+                ctx, 7710 + idx, itn,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            setSafe(am, nextMs, pi)
+        }
+    }
+
+    fun scheduleMorningAlarm(ctx: Context, hr: Int = -1) {
+        rescheduleAllBriefingAlarms(ctx)
+    }
+
+    fun syncNoteAlarms(ctx: Context, notes: List<NoteItem>): Int = runCatching {
+        val am = ctx.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        for (s in 0 until 12) {
+            android.app.PendingIntent.getBroadcast(
+                ctx, 7800 + s, android.content.Intent(ctx, BriefingReceiver::class.java),
+                android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+            )?.let { am.cancel(it) }
+        }
+        val now = System.currentTimeMillis()
+        val up = notes.flatMap { n ->
+            n.content.lines().mapNotNull { ln ->
+                parseLineSchedule(ln, now)?.let { (ms, lb) ->
+                    if (ms > now + 15000L) Triple(ms, lb, ln.replace("☐", "").trim().take(48)) else null
+                }
+            }
+        }.sortedBy { it.first }.take(12)
+        up.forEachIndexed { idx, (ms, lb, bd) ->
+            val pi = android.app.PendingIntent.getBroadcast(
+                ctx, 7800 + idx,
+                android.content.Intent(ctx, BriefingReceiver::class.java)
+                    .putExtra("mode", "ITEM")
+                    .putExtra("title", "⏰ 일정 알림 ($lb)")
+                    .putExtra("body", bd),
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            setSafe(am, ms, pi)
+        }
+        rescheduleAllBriefingAlarms(ctx)
+        up.size
+    }.getOrDefault(0)
+
+    fun buildVoiceBriefingPayload(notes: List<NoteItem>, slotLabel: String = ""): VoiceBriefingPayload {
+        val now = System.currentTimeMillis()
+        val timed = notes.flatMap { n ->
+            n.content.lines().mapNotNull { ln ->
+                parseLineSchedule(ln, now)?.let { (ms, lb) ->
+                    if (ms > now - 7200000L) Triple(ms, lb, ln.replace("☐", "").replace(Regex("#[^\s#]+"), "").trim()) else null
+                }
+            }
+        }.sortedBy { it.first }.take(6)
+        val checks = notes.flatMap { n ->
+            n.content.lines().filter { it.trimStart().startsWith("☐ ") }.map {
+                it.trim().removePrefix("☐ ").replace(Regex("#[^\s#]+"), "").trim()
+            }
+        }.filter { it.isNotEmpty() }.distinct().take(6)
+
+        val hasItems = timed.isNotEmpty() || checks.isNotEmpty()
+        val visual = buildString {
+            append("📋 오늘의 일정·체크리스트 브리핑\n")
+            if (timed.isNotEmpty()) {
+                append("⏰ 시간 일정 (${timed.size}건):\n")
+                timed.forEach { (_, lb, tx) -> append("• [$lb] ${tx.take(44)}\n") }
+            }
+            if (checks.isNotEmpty()) {
+                append("☑ 미완료 할 일 (${checks.size}건):\n")
+                checks.forEach { tx -> append("• ${tx.take(44)}\n") }
+            }
+            if (!hasItems) append("예정된 시간 일정이나 미완료 할 일이 없습니다.")
+        }.trim()
+
+        val curHr = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val greet = when {
+            curHr in 5..10 -> "좋은 아침입니다."
+            curHr in 11..16 -> "안녕하세요."
+            curHr in 17..21 -> "편안한 저녁입니다."
+            else -> "안녕하세요."
+        }
+        val spoken = if (!hasItems) {
+            "$greet 현재 예정된 시간 일정이나 미완료된 할 일이 없습니다."
+        } else {
+            buildString {
+                append(greet).append(" ")
+                if (slotLabel.isNotBlank()) append("$slotLabel ")
+                append("일정 브리핑을 시작합니다. ")
+                if (timed.isNotEmpty()) {
+                    append("예정된 시간 일정은 총 ${timed.size}건입니다. ")
+                    timed.forEachIndexed { idx, (_, lb, tx) ->
+                        val naturalTime = lb.replace(":00", "시 정각").replace(":", "시 ") + (if (lb.endsWith(":00")) "" else "분")
+                        append("${idx + 1}번, $naturalTime, ${tx.take(60)}. ")
+                    }
+                }
+                if (checks.isNotEmpty()) {
+                    append("미완료된 할 일은 ${checks.size}건입니다. ")
+                    checks.forEachIndexed { idx, tx ->
+                        append("${idx + 1}번, ${tx.take(60)}. ")
+                    }
+                }
+                append("이상 브리핑을 마칩니다.")
+            }.trim()
+        }
+        return VoiceBriefingPayload(hasItems, visual, spoken)
+    }
+
+    fun buildBriefingSummary(notes: List<NoteItem>): String = buildVoiceBriefingPayload(notes).visualSummary
+
+    fun isHeadsetOrBtConnected(am: android.media.AudioManager): Boolean = runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= 23) {
+            am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).any { d ->
+                d.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    d.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    d.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    d.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    d.type == android.media.AudioDeviceInfo.TYPE_USB_HEADSET ||
+                    (android.os.Build.VERSION.SDK_INT >= 31 && (d.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET || d.type == android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER))
+            }
+        } else false
+    }.getOrDefault(false)
+
+    fun stopBriefingPlayback(ctx: Context) {
+        briefingSpeakingNow = false
+        monitorJob?.cancel()
+        stopOneShotTts()
+        runCatching {
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            nm.cancel(7701)
+        }
+        keepAw(ctx, false)
+    }
+
+    fun triggerScheduledBriefingFromAlarm(ctx: Context, slotLabel: String) {
+        val appC = ctx.applicationContext
+        val cfg = loadBriefCfg(appC)
+        rescheduleAllBriefingAlarms(appC, cfg)
+        if (!cfg.enabled || cfg.slots.none { it.enabled }) return
+        val notes = LauncherRepository(appC).loadNotes()
+        val payload = buildVoiceBriefingPayload(notes, slotLabel)
+        if (!payload.hasItems && cfg.skipIfEmpty) return
+
+        val am = appC.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val ringer = am.ringerMode
+        val headset = isHeadsetOrBtConnected(am)
+        val shouldSpeak = cfg.forceOnSilent || ringer == android.media.AudioManager.RINGER_MODE_NORMAL || headset
+        val useAlarmStream = cfg.forceOnSilent && ringer != android.media.AudioManager.RINGER_MODE_NORMAL && !headset
+
+        if (!shouldSpeak) {
+            postBriefingNotification(
+                appC,
+                "📳 매너모드 일정 브리핑 ($slotLabel)",
+                payload.visualSummary,
+                7701,
+                withStopAction = false
+            )
+            return
+        }
+
+        briefingSpeakingNow = true
+        keepAw(appC, true)
+        postBriefingNotification(
+            appC,
+            "🔊 자동 일정 브리핑 낭독 중 ($slotLabel)",
+            payload.visualSummary,
+            7701,
+            withStopAction = true
+        )
+        speakBriefingWithStream(appC, payload.spokenScript, useAlarmStream)
+        monitorJob?.cancel()
+        monitorJob = monitorScope.launch {
+            kotlinx.coroutines.delay(1400L)
+            var ticks = 0
+            while (briefingSpeakingNow && ticks < 360) {
+                if (!isTtsBusyNow() && (System.currentTimeMillis() - ttsLastEnqueueMs) >= 600L) break
+                kotlinx.coroutines.delay(250L)
+                ticks++
+            }
+            briefingSpeakingNow = false
+            keepAw(appC, false)
+        }
+    }
+
+    fun postBriefingNotification(
+        ctx: Context,
+        title: String,
+        body: String,
+        notifId: Int = 7701,
+        withStopAction: Boolean = false
+    ) = runCatching {
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            nm.createNotificationChannel(android.app.NotificationChannel(CH_ID, "일정 브리핑", android.app.NotificationManager.IMPORTANCE_HIGH))
+        }
+        val cPi = android.app.PendingIntent.getActivity(
+            ctx, notifId,
+            android.content.Intent(ctx, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val b = if (android.os.Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(ctx, CH_ID) else android.app.Notification.Builder(ctx)
+        b.setSmallIcon(android.R.drawable.ic_popup_reminder)
+            .setContentTitle(title)
+            .setContentText(body.lines().firstOrNull() ?: body)
+            .setStyle(android.app.Notification.BigTextStyle().bigText(body))
+            .setContentIntent(cPi)
+            .setAutoCancel(true)
+        if (withStopAction) {
+            val stopPi = android.app.PendingIntent.getBroadcast(
+                ctx, 7709,
+                android.content.Intent(ctx, BriefingReceiver::class.java).putExtra("mode", "STOP_BRIEF"),
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            b.addAction(android.app.Notification.Action.Builder(android.R.drawable.ic_media_pause, "⏹️ 낭독 중지", stopPi).build())
+        }
+        nm.notify(notifId, b.build())
+    }
+}

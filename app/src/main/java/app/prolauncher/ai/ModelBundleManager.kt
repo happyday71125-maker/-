@@ -290,6 +290,18 @@ Text("스마트폰 홈 버튼을 눌렀을 때 Pro Launcher AI가 바로 열리�
 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = onAskHome) { Text("🏠 기본 홈 권한 요청", fontSize = (ui.subSp.value + 1).sp) }; OutlinedButton(onClick = onSysHome) { Text("시스템 기본 앱 설정", fontSize = (ui.subSp.value + 1).sp) } }
 }
 }
+Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, Color(0xFF23324B)), modifier = Modifier.fillMaxWidth()) {
+Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+Text("🤖 자비스 음성 호출·접근성·도움말", fontWeight = FontWeight.Bold, fontSize = ui.bodySp, color = CA)
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+ChipBtn(if (wakeOnly) "👂 호출어 대기 ON (${wakeWord})" else "🎙️ 상시 반응 모드", wakeOnly, CA) { setWakeOnly(ctx, !wakeOnly) }
+ChipBtn(if (ProJarvisAccessibilityService.inst != null) "🤖 접근성 제어 ON" else "⚙️ 접근성 권한 켜기", ProJarvisAccessibilityService.inst != null, CG) {
+runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+}
+ChipBtn("❓ 전체 기능 도움말", false, CW) { onClose(); showEmojiHelp = true }
+}
+}
+}
 }
 }
 }

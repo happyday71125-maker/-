@@ -100,25 +100,65 @@ fun stop(ctx: Context) {
 on = false; job?.cancel(); job = null; stopOneShotTts()
 status = "⏹️ 독서대 연속 낭독 중지됨"; keepAw(appCtxRef ?: ctx.applicationContext, false)
 }
+private fun findFirstSentenceCut(text: String, maxProbe: Int = 320): Int {
+val lim = minOf(text.length, maxProbe)
+for (i in 0 until lim) {
+val c = text[i]
+if (c == '\n' && i + 1 < text.length && text[i + 1] == '\n') return i + 2
+val isDec = c == '.' && i > 0 && i + 1 < text.length && text[i - 1].isDigit() && text[i + 1].isDigit()
+if (!isDec && (c == '.' || c == '!' || c == '?' || c == '。' || c == '…')) {
+var end = i + 1
+while (end < text.length && text[end] in charArrayOf('"', '\'', '”', '’', ')', ']', '』', '」')) end++
+if (end >= text.length || text[end].isWhitespace()) return end
+}
+}
+return -1
+}
 private fun runLoop(appC: Context, firstExcerpt: String) {
 job?.cancel()
 job = scope.launch {
 var useEx = firstExcerpt
+var carrySkip = 0
 while (on) {
 val b = booksRef.find { it.id == bookId }
 if (b == null || b.pages.isEmpty()) { on = false; keepAw(appC, false); break }
 val curIdx = pageIdx.coerceIn(0, b.pages.size - 1); pageIdx = curIdx
-val rawTx = if (useEx.isNotEmpty()) { val e = useEx; useEx = ""; e } else b.pages.getOrElse(curIdx) { "" }.trim()
+var rawTx = if (useEx.isNotEmpty()) {
+carrySkip = 0
+val e = useEx
+useEx = ""
+e
+} else {
+val pageRaw = b.pages.getOrElse(curIdx) { "" }
+val sliced = if (carrySkip in 1..pageRaw.length) pageRaw.substring(carrySkip) else pageRaw
+carrySkip = 0
+sliced.trim()
+}
+if (rawTx.isNotBlank() && curIdx + 1 < b.pages.size) {
+val lastCh = rawTx.trimEnd().lastOrNull { it != '"' && it != '\'' && it != '”' && it != '’' && it != ')' && it != ']' }
+val endsClean = lastCh == null || lastCh == '.' || lastCh == '!' || lastCh == '?' || lastCh == '。' || lastCh == '…' || lastCh == ':' || lastCh == '】' || lastCh == '』'
+if (!endsClean) {
+val nextRaw = b.pages[curIdx + 1]
+val cutNext = findFirstSentenceCut(nextRaw, 320)
+if (cutNext > 0) {
+val tail = nextRaw.substring(0, cutNext).trim()
+if (tail.isNotEmpty()) {
+rawTx = rawTx.trimEnd() + " " + tail
+carrySkip = cutNext
+}
+}
+}
+}
 status = "🔊 『${b.title}』 ${curIdx + 1}/${b.pages.size}섹션 낭독 중 (자동 넘김 · 화면 OFF 유지)"
 if (rawTx.isNotBlank()) {
-keepAw(appC, true); speakOneShot(appC, rawTx); delay(500L)
+keepAw(appC, true); speakOneShot(appC, rawTx); delay(240L)
 var gd = 0
-while (on && gd < 7200) {
+while (on && gd < 14400) {
 if (wakeLockRef?.isHeld != true) keepAw(appC, true)
-if (!isTtsBusyNow() && (System.currentTimeMillis() - ttsLastEnqueueMs) >= 750L) break
-delay(250L); gd++
+if (!isTtsBusyNow() && (System.currentTimeMillis() - ttsLastEnqueueMs) >= 280L) break
+delay(120L); gd++
 }
-} else delay(400L)
+} else delay(120L)
 if (!on) break
 val latestB = booksRef.find { it.id == bookId } ?: b
 if (curIdx + 1 < latestB.pages.size) {
@@ -129,7 +169,7 @@ val updated = booksRef.map { if (it.id == bookId) it.copy(currentPage = nextIdx)
 booksRef = updated
 runCatching { (repoRef ?: LauncherRepository(appC)).saveBooks(updated) }
 uiP(0L) { runCatching { saveCb(updated) } }
-delay(320L)
+delay(80L)
 } else {
 status = "✅ 『${latestB.title}』 마지막 페이지까지 낭독을 완료했습니다!"
 on = false; keepAw(appC, false); break

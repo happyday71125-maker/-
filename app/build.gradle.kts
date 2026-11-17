@@ -10,8 +10,8 @@ android {
         applicationId = "app.prolauncher.ai.v3"
         minSdk = 26
         targetSdk = 34
-        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.let { 103000 + it } ?: 103400)
-        versionName = "10.3.1"
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.let { 103000 + it } ?: 103500)
+        versionName = "10.3.2"
     }
     if (file("fixed.keystore").let { it.exists() && it.length() > 100L }) {
         signingConfigs { getByName("debug") { storeFile = file("fixed.keystore") } }

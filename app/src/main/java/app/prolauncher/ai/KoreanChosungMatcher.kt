@@ -280,8 +280,8 @@ data class VoiceBriefingPayload(
 object ScheduleBriefingManager {
     private const val CH_ID = "pl_briefing_ch"
     private const val PREF_KEY = "smart_brief_cfg_v1"
-    private val mdRx = Regex("(\d{1,2})\s*월\s*(\d{1,2})\s*일")
-    private val tmRx = Regex("(오전|오후|아침|점심|저녁|밤)?\s*(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분|\s*(반))?")
+    private val mdRx = Regex("([0-9]{1,2})[ ]*월[ ]*([0-9]{1,2})[ ]*일")
+    private val tmRx = Regex("(오전|오후|아침|점심|저녁|밤)?[ ]*([0-9]{1,2})[ ]*시(?:[ ]*([0-9]{1,2})[ ]*분|[ ]*(반))?")
     private val monitorScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
     private var monitorJob: kotlinx.coroutines.Job? = null
 
@@ -544,13 +544,13 @@ object ScheduleBriefingManager {
         val timed = notes.flatMap { n ->
             n.content.lines().mapNotNull { ln ->
                 parseLineSchedule(ln, now)?.let { (ms, lb) ->
-                    if (ms > now - 7200000L) Triple(ms, lb, ln.replace("☐", "").replace(Regex("#[^\s#]+"), "").trim()) else null
+                    if (ms > now - 7200000L) Triple(ms, lb, ln.replace("☐", "").replace(Regex("#[^ #]+"), "").trim()) else null
                 }
             }
         }.sortedBy { it.first }.take(6)
         val checks = notes.flatMap { n ->
             n.content.lines().filter { it.trimStart().startsWith("☐ ") }.map {
-                it.trim().removePrefix("☐ ").replace(Regex("#[^\s#]+"), "").trim()
+                it.trim().removePrefix("☐ ").replace(Regex("#[^ #]+"), "").trim()
             }
         }.filter { it.isNotEmpty() }.distinct().take(6)
 

@@ -43,7 +43,6 @@ val showBullet: Boolean = true,
 val showDate: Boolean = true,
 val showDivider: Boolean = true,
 val showNewline: Boolean = true,
-val autoSumLong: Boolean = false,
 val customLabel: String = "📌 템플릿",
 val customText: String = "[제목]\n☐ 항목: "
 )
@@ -65,13 +64,13 @@ fun loadBtnCfg(ctx: Context): QuickBtnConfig {
 val p = prefs(ctx)
 return QuickBtnConfig(
 p.getBoolean("b_check", true), p.getBoolean("b_bullet", true), p.getBoolean("b_date", true),
-p.getBoolean("b_div", true), p.getBoolean("b_nl", true), p.getBoolean("b_autosum", false),
+p.getBoolean("b_div", true), p.getBoolean("b_nl", true),
 p.getString("b_clabel", "📌 템플릿") ?: "📌 템플릿", p.getString("b_ctext", "[메모]\n☐ 항목: ") ?: "[메모]\n☐ 항목: "
 )
 }
 fun saveBtnCfg(ctx: Context, c: QuickBtnConfig) {
 prefs(ctx).edit().putBoolean("b_check", c.showCheck).putBoolean("b_bullet", c.showBullet).putBoolean("b_date", c.showDate)
-.putBoolean("b_div", c.showDivider).putBoolean("b_nl", c.showNewline).putBoolean("b_autosum", c.autoSumLong)
+.putBoolean("b_div", c.showDivider).putBoolean("b_nl", c.showNewline)
 .putString("b_clabel", c.customLabel).putString("b_ctext", c.customText).apply()
 }
 fun sanitizeNotes(notes: List<NoteItem>, repo: LauncherRepository): List<NoteItem> {
@@ -214,7 +213,6 @@ var isDefHome by remember { mutableStateOf(repo.isDefaultHomeApp()) }
 var drawerOpen by remember { mutableStateOf(false) }
 var settingsOpen by remember { mutableStateOf(false) }
 var interruptApp by remember { mutableStateOf<AppEntry?>(null) }
-var quotedText by remember { mutableStateOf<String?>(null) }
 val homeRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { isDefHome = repo.isDefaultHomeApp() }
 fun askDefaultHome() { runCatching { homeRoleLauncher.launch(repo.buildRequestDefaultHomeIntent()) }.onFailure { repo.openSystemDefaultAppsSettings() } }
 fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
@@ -240,9 +238,7 @@ onSaveToMemo = { raw -> val nx = listOf(NoteItem(nextId(), makeHashtags(raw, "�
 books, cfg, repo,
 onSaveBooks = { books = it; repo.saveBooks(it) },
 onCfg = { cfg = it; repo.saveConfig(it) },
-onQuote = { q -> quotedText = q; scope.launch { pager.animateScrollToPage(3) } },
 onHome = { scope.launch { pager.animateScrollToPage(2) } },
-onQuickAddNote = { raw -> val nx = appendOrCreateBookNote(notes, "독서", raw); notes = nx; repo.saveNotes(nx) },
 onBookNote = { bTitle, body, goMemo -> val nx = appendOrCreateBookNote(notes, bTitle, body); notes = nx; repo.saveNotes(nx); if (goMemo) scope.launch { pager.animateScrollToPage(3) } }
 )
 2 -> HomeView(
@@ -259,8 +255,8 @@ onNavTab = { pg -> scope.launch { pager.animateScrollToPage(pg.coerceIn(0, 4)) }
 onToggleCheck = { nid, lIdx -> val nx = notes.map { if (it.id == nid) SmartMemoClassifier.toggleCheckLine(it, lIdx) else it }; notes = nx; repo.saveNotes(nx) },
 onLeftWriter = { scope.launch { pager.animateScrollToPage(0) } }
 )
-3 -> NotesRagView(notes, books, cfg, ai, quotedText, onClearQuote = { quotedText = null }, onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = false)
-4 -> NotesRagView(notes, books, cfg, ai, null, onClearQuote = {}, onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = true)
+3 -> NotesRagView(notes, books, cfg, ai, onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = false)
+4 -> NotesRagView(notes, books, cfg, ai, onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = true)
 }
 }
 AnimatedVisibility(visible = drawerOpen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
@@ -269,7 +265,7 @@ onFav = { repo.toggleFavorite(it.packageName); apps = repo.loadInstalledApps() }
 onInt = { repo.toggleInterrupt(it.packageName); apps = repo.loadInstalledApps() })
 }
 AnimatedVisibility(visible = settingsOpen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
-SettingsSheet(cfg, isDefHome, ai, onAskHome = ::askDefaultHome, onSysHome = { repo.openSystemDefaultAppsSettings() },
+SettingsSheet(cfg, isDefHome, onAskHome = ::askDefaultHome, onSysHome = { repo.openSystemDefaultAppsSettings() },
 onCfg = { cfg = it; repo.saveConfig(it) }, onClose = { settingsOpen = false })
 }
 interruptApp?.let { app ->
@@ -412,11 +408,11 @@ Surface(
             }
             OutlinedTextField(
                 value = JarvisRuntime.input,
-                onValueChange = { JarvisRuntime.input = it; dictAccumText = it },
+                onValueChange = { JarvisRuntime.input = it; syncDictationBuffer(homeCtx, it) },
                 placeholder = {
                     Text(
                         if (JarvisRuntime.on) (if (wakeOnly) "👂 [${wakeWord}] 호출 대기 중..." else "🤖 자비스 경청 중...")
-                        else "메모·일정 기록 또는 AI 질문...",
+                        else "메모·일정 기록 또는 즉석 AI 질문...",
                         fontSize = 12.sp,
                         color = CD
                     )
@@ -425,41 +421,84 @@ Surface(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.weight(1f)
             )
-            if (JarvisRuntime.input.isNotBlank()) {
-                Surface(
-                    color = CG,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.clickable {
-                        val t = JarvisRuntime.input.trim()
-                        if (t.isNotEmpty()) {
-                            JarvisRuntime.input = ""
-                            JarvisRuntime.processUtterance(homeCtx, t, false)
-                        }
-                    }
-                ) {
-                    Text("⏎", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF07090E), modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp))
+if (JarvisRuntime.busy || isAiBusy) {
+Surface(
+                color = Color(0xFFEF4444),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.clickable {
+                    activeGenId++
+                    if (ProLlamaJni.ready) runCatching { ProLlamaJni.abortGeneration() }
+                    JarvisRuntime.busy = false
+                    isAiBusy = false
+                    streamActive = false
+                    stopOneShotTts()
                 }
+            ) {
+                Text("⏹️", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = CW, modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp))
             }
-        }
-        if (JarvisRuntime.input.isNotBlank()) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
-                ChipBtn("📝 메모로 저장", true, CG) {
-                    val t = JarvisRuntime.input.trim()
-                    if (t.isNotEmpty()) {
-                        JarvisRuntime.status = onQuickMemo(t)
-                        JarvisRuntime.input = ""
-                    }
-                }
-                ChipBtn("🦙 AI 채팅으로 질문", false, CA) {
+        } else {
+    
+      val hasTxt = JarvisRuntime.input.isNotBlank()
+            Surface(
+                color = if (hasTxt) CA else Color(0xFF172236),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, if (hasTxt) CA else Color(0xFF2E4057)),
+                modifier = Modifier.clickable {
                     val t = JarvisRuntime.input.trim()
                     if (t.isNotEmpty()) {
                         JarvisRuntime.input = ""
-                        onQuickAi(t)
+                        syncDictationBuffer(homeCtx, "")
+                        aiFolded = false
+                        JarvisRuntime.processUtterance(homeCtx, t, false)
+                    } else {
+                        aiFolded = false
+                        JarvisRuntime.status = "💡 입력창에 궁금한 내용을 적고 [⚡즉석질문]을 누르면 탭 이동 없이 홈 화면에서 바로 AI 답변을 보여줍니다."
                     }
                 }
-                ChipBtn("✕ 비우기", false, CM) { JarvisRuntime.input = "" }
+            ) {
+                Text(
+                    "⚡질문",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (hasTxt) Color(0xFF07090E) else CA,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 9.dp)
+                )
             }
         }
+    }
+    if (JarvisRuntime.input.isNotBlank()) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+            ChipBtn("⚡ 즉석 AI 답변", true, CA) {
+                val t = JarvisRuntime.input.trim()
+                if (t.isNotEmpty()) {
+                    JarvisRuntime.input = ""
+                    syncDictationBuffer(homeCtx, "")
+                    aiFolded = false
+                    JarvisRuntime.processUtterance(homeCtx, t, false)
+                }
+            }
+            ChipBtn("📝 메모로 저장", false, CG) {
+                val t = JarvisRuntime.input.trim()
+                if (t.isNotEmpty()) {
+                    JarvisRuntime.status = onQuickMemo(t)
+                    JarvisRuntime.input = ""
+                    syncDictationBuffer(homeCtx, "")
+                }
+            }
+            ChipBtn("🦙 AI 탭에서 대화", false, CW) {
+                val t = JarvisRuntime.input.trim()
+                if (t.isNotEmpty()) {
+                    JarvisRuntime.input = ""
+                    syncDictationBuffer(homeCtx, "")
+                    onQuickAi(t)
+                }
+            }
+            ChipBtn("✕ 비우기", false, CM) {
+                JarvisRuntime.input = ""
+                syncDictationBuffer(homeCtx, "")
+            }
+        }
+    } 
         val activeSlotCnt = briefCfg.slots.count { it.enabled }
         val isAutoActive = briefCfg.enabled && activeSlotCnt > 0
         val nextBadge = ScheduleBriefingManager.nextSummaryBadge(briefCfg, now.time)

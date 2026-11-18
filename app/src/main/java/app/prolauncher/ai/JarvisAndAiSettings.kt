@@ -281,14 +281,12 @@ var gemmaName by mutableStateOf("미연결")
 var embedName by mutableStateOf("미연결")
 var gemmaMb by mutableStateOf(0L)
 var embedMb by mutableStateOf(0L)
-var uiTick by mutableStateOf(0)
 fun clearStorage(ctx: Context): String {
 appCtxRef = ctx.applicationContext
 releaseAllLocalModels()
 gemmaMb = 0L; embedMb = 0L; gemmaName = "미연결"; embedName = "미연결"
 var b = 0L
 listOf("models", "llm_models", "embed_models").forEach { d -> java.io.File(ctx.applicationContext.filesDir, d).listFiles()?.forEach { b += it.length(); it.delete() } }
-uiTick++
 return "🗑️ GGUF 채팅 · 임베딩젬마2 모델 비우기 완료 (" + (b / 1048576L) + "MB 확보)"
 }
 }

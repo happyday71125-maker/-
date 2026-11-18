@@ -63,8 +63,41 @@ val editTxt = editTfv.text
 fun setEditProg(s: String, fromDict: Boolean = false) { editTfv = TextFieldValue(s, TextRange(s.length)); if (!fromDict && dictMode == 3) syncDictationBuffer(ctx, s) }
 var editCat by remember { mutableStateOf("일상") }
 var editImp by remember { mutableStateOf(false) }
-val bkExp = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { u -> if (u != null) runCatching { val j = ctx.getSharedPreferences("pl_ai_v2_prefs", 0).getString("notes_json", "[]") ?: "[]"; ctx.contentResolver.openOutputStream(u)?.use { it.write(j.toByteArray()) }; aiMsg = "💾 메모 파일 백업 완료 (" + notes.size + "건)" } }
-val bkImp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) runCatching { val j = ctx.contentResolver.openInputStream(u)?.bufferedReader()?.use { it.readText() } ?: ""; if (j.trim().startsWith("[")) { val old = notes; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putString("notes_json", j).commit(); val merged = (repo.loadNotes() + old).distinctBy { it.id }; onSaveNotes(merged); aiMsg = "♻️ 메모 복원 완료 (총 " + merged.size + "건)" } } }
+var pendingTabScope by remember { mutableStateOf("MEMO") }
+var pendingFolderFilter by remember { mutableStateOf<String?>(null) }
+var memoFolderDlgOpen by remember { mutableStateOf(false) }
+var aiFolders by remember { mutableStateOf(FolderRegistry.loadAiFolders(ctx)) }
+var aiSessions by remember { mutableStateOf(FolderRegistry.loadAiSessions(ctx)) }
+var curAiSessionId by remember { mutableStateOf(0L) }
+var curAiFolder by remember { mutableStateOf(aiFolders.firstOrNull() ?: "기본 대화") }
+var aiShelfOpen by remember { mutableStateOf(false) }
+var aiShelfFilter by remember { mutableStateOf("전체") }
+var aiFolderDlgOpen by remember { mutableStateOf(false) }
+LaunchedEffect(LauncherBackupManager.backupRev) {
+if (LauncherBackupManager.backupRev > 0) {
+cats = SMC.loadMemoCats(ctx)
+onSaveNotes(repo.loadNotes())
+aiFolders = FolderRegistry.loadAiFolders(ctx)
+aiSessions = FolderRegistry.loadAiSessions(ctx)
+}
+}
+val bkExp = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { u ->
+if (u != null) runCatching {
+val json = LauncherBackupManager.exportBackupJson(ctx, repo, pendingTabScope, pendingFolderFilter)
+ctx.contentResolver.openOutputStream(u)?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+aiMsg = "✅ [${pendingTabScope}] 백업 저장 완료!"
+}
+}
+val bkImp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+if (u != null) runCatching {
+val j = ctx.contentResolver.openInputStream(u)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+aiMsg = LauncherBackupManager.importAndMergeBackupJson(ctx, repo, j)
+cats = SMC.loadMemoCats(ctx)
+onSaveNotes(repo.loadNotes())
+aiFolders = FolderRegistry.loadAiFolders(ctx)
+aiSessions = FolderRegistry.loadAiSessions(ctx)
+}
+}
 val tabs = remember(cats) { listOf("전체", "★", "☑") + cats }
 val list = remember(notes, selTab, cats) {
 val b = when (selTab) {
@@ -234,8 +267,10 @@ Surface(color = Color(0xFF09101C), shape = RoundedCornerShape(11.dp), border = B
 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Text("💾 메모 데이터 백업 및 복원", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG)
 Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6) {
-ChipBtn("📤 파일로 백업(.json)", false, CG) { bkExp.launch("prolauncher_memos_backup.json") }
-ChipBtn("📂 파일 복원", false, CA) { bkImp.launch(arrayOf("*/*")) }
+
+ChipBtn("📤 전체 메모 백업(.json)", false, CG) { pendingTabScope = "MEMO"; pendingFolderFilter = null; bkExp.launch("prolauncher_memos_backup.json") }
+if (selTab !in listOf("전체", "★", "☑")) ChipBtn("📤 [$selTab] 폴더만 백업", false, CW) { pendingTabScope = "MEMO"; pendingFolderFilter = selTab; bkExp.launch("prolauncher_memos_${selTab}.json") }
+ChipBtn("♻️ 파일 병합 복원(무충돌)", false, CA) { bkImp.launch(arrayOf("*/*")) }
 ChipBtn("⚡ 내부 즉시백업", false, CG) { val j = ctx.getSharedPreferences("pl_ai_v2_prefs", 0).getString("notes_json", "[]") ?: "[]"; ctx.getSharedPreferences("pl_ai_v4_custom", 0).edit().putString("memo_backup_json", j).apply(); aiMsg = "✅ 메모 " + notes.size + "건 즉시 백업 완료!" }
 ChipBtn("♻️ 내부 복원", false, CA) { val j = ctx.getSharedPreferences("pl_ai_v4_custom", 0).getString("memo_backup_json", null); if (!j.isNullOrBlank()) { val old = notes; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putString("notes_json", j).commit(); val merged = (repo.loadNotes() + old).distinctBy { it.id }; onSaveNotes(merged); aiMsg = "✅ 메모 " + merged.size + "건 복원 완료!" } }
 }
@@ -252,7 +287,95 @@ listOf("AUTO" to "자동(맞춤)", "COMPACT" to "작게", "NORMAL" to "표준", 
 }
 }
 if (mode == "AI") { Spacer(Modifier.height(4.dp)); Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) { ChipBtn("💬", !aiCfg.ragOn && !vOn, CW) { vStop(ctx); aiCfg = aiCfg.copy(ragOn = false); saveAiCfg(ctx, aiCfg); aiMsg = "💬 일반 챗봇 모드" }; ChipBtn("🗂️", aiCfg.ragOn, CG) { aiCfg = aiCfg.copy(ragOn = !aiCfg.ragOn); saveAiCfg(ctx, aiCfg); aiMsg = if (aiCfg.ragOn) "🗂️ 메모 RAG 켜짐" else "💬 일반 챗봇 모드" }; val cpuIcon = when (aiCfg.cpuMode) { 1 -> "🔋"; 3 -> "🚀"; else -> "⚖️" }; ChipBtn(cpuIcon, true, CG) { val nxM = if (aiCfg.cpuMode == 1) 2 else if (aiCfg.cpuMode == 2) 3 else 1; val nx = aiCfg.copy(cpuMode = nxM); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = when (nxM) { 1 -> "🔋 절전(2코어·저발열)"; 3 -> "🚀 고성능(4코어·최고속)"; else -> "⚖️ 균형(3코어·권장)" } }; val curTk = aiCfg.maxTok.coerceAtLeast(512); ChipBtn("📏${curTk}", true, CA) { val nxTk = when (curTk) { 512 -> 1024; 1024 -> 2048; 2048 -> 4096; else -> 512 }; val nx = aiCfg.copy(maxTok = nxTk, ctxSize = maxOf(aiCfg.ctxSize, nxTk + 512)); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = "📏 최대 출력 토큰: ${nxTk}토큰" }; ChipBtn("🔗${aiCfg.histTurns}", aiCfg.histTurns > 0, CG) { val nxH = when (aiCfg.histTurns) { 0 -> 2; 2 -> 4; 4 -> 6; 6 -> 10; else -> 0 }; val nx = aiCfg.copy(histTurns = nxH); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = if (nxH == 0) "🔗 기억 대화 0개 (단발·최고속)" else "🔗 이전 대화 ${nxH}개 연속 기억" }; val idLb = when (aiCfg.idleMin) { 0 -> "🧹∞"; 180 -> "🧹3h"; else -> "🧹${aiCfg.idleMin}m" }; ChipBtn(idLb, aiCfg.idleMin > 0, CW) { val nxI = when (aiCfg.idleMin) { 30 -> 60; 60 -> 180; 180 -> 0; else -> 30 }; val nx = aiCfg.copy(idleMin = nxI); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = if (nxI == 0) "🧹 모델 상주 모드 (자동 해제 OFF)" else "🧹 ${if (nxI == 180) "3시간" else "${nxI}분"} 유휴 시 모델 RAM 자동 해제" }; ChipBtn(if (thinkOn) "🧠" else "⚡", thinkOn, CA) { setThinkOn(ctx, !thinkOn); aiMsg = if (thinkOn) "🧠 심층 추론 ON" else "⚡ 초고속 직답 모드" }; ChipBtn(if (streamOn) "🌊" else "📄", streamOn, CG) { setStreamOn(ctx, !streamOn); aiMsg = if (streamOn) "🌊 실시간 토큰 스트리밍" else "📄 일괄 출력" }; ChipBtn(if (vOn) "🔴" else "🎙️", vOn, CA) { if (vOn) vStop(ctx) else vStart() }; ChipBtn(if (wakeOnly) "👂" else "🎙️", wakeOnly, CA) { setWakeOnly(ctx, !wakeOnly); aiMsg = if (wakeOnly) "👂 호출어 대기 ON: [${wakeWord}] 부를 때만 반응" else "🎙️ 상시 반응 모드" }; ChipBtn("⏱️${vWaitSec}", vOn, CW) { vWaitSec = if (vWaitSec == 2) 3 else if (vWaitSec == 3) 5 else 2; aiMsg = "⏱️ 음성 대기 ${vWaitSec}초" }; ChipBtn(if (ttsOn) "🔊" else "🔇", ttsOn, CG) { ttsOn = !ttsOn; if (!ttsOn) stopOneShotTts() }; ChipBtn("🌙", blkOn, CW) { keepAw(ctx, true); blkOn = true }; ChipBtn("❓", false, CA) { showEmojiHelp = true } }
-if (aiPromptCfgOpen) {
+Spacer(Modifier.height(4.dp))
+Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) {
+ChipBtn("📂대화폴더(${aiSessions.size})", aiShelfOpen, CA) { aiShelfOpen = !aiShelfOpen }
+ChipBtn("📁$curAiFolder", false, CW) {
+val idx = aiFolders.indexOf(curAiFolder)
+curAiFolder = if (idx >= 0 && aiFolders.isNotEmpty()) aiFolders[(idx + 1) % aiFolders.size] else "기본 대화"
+aiMsg = "📁 현재 대화 저장 폴더: [$curAiFolder]"
+}
+ChipBtn("💾대화저장", false, CG) {
+val meaningful = chatMsgs.filter { it.id != 1L }
+if (meaningful.isEmpty()) {
+aiMsg = "⚠️ 먼저 AI와 나눈 대화가 있어야 저장할 수 있습니다."
+} else {
+val titleGuess = meaningful.firstOrNull { it.isUser }?.text?.lines()?.firstOrNull()?.take(26)?.ifBlank { "AI 대화" } ?: "AI 대화"
+val sid = if (curAiSessionId > 0L && aiSessions.any { it.id == curAiSessionId }) curAiSessionId else nextId()
+curAiSessionId = sid
+val sess = AiChatSession(sid, titleGuess, curAiFolder, chatMsgs, nowStr())
+val nx = listOf(sess) + aiSessions.filterNot { it.id == sid }
+aiSessions = nx
+FolderRegistry.saveAiSessions(ctx, nx)
+aiMsg = "💾 [📁$curAiFolder] 폴더에 '$titleGuess' 대화를 저장했습니다."
+}
+}
+ChipBtn("➕새대화", false, CM) {
+curAiSessionId = 0L
+chatMsgs = listOf(ChatMsg(1L, false, "새 대화를 시작합니다. 궁금한 내용을 편하게 물어보세요!", false))
+aiMsg = "✨ 새 대화창이 열렸습니다."
+}
+ChipBtn("⚙️폴더·백업", aiFolderDlgOpen, CG) { aiFolderDlgOpen = true }
+}
+if (aiShelfOpen) {
+Spacer(Modifier.height(4.dp))
+val visSessions = if (aiShelfFilter == "전체") aiSessions else aiSessions.filter { it.folder == aiShelfFilter }
+Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, CA.copy(alpha = 0.7f)), modifier = FMW.heightIn(max = 230.dp)) {
+Column(Modifier.padding(10.dp), verticalArrangement = VS6) {
+Row(FMW, SB, CV) {
+Text("📂 AI 대화 폴더 보관함 (${visSessions.size}/${aiSessions.size}건)", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CA)
+Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = CV) {
+Text("📤백업", fontSize = ui.subSp, color = CG, modifier = Modifier.clickable { pendingTabScope = "AI"; pendingFolderFilter = if (aiShelfFilter == "전체") null else aiShelfFilter; bkExp.launch("prolauncher_ai_chats_backup.json") })
+Text("♻️복원", fontSize = ui.subSp, color = CA, modifier = Modifier.clickable { bkImp.launch(arrayOf("*/*")) })
+Text("✕닫기", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { aiShelfOpen = false })
+}
+}
+Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) {
+(listOf("전체") + (aiFolders + aiSessions.map { it.folder }).distinct()).forEach { af ->
+val cnt = if (af == "전체") aiSessions.size else aiSessions.count { it.folder == af }
+ChipBtn("📁$af($cnt)", aiShelfFilter == af, CG) { aiShelfFilter = af }
+}
+ChipBtn("➕폴더", false, CA) { aiFolderDlgOpen = true }
+}
+if (visSessions.isEmpty()) {
+Text("이 폴더에 저장된 대화가 없습니다. 상단 [💾대화저장]으로 중요한 대화를 폴더별로 보관하세요.", fontSize = ui.subSp, color = CM)
+} else {
+LazyColumn(verticalArrangement = VS6) {
+items(visSessions, key = { it.id }) { s ->
+Surface(color = if (s.id == curAiSessionId) Color(0xFF132924) else CS, shape = RoundedCornerShape(8.dp), modifier = FMW.clickable {
+curAiSessionId = s.id
+curAiFolder = s.folder
+chatMsgs = s.messages
+aiShelfOpen = false
+aiMsg = "📂 [📁${s.folder}] '${s.title}' 대화를 불러왔습니다."
+}) {
+Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), SB, CV) {
+Column(Modifier.weight(1f)) {
+Text("${s.title} (${s.messages.size}메시지)", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CW, maxLines = 1, overflow = TextOverflow.Ellipsis)
+Text("📁${s.folder} · ${s.updatedAt}", fontSize = 10.sp, color = CM)
+}
+Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
+Text("📁이동", fontSize = 10.sp, color = CA, modifier = Modifier.clickable {
+val idx = aiFolders.indexOf(s.folder)
+val nxF = if (idx >= 0 && aiFolders.isNotEmpty()) aiFolders[(idx + 1) % aiFolders.size] else "기본 대화"
+val nx = aiSessions.map { if (it.id == s.id) it.copy(folder = nxF) else it }
+aiSessions = nx; FolderRegistry.saveAiSessions(ctx, nx)
+}.padding(4.dp))
+Text("🗑️", fontSize = ui.subSp, color = Color(0xFFEF4444), modifier = Modifier.clickable {
+val nx = aiSessions.filterNot { it.id == s.id }
+aiSessions = nx; FolderRegistry.saveAiSessions(ctx, nx)
+if (curAiSessionId == s.id) curAiSessionId = 0L
+}.padding(4.dp))
+}
+}
+}
+}
+}
+}
+}
+}
+}
+  if (aiPromptCfgOpen) {
 Spacer(Modifier.height(4.dp))
 AiPromptRagPanel(ctx, aiCfg, ui, onUpdate = { aiCfg = it })
 }
@@ -304,8 +427,17 @@ Text("↓", fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = CG, m
 }
 } else {
 Spacer(Modifier.height(4.dp))
-Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6) {
-tabs.forEach { c -> ChipBtn(c, selTab == c) { selTab = c } }
+Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) {
+tabs.forEach { c ->
+val label = when (c) {
+"전체" -> "📁전체(${notes.size})"
+"★" -> "★중요(${notes.count { SMC.isImportant(it) }})"
+"☑" -> "☑할일"
+else -> "📁$c(${notes.count { SMC.categoryOf(it, cats) == c }})"
+}
+ChipBtn(label, selTab == c) { selTab = c }
+}
+ChipBtn("➕폴더·백업", memoFolderDlgOpen, CA) { memoFolderDlgOpen = true }
 }
 Spacer(Modifier.height(6.dp))
 LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth(), verticalArrangement = VS8) {
@@ -402,4 +534,70 @@ else ai.askRag(q, notes, books, cfg.ragIncludeBooks)
 }
 }
 }
+if (memoFolderDlgOpen) {
+FolderManageDialog(
+title = "📁 메모장 폴더 관리 및 백업",
+folders = cats,
+selectedFolder = selTab,
+ui = ui,
+onAddFolder = { t ->
+if (!cats.contains(t)) {
+val nx = cats + t
+cats = nx; SMC.saveMemoCats(ctx, nx)
 }
+},
+onRenameFolder = { oldN, newN ->
+val (nf, nn) = FolderRegistry.renameMemoFolder(ctx, repo, oldN, newN, notes)
+cats = nf; onSaveNotes(nn)
+if (selTab == oldN) selTab = newN
+if (mCat == oldN) mCat = newN
+},
+onDeleteFolder = { delN ->
+if (cats.size > 1) {
+val nx = cats.filterNot { it == delN }
+cats = nx; SMC.saveMemoCats(ctx, nx)
+if (selTab == delN) selTab = "전체"
+if (mCat == delN) mCat = nx.first()
+}
+},
+onBackupAllInTab = { pendingTabScope = "MEMO"; pendingFolderFilter = null; bkExp.launch("prolauncher_memos_backup.json") },
+onBackupCurrentFolder = { if (selTab !in listOf("전체", "★", "☑")) { pendingTabScope = "MEMO"; pendingFolderFilter = selTab; bkExp.launch("prolauncher_memos_${selTab}.json") } },
+onRestoreTab = { bkImp.launch(arrayOf("*/*")) },
+statusText = aiMsg,
+onDismiss = { memoFolderDlgOpen = false }
+)
+}
+if (aiFolderDlgOpen) {
+FolderManageDialog(
+title = "📁 AI 대화 폴더 관리 및 백업",
+folders = aiFolders,
+selectedFolder = aiShelfFilter,
+ui = ui,
+onAddFolder = { t ->
+if (!aiFolders.contains(t)) {
+val nx = aiFolders + t
+aiFolders = nx; FolderRegistry.saveAiFolders(ctx, nx)
+}
+},
+onRenameFolder = { oldN, newN ->
+val (nf, ns) = FolderRegistry.renameAiFolder(ctx, oldN, newN, aiSessions)
+aiFolders = nf; aiSessions = ns
+if (curAiFolder == oldN) curAiFolder = newN
+if (aiShelfFilter == oldN) aiShelfFilter = newN
+},
+onDeleteFolder = { delN ->
+if (aiFolders.size > 1) {
+val nx = aiFolders.filterNot { it == delN }
+aiFolders = nx; FolderRegistry.saveAiFolders(ctx, nx)
+if (curAiFolder == delN) curAiFolder = nx.first()
+if (aiShelfFilter == delN) aiShelfFilter = "전체"
+}
+},
+onBackupAllInTab = { pendingTabScope = "AI"; pendingFolderFilter = null; bkExp.launch("prolauncher_ai_chats_backup.json") },
+onBackupCurrentFolder = { if (aiShelfFilter != "전체") { pendingTabScope = "AI"; pendingFolderFilter = aiShelfFilter; bkExp.launch("prolauncher_ai_${aiShelfFilter}.json") } },
+onRestoreTab = { bkImp.launch(arrayOf("*/*")) },
+statusText = aiMsg,
+onDismiss = { aiFolderDlgOpen = false }
+)
+}
+  }

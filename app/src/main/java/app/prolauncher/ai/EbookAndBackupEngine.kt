@@ -902,7 +902,7 @@ object LauncherBackupManager {
   var kept = 0
   val sArr = aObj.optJSONArray("sessions") ?: JSONArray()
   for (i in 0 until sArr.length()) {
-   val o = aObj.optJSONObject(i) ?: continue
+   val o = sArr.optJSONObject(i) ?: continue
    val mArr = o.optJSONArray("messages") ?: JSONArray()
    val msgs = buildList {
     for (j in 0 until mArr.length()) {

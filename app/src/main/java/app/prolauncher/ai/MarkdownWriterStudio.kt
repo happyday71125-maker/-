@@ -54,7 +54,8 @@ data class WriterDoc(
     val id: Long,
     val title: String,
     val content: String,
-    val updatedAt: String
+    val updatedAt: String,
+    val folder: String = "기본 폴더"
 )
 
 fun loadWriterDocs(ctx: Context): List<WriterDoc> = runCatching {
@@ -63,7 +64,7 @@ fun loadWriterDocs(ctx: Context): List<WriterDoc> = runCatching {
     buildList {
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
-            add(WriterDoc(o.getLong("id"), o.optString("title", "제목 없음"), o.optString("content", ""), o.optString("updatedAt", "")))
+            add(WriterDoc(o.getLong("id"), o.optString("title", "제목 없음"), o.optString("content", ""), o.optString("updatedAt", ""), o.optString("folder", "기본 폴더").ifBlank { "기본 폴더" }))
         }
     }
 }.getOrElse { emptyList() }
@@ -71,7 +72,7 @@ fun loadWriterDocs(ctx: Context): List<WriterDoc> = runCatching {
 fun saveWriterDocs(ctx: Context, docs: List<WriterDoc>) {
     val arr = JSONArray()
     docs.forEach { d ->
-        arr.put(JSONObject().put("id", d.id).put("title", d.title).put("content", d.content).put("updatedAt", d.updatedAt))
+        arr.put(JSONObject().put("id", d.id).put("title", d.title).put("content", d.content).put("updatedAt", d.updatedAt).put("folder", d.folder.ifBlank { "기본 폴더" }))
     }
     ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE).edit().putString("writer_docs_v1", arr.toString()).apply()
 }
@@ -667,8 +668,20 @@ fun MarkdownWriterView(
     val scope = rememberCoroutineScope()
     EmojiHelpDialog()
     val sp = remember { ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE) }
+    val writerRepo = remember { LauncherRepository(ctx) }
     var docs by remember { mutableStateOf(loadWriterDocs(ctx)) }
+    var writerFolders by remember { mutableStateOf(FolderRegistry.loadWriterFolders(ctx)) }
+    var curDocFolder by remember { mutableStateOf(sp.getString("writer_active_folder_v1", "기본 폴더") ?: "기본 폴더") }
+    var shelfFolderFilter by remember { mutableStateOf("전체") }
+    var writerFolderDlgOpen by remember { mutableStateOf(false) }
+    var pendingWriterBackupFlt by remember { mutableStateOf<String?>(null) }
     var curDocId by remember { mutableStateOf(sp.getLong("writer_active_id_v1", 0L)) }
+    LaunchedEffect(LauncherBackupManager.backupRev) {
+        if (LauncherBackupManager.backupRev > 0) {
+            docs = loadWriterDocs(ctx)
+            writerFolders = FolderRegistry.loadWriterFolders(ctx)
+        }
+    }
     var writerFontSp by remember { mutableStateOf(sp.getInt("writer_font_sp_v1", 16).coerceIn(12, 32)) }
     var fontBarOpen by remember { mutableStateOf(false) }
     var titleTfv by remember {
@@ -717,12 +730,17 @@ fun MarkdownWriterView(
         if (titleTfv.text.isBlank()) titleTfv = TextFieldValue(t, TextRange(t.length))
         val id = if (curDocId > 0L && docs.any { it.id == curDocId }) curDocId else System.currentTimeMillis()
         curDocId = id
-        val item = WriterDoc(id, t, bodyTfv.text, nowLabel())
+        val fld = curDocFolder.ifBlank { "기본 폴더" }
+        if (!writerFolders.contains(fld)) {
+            writerFolders = writerFolders + fld
+            FolderRegistry.saveWriterFolders(ctx, writerFolders)
+        }
+        val item = WriterDoc(id, t, bodyTfv.text, nowLabel(), fld)
         val updated = listOf(item) + docs.filterNot { it.id == id }
         docs = updated
         saveWriterDocs(ctx, updated)
-        sp.edit().putLong("writer_active_id_v1", id).putString("writer_active_title_v1", t).putString("writer_active_draft_v1", bodyTfv.text).apply()
-        statusMsg = "💾 문서함에 [$t] 저장 완료 (${bodyTfv.text.length}자)"
+        sp.edit().putLong("writer_active_id_v1", id).putString("writer_active_title_v1", t).putString("writer_active_folder_v1", fld).putString("writer_active_draft_v1", bodyTfv.text).apply()
+        statusMsg = "💾 [📁$fld] 문서함에 [$t] 저장 완료 (${bodyTfv.text.length}자)"
     }
     val mdSaveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
         if (uri != null) {
@@ -754,6 +772,26 @@ fun MarkdownWriterView(
                 val res = exportMarkdownToPdf(ctx, uri, titleTfv.text, bodyTfv.text, writerFontSp)
                 statusMsg = res
             }
+        }
+    }
+    val writerBackupExp = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            val flt = pendingWriterBackupFlt
+            runCatching {
+                val json = LauncherBackupManager.exportBackupJson(ctx, writerRepo, "WRITER", flt)
+                ctx.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                statusMsg = "✅ 문서함 백업 완료 (${if (flt == null) "전체 문서" else "[$flt] 폴더"})"
+            }.onFailure { statusMsg = "⚠️ 문서 백업 실패: ${it.message}" }
+        }
+    }
+    val writerBackupImp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                val raw = ctx.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+                statusMsg = LauncherBackupManager.importAndMergeBackupJson(ctx, writerRepo, raw)
+                docs = loadWriterDocs(ctx)
+                writerFolders = FolderRegistry.loadWriterFolders(ctx)
+            }.onFailure { statusMsg = "⚠️ 문서 복원 실패: ${it.message}" }
         }
     }
     val writerDictFallback = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
@@ -960,17 +998,25 @@ fun MarkdownWriterView(
                     singleLine = true,
                     modifier = Modifier.weight(1f)
                 )
+                ChipBtn("📁$curDocFolder", false, CA) {
+                    val idx = writerFolders.indexOf(curDocFolder)
+                    val nxF = if (idx >= 0 && writerFolders.isNotEmpty()) writerFolders[(idx + 1) % writerFolders.size] else (writerFolders.firstOrNull() ?: "기본 폴더")
+                    curDocFolder = nxF
+                    sp.edit().putString("writer_active_folder_v1", nxF).apply()
+                    statusMsg = "📁 현재 문서 폴더: [$nxF] (길게 관리하려면 [📁폴더·백업] 버튼 터치)"
+                }
                 ChipBtn("📄새문서", false, CM) {
                     saveToInternalShelf()
                     curDocId = 0L
                     titleTfv = TextFieldValue("새 마크다운 문서", TextRange(9))
-                    setBodyText("# 새 문서\n\n")
+                    setBodyText("# 새 문서" + 10.toChar() + 10.toChar())
                     statusMsg = "📄 이전 문서를 보관하고 새 문서를 열었습니다."
                 }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                 ChipBtn("💾저장", false, CG) { saveToInternalShelf() }
                 ChipBtn("📂문서함(${docs.size})", docShelfOpen, CA) { docShelfOpen = !docShelfOpen }
+                ChipBtn("📁폴더·백업", writerFolderDlgOpen, CG) { writerFolderDlgOpen = true }
                 ChipBtn("📂파일열기", false, CW) { mdLoadLauncher.launch(arrayOf("text/*", "application/octet-stream", "*/*")) }
                 ChipBtn("💾.md저장", false, CG) {
                     val fn = (titleTfv.text.trim().ifEmpty { "markdown_note" }) + ".md"
@@ -990,44 +1036,72 @@ fun MarkdownWriterView(
                 ChipBtn("🪟플로팅AI", aiMode == 2, CA) { aiMode = if (aiMode == 2) 0 else 2; floatMin = false }
             }
             if (docShelfOpen) {
+                val visibleDocs = remember(docs, shelfFolderFilter) {
+                    if (shelfFolderFilter == "전체") docs else docs.filter { it.folder == shelfFolderFilter }
+                }
                 Surface(
                     color = Color(0xFF0E1524),
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, CA.copy(alpha = 0.7f)),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 210.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 250.dp)
                 ) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(Modifier.fillMaxWidth(), SB, CV) {
-                            Text("📂 내 마크다운 문서함 (${docs.size}건)", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CA)
-                            Text("✕ 닫기", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { docShelfOpen = false })
+                            Text("📂 마크다운 문서함 (${visibleDocs.size}/${docs.size}건)", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CA)
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = CV) {
+                                Text("📤백업", fontSize = ui.subSp, color = CG, modifier = Modifier.clickable {
+                                    pendingWriterBackupFlt = if (shelfFolderFilter == "전체") null else shelfFolderFilter
+                                    writerBackupExp.launch("prolauncher_writer_backup.json")
+                                })
+                                Text("♻️복원", fontSize = ui.subSp, color = CA, modifier = Modifier.clickable { writerBackupImp.launch(arrayOf("*/*")) })
+                                Text("✕ 닫기", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { docShelfOpen = false })
+                            }
                         }
-                        if (docs.isEmpty()) {
-                            Text("저장된 문서가 없습니다. 상단 [💾저장]을 눌러 현재 글을 보관해 보세요.", fontSize = ui.subSp, color = CM)
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = CV) {
+                            val allWF = (listOf("전체") + (writerFolders + docs.map { it.folder }).distinct())
+                            allWF.forEach { wf ->
+                                val cnt = if (wf == "전체") docs.size else docs.count { it.folder == wf }
+                                ChipBtn("📁$wf($cnt)", shelfFolderFilter == wf, CG) { shelfFolderFilter = wf }
+                            }
+                            ChipBtn("➕폴더", false, CA) { writerFolderDlgOpen = true }
+                        }
+                        if (visibleDocs.isEmpty()) {
+                            Text("이 폴더에 저장된 문서가 없습니다. 상단 [💾저장]을 눌러 현재 글을 보관해 보세요.", fontSize = ui.subSp, color = CM)
                         } else {
                             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                items(docs, key = { it.id }) { d ->
+                                items(visibleDocs, key = { it.id }) { d ->
                                     Surface(
                                         color = if (d.id == curDocId) Color(0xFF132924) else CS,
                                         shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier.fillMaxWidth().clickable {
                                             curDocId = d.id
+                                            curDocFolder = d.folder
                                             titleTfv = TextFieldValue(d.title, TextRange(d.title.length))
                                             setBodyText(d.content)
-                                            sp.edit().putLong("writer_active_id_v1", d.id).putString("writer_active_title_v1", d.title).apply()
+                                            sp.edit().putLong("writer_active_id_v1", d.id).putString("writer_active_title_v1", d.title).putString("writer_active_folder_v1", d.folder).apply()
                                             docShelfOpen = false
-                                            statusMsg = "📂 [${d.title}] 문서를 불러왔습니다."
+                                            statusMsg = "📂 [📁${d.folder}] ${d.title} 문서를 불러왔습니다."
                                         }
                                     ) {
                                         Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), SB, CV) {
                                             Column(Modifier.weight(1f)) {
                                                 Text("${d.title} (${d.content.length}자)", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CW, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                Text("수정: ${d.updatedAt}", fontSize = 10.sp, color = CM)
+                                                Text("📁${d.folder} · 수정: ${d.updatedAt}", fontSize = 10.sp, color = CM)
                                             }
-                                            Text("🗑️", fontSize = ui.subSp, color = Color(0xFFEF4444), modifier = Modifier.clickable {
-                                                val nx = docs.filterNot { it.id == d.id }
-                                                docs = nx; saveWriterDocs(ctx, nx)
-                                                if (curDocId == d.id) curDocId = 0L
-                                            }.padding(4.dp))
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
+                                                Text("📁이동", fontSize = 10.sp, color = CA, modifier = Modifier.clickable {
+                                                    val idx = writerFolders.indexOf(d.folder)
+                                                    val nxF = if (idx >= 0 && writerFolders.isNotEmpty()) writerFolders[(idx + 1) % writerFolders.size] else "기본 폴더"
+                                                    val nx = docs.map { if (it.id == d.id) it.copy(folder = nxF) else it }
+                                                    docs = nx; saveWriterDocs(ctx, nx)
+                                                    if (curDocId == d.id) curDocFolder = nxF
+                                                }.padding(4.dp))
+                                                Text("🗑️", fontSize = ui.subSp, color = Color(0xFFEF4444), modifier = Modifier.clickable {
+                                                    val nx = docs.filterNot { it.id == d.id }
+                                                    docs = nx; saveWriterDocs(ctx, nx)
+                                                    if (curDocId == d.id) curDocId = 0L
+                                                }.padding(4.dp))
+                                            }
                                         }
                                     }
                                 }
@@ -1193,6 +1267,50 @@ fun MarkdownWriterView(
                     }
                 }
             }
+        }
+        if (writerFolderDlgOpen) {
+            FolderManageDialog(
+                title = "📁 문서 스튜디오 폴더 관리 및 백업",
+                folders = writerFolders,
+                selectedFolder = shelfFolderFilter,
+                ui = ui,
+                onAddFolder = { t ->
+                    if (!writerFolders.contains(t)) {
+                        val nx = writerFolders + t
+                        writerFolders = nx
+                        FolderRegistry.saveWriterFolders(ctx, nx)
+                    }
+                },
+                onRenameFolder = { oldN, newN ->
+                    val (nf, nd) = FolderRegistry.renameWriterFolder(ctx, oldN, newN, docs)
+                    writerFolders = nf
+                    docs = nd
+                    if (curDocFolder == oldN) curDocFolder = newN
+                    if (shelfFolderFilter == oldN) shelfFolderFilter = newN
+                },
+                onDeleteFolder = { delN ->
+                    if (writerFolders.size > 1) {
+                        val nx = writerFolders.filterNot { it == delN }
+                        writerFolders = nx
+                        FolderRegistry.saveWriterFolders(ctx, nx)
+                        if (curDocFolder == delN) curDocFolder = nx.first()
+                        if (shelfFolderFilter == delN) shelfFolderFilter = "전체"
+                    }
+                },
+                onBackupAllInTab = {
+                    pendingWriterBackupFlt = null
+                    writerBackupExp.launch("prolauncher_writer_backup.json")
+                },
+                onBackupCurrentFolder = {
+                    if (shelfFolderFilter != "전체") {
+                        pendingWriterBackupFlt = shelfFolderFilter
+                        writerBackupExp.launch("prolauncher_writer_${shelfFolderFilter}.json")
+                    }
+                },
+                onRestoreTab = { writerBackupImp.launch(arrayOf("*/*")) },
+                statusText = statusMsg,
+                onDismiss = { writerFolderDlgOpen = false }
+            )
         }
         if (mdHelpOpen) {
             AlertDialog(

@@ -777,30 +777,7 @@ fun ReaderView(
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth().height(16.dp), SB, CV) {
-                                    Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    Text("${progressPct}%$scrollTag", fontSize = 10.sp, color = mut.copy(alpha = 0.8f))
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                if (scrollAssistNeeded) {
-                                    Box(Modifier.width(lockedColW).heightIn(min = lockedTextH)) {
-                                        Text(leftPageTx, style = pageTextStyle, modifier = Modifier.fillMaxWidth())
-                                    }
-                                } else {
-                                    Box(Modifier.width(lockedColW).height(lockedTextH)) {
-                                        Text(leftPageTx, style = pageTextStyle, overflow = TextOverflow.Clip, modifier = Modifier.fillMaxSize())
-                                    }
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                Row(Modifier.fillMaxWidth().height(18.dp), SB, CV) {
-                                    Text(act.category.ifBlank { "독서" }, fontSize = 10.sp, color = mut.copy(alpha = 0.65f))
-                                    Text("${vIdx + 1} / ${vPages.size}", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = mut)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            
 
             Row(Modifier.fillMaxWidth().padding(bottom = 2.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                 ChipBtn(if (hasSel) "🦙선택해설(${activeExcerpt.length}자)" else "🦙페이지해설", readerAiOpen, CG) {

@@ -22,12 +22,9 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.*
 import androidx.compose.ui.unit.*
 import kotlinx.coroutines.*
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 object ReaderLayoutCache {
-    val cleanTextHPx = mutableMapOf<String, Float>()
-    val cleanColWPx = mutableMapOf<String, Int>()
     val pagesCache = object : LinkedHashMap<String, List<PageSlice>>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<PageSlice>>?): Boolean = size > 12
     }
@@ -83,7 +80,7 @@ fun splitSpreadIntoSegments(raw: String): List<String> {
 fun ReaderView(
     books: List<BookItem>, cfg: LauncherConfig, repo: LauncherRepository,
     onSaveBooks: (List<BookItem>) -> Unit, onCfg: (LauncherConfig) -> Unit,
-    onQuote: (String) -> Unit, onHome: () -> Unit, onQuickAddNote: (String) -> Unit = {}, onBookNote: (String, String, Boolean) -> Unit = { _, _, _ -> }
+    onHome: () -> Unit, onBookNote: (String, String, Boolean) -> Unit = { _, _, _ -> }
 ) {
     val ctx = LocalContext.current
     val aiCfg = remember { loadAiCfg(ctx) }
@@ -391,20 +388,24 @@ fun ReaderView(
                     color = fg
                 )
             }
-            val orientKey = "${conf.screenWidthDp}x${conf.screenHeightDp}_${aiCfg.uiScale}"
-            val colKey = "${orientKey}_$twoPageMode"
-            var activeColWPx by remember(colKey) { mutableStateOf(ReaderLayoutCache.cleanColWPx[colKey] ?: 0) }
-            var activeTextHPx by remember(orientKey) { mutableStateOf(ReaderLayoutCache.cleanTextHPx[orientKey] ?: 0f) }
+            val density = LocalDensity.current
+            val outerPad = if (twoPageMode) 12.dp else 14.dp
+            val spineW = if (twoPageMode) 20.dp else 0.dp
+            val fixedBookW = (conf.screenWidthDp.dp - ui.hPad * 2).coerceAtLeast(220.dp)
+            val fixedColW = if (twoPageMode) ((fixedBookW - outerPad * 2 - spineW) / 2f).coerceAtLeast(80.dp) else (fixedBookW - outerPad * 2).coerceAtLeast(100.dp)
+            val fixedTextH = (conf.screenHeightDp.dp - ui.vPad * 2 - 216.dp).coerceAtLeast(180.dp)
+            val fixedColWPx = with(density) { fixedColW.roundToPx() }.coerceAtLeast(80)
+            val fixedTextHPx = (with(density) { fixedTextH.toPx() } - 4f).coerceAtLeast(120f)
 
-            val pageCacheKey = "${act.id}_${reflowSrc.fullText.length}_${reflowSrc.fullText.hashCode()}_${activeColWPx}_${activeTextHPx.roundToInt()}_${curPt}_${cfg.readerUseSerif}"
+            val pageCacheKey = "${act.id}_${reflowSrc.fullText.length}_${reflowSrc.fullText.hashCode()}_${fixedColWPx}_${fixedTextHPx.roundToInt()}_${curPt}_${cfg.readerUseSerif}"
             var lastStablePages by remember(act.id) {
                 val prior = ReaderLayoutCache.pagesCache.entries.lastOrNull { it.key.startsWith("${act.id}_") }?.value
                     ?: listOf(PageSlice(0, reflowSrc.fullText.length.coerceAtMost(1500)))
                 mutableStateOf(prior)
             }
             val syncPages = remember(pageCacheKey) {
-                ReaderLayoutCache.pagesCache[pageCacheKey] ?: if (reflowSrc.fullText.length <= 45000 && activeColWPx > 40 && activeTextHPx > 40f) {
-                    runCatching { paginateBookReflow(reflowSrc.fullText, activeColWPx, activeTextHPx, pageTextStyle, textMeasurer) }
+                ReaderLayoutCache.pagesCache[pageCacheKey] ?: if (reflowSrc.fullText.length <= 55000) {
+                    runCatching { paginateBookReflow(reflowSrc.fullText, fixedColWPx, fixedTextHPx, pageTextStyle, textMeasurer) }
                         .getOrElse { listOf(PageSlice(0, reflowSrc.fullText.length)) }
                         .also { ReaderLayoutCache.pagesCache[pageCacheKey] = it }
                 } else null
@@ -412,9 +413,9 @@ fun ReaderView(
             LaunchedEffect(pageCacheKey) {
                 if (syncPages != null) {
                     lastStablePages = syncPages
-                } else if (activeColWPx > 40 && activeTextHPx > 40f) {
+                } else {
                     val computed = withContext(Dispatchers.Default) {
-                        runCatching { paginateBookReflow(reflowSrc.fullText, activeColWPx, activeTextHPx, pageTextStyle, textMeasurer) }
+                        runCatching { paginateBookReflow(reflowSrc.fullText, fixedColWPx, fixedTextHPx, pageTextStyle, textMeasurer) }
                             .getOrElse { listOf(PageSlice(0, reflowSrc.fullText.length)) }
                     }
                     ReaderLayoutCache.pagesCache[pageCacheKey] = computed
@@ -476,7 +477,6 @@ fun ReaderView(
             val hasSel = activeExcerpt.isNotBlank()
             val selBannerVisible = !selectMode && hasSel
             val sliderBarVisible = sliderOpen && vPages.size > stepPg
-            val anyExtraUi = topTtsVisible || topStatusVisible || bmOpen || cfgOpen || catBarOpen || selBannerVisible || selectMode || readerAiOpen || sliderBarVisible || quoteConfirmText != null
             val aiTargetText = if (hasSel) activeExcerpt else spreadText
             fun commitDraftIfEditing(): String {
                 if (editExcerptOpen) {
@@ -558,51 +558,12 @@ fun ReaderView(
             }
 
             val ovScroll = rememberScrollState()
+            LaunchedEffect(vIdx, act.id) {
+                if (ovScroll.value != 0) ovScroll.scrollTo(0)
+            }
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp)) {
-                val density = LocalDensity.current
-                val totalW = this.maxWidth
-                val totalH = this.maxHeight
-                val outerPad = if (twoPageMode) 12.dp else 14.dp
-                val spineW = if (twoPageMode) 20.dp else 0.dp
-                val rawColW = if (twoPageMode) ((totalW - outerPad * 2 - spineW) / 2f).coerceAtLeast(80.dp) else (totalW - outerPad * 2).coerceAtLeast(100.dp)
-                val rawTextH = (totalH - 56.dp).coerceAtLeast(60.dp)
-                val rawColWPx = with(density) { rawColW.roundToPx() }
-                val rawTextHPx = (with(density) { rawTextH.toPx() } - 4f).coerceAtLeast(40f)
-                val cachedCol = ReaderLayoutCache.cleanColWPx[colKey] ?: 0
-                val cachedH = ReaderLayoutCache.cleanTextHPx[orientKey] ?: 0f
-
-                val effColWPx = when {
-                    !anyExtraUi && rawColWPx > 40 -> rawColWPx
-                    cachedCol > 40 -> cachedCol
-                    else -> rawColWPx
-                }
-                val effTextHPx = when {
-                    !anyExtraUi && rawTextHPx > 80f && (cachedH <= 40f || rawTextHPx >= cachedH - 3f) -> maxOf(cachedH, rawTextHPx)
-                    cachedH > 40f -> cachedH
-                    else -> rawTextHPx
-                }
-                SideEffect {
-                    if (!anyExtraUi && rawColWPx > 40) {
-                        ReaderLayoutCache.cleanColWPx[colKey] = rawColWPx
-                    }
-                    if (!anyExtraUi && rawTextHPx > 80f && rawTextHPx >= cachedH - 3f) {
-                        ReaderLayoutCache.cleanTextHPx[orientKey] = maxOf(cachedH, rawTextHPx)
-                    }
-                    if (effColWPx > 40 && effColWPx != activeColWPx) {
-                        activeColWPx = effColWPx
-                    }
-                    if (effTextHPx > 40f && abs(effTextHPx - activeTextHPx) > 1.5f) {
-                        activeTextHPx = effTextHPx
-                    }
-                }
-
-                val lockedColW = if (effColWPx > 40) with(density) { effColWPx.toDp() } else rawColW
-                val lockedTextH = if (effTextHPx > 40f) with(density) { (effTextHPx + 4f).toDp() } else rawTextH
-                val viewportShrunk = effTextHPx > 40f && rawTextHPx < effTextHPx - 6f
-                val scrollAssistNeeded = anyExtraUi || viewportShrunk
-                LaunchedEffect(vIdx, act.id, scrollAssistNeeded) {
-                    if (!scrollAssistNeeded || ovScroll.value > 0) ovScroll.scrollTo(0)
-                }
+                val availW = this.maxWidth
+                val renderColW = if (twoPageMode) ((availW - outerPad * 2 - spineW) / 2f).coerceAtLeast(80.dp) else (availW - outerPad * 2).coerceAtLeast(100.dp)
 
                 if (selectMode) {
                     Surface(
@@ -731,27 +692,21 @@ fun ReaderView(
                         border = BorderStroke(0.8.dp, mut.copy(alpha = 0.28f)),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        val scrollTag = if (scrollAssistNeeded) " · ↕스크롤" else ""
                         if (twoPageMode) {
-                            val rowMod = if (scrollAssistNeeded) {
-                                Modifier.fillMaxSize().verticalScroll(ovScroll).padding(horizontal = outerPad)
-                            } else {
-                                Modifier.fillMaxSize().padding(horizontal = outerPad)
-                            }
-                            Row(rowMod, verticalAlignment = Alignment.Top) {
-                                Column(Modifier.width(lockedColW).then(if (scrollAssistNeeded) Modifier else Modifier.fillMaxHeight()).padding(top = 8.dp, bottom = 6.dp)) {
+                            Row(
+                                Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(ovScroll)
+                                    .padding(horizontal = outerPad),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Column(Modifier.width(renderColW).padding(top = 8.dp, bottom = 6.dp)) {
                                     Box(Modifier.fillMaxWidth().height(16.dp), contentAlignment = Alignment.CenterStart) {
                                         Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                     Spacer(Modifier.height(4.dp))
-                                    if (scrollAssistNeeded) {
-                                        Box(Modifier.width(lockedColW).heightIn(min = lockedTextH)) {
-                                            Text(leftPageTx, style = pageTextStyle, modifier = Modifier.fillMaxWidth())
-                                        }
-                                    } else {
-                                        Box(Modifier.width(lockedColW).height(lockedTextH)) {
-                                            Text(leftPageTx, style = pageTextStyle, overflow = TextOverflow.Clip, modifier = Modifier.fillMaxSize())
-                                        }
+                                    Box(Modifier.width(renderColW).heightIn(min = fixedTextH)) {
+                                        Text(leftPageTx, style = pageTextStyle, modifier = Modifier.fillMaxWidth())
                                     }
                                     Spacer(Modifier.height(4.dp))
                                     Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.CenterStart) {
@@ -761,7 +716,7 @@ fun ReaderView(
                                 Box(
                                     Modifier
                                         .width(spineW)
-                                        .then(if (scrollAssistNeeded) Modifier.height(lockedTextH + 52.dp) else Modifier.fillMaxHeight())
+                                        .height(fixedTextH + 52.dp)
                                         .background(
                                             Brush.horizontalGradient(
                                                 listOf(
@@ -777,29 +732,17 @@ fun ReaderView(
                                 ) {
                                     Box(Modifier.width(1.dp).fillMaxHeight(0.94f).background(mut.copy(alpha = 0.26f)))
                                 }
-                                Column(Modifier.width(lockedColW).then(if (scrollAssistNeeded) Modifier else Modifier.fillMaxHeight()).padding(top = 8.dp, bottom = 6.dp)) {
+                                Column(Modifier.width(renderColW).padding(top = 8.dp, bottom = 6.dp)) {
                                     Box(Modifier.fillMaxWidth().height(16.dp), contentAlignment = Alignment.CenterEnd) {
-                                        Text("${act.category.ifBlank { "독서" }} · ${progressPct}%$scrollTag", fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1)
+                                        Text("${act.category.ifBlank { "독서" }} · ${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1)
                                     }
                                     Spacer(Modifier.height(4.dp))
-                                    if (scrollAssistNeeded) {
-                                        Box(Modifier.width(lockedColW).heightIn(min = lockedTextH)) {
-                                            if (hasRightPage) {
-                                                Text(rightPageTx, style = pageTextStyle, modifier = Modifier.fillMaxWidth())
-                                            } else {
-                                                Box(Modifier.fillMaxWidth().height(lockedTextH), contentAlignment = Alignment.Center) {
-                                                    Text("— 마지막 페이지 —", fontSize = ui.subSp, color = mut.copy(alpha = 0.65f))
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        Box(Modifier.width(lockedColW).height(lockedTextH)) {
-                                            if (hasRightPage) {
-                                                Text(rightPageTx, style = pageTextStyle, overflow = TextOverflow.Clip, modifier = Modifier.fillMaxSize())
-                                            } else {
-                                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                                    Text("— 마지막 페이지 —", fontSize = ui.subSp, color = mut.copy(alpha = 0.65f))
-                                                }
+                                    Box(Modifier.width(renderColW).heightIn(min = fixedTextH)) {
+                                        if (hasRightPage) {
+                                            Text(rightPageTx, style = pageTextStyle, modifier = Modifier.fillMaxWidth())
+                                        } else {
+                                            Box(Modifier.fillMaxWidth().height(fixedTextH), contentAlignment = Alignment.Center) {
+                                                Text("— 마지막 페이지 —", fontSize = ui.subSp, color = mut.copy(alpha = 0.65f))
                                             }
                                         }
                                     }
@@ -810,13 +753,31 @@ fun ReaderView(
                                 }
                             }
                         } else {
-                            val colMod = if (scrollAssistNeeded) {
-                                Modifier.fillMaxSize().verticalScroll(ovScroll).padding(horizontal = outerPad, vertical = 7.dp)
-                            } else {
-                                Modifier.fillMaxSize().padding(horizontal = outerPad, vertical = 7.dp)
-                            }
-                            Column(colMod) {
+                            Column(
+                                Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(ovScroll)
+                                    .padding(horizontal = outerPad, vertical = 7.dp)
+                            ) {
                                 Row(Modifier.fillMaxWidth().height(16.dp), SB, CV) {
+                                    Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Text("${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.8f))
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Box(Modifier.width(renderColW).heightIn(min = fixedTextH)) {
+                                    Text(leftPageTx, style = pageTextStyle, modifier = Modifier.fillMaxWidth())
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Row(Modifier.fillMaxWidth().height(18.dp), SB, CV) {
+                                    Text(act.category.ifBlank { "독서" }, fontSize = 10.sp, color = mut.copy(alpha = 0.65f))
+                                    Text("${vIdx + 1} / ${vPages.size}", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = mut)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().height(16.dp), SB, CV) {
                                     Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                                     Text("${progressPct}%$scrollTag", fontSize = 10.sp, color = mut.copy(alpha = 0.8f))
                                 }

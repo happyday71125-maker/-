@@ -182,9 +182,13 @@ on = false; keepAw(appC, false); break
 @Composable
 fun DrawerSheet(apps: List<AppEntry>, onClose: () -> Unit, onLaunch: (AppEntry) -> Unit, onFav: (AppEntry) -> Unit, onInt: (AppEntry) -> Unit) {
 val ctx = LocalContext.current
-val ui = rememberUi(loadAiCfg(ctx).uiScale)
+val repo = remember { LauncherRepository(ctx) }
+  val ui = rememberUi(loadAiCfg(ctx).uiScale)
 var q by remember { mutableStateOf("") }
-var pullDown by remember { mutableStateOf(0f) }
+var appFolders by remember(LauncherBackupManager.backupRev) { mutableStateOf(FolderRegistry.loadAppFolders(ctx, apps)) }
+var selFolderId by remember { mutableStateOf(-1L) }
+var folderMgrOpen by remember { mutableStateOf(false) }
+  var pullDown by remember { mutableStateOf(0f) }
 val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 val downNested = remember(listState) {
 object : NestedScrollConnection {
@@ -202,8 +206,18 @@ return Offset.Zero
 }
 }
 }
-val flt = remember(apps, q) { apps.filter { KoreanChosungMatcher.matches(it.label, q) } }
-LaunchedEffect(flt, q) { if (q.trim().isNotEmpty() && !q.startsWith(" ") && flt.size == 1 && !flt.first().isInterruptEnabled) { val a = flt.first(); q = ""; onLaunch(a) } }
+val flt = remember(apps, q, selFolderId, appFolders) {
+val base = when {
+selFolderId == -2L -> apps.filter { it.isFavorite }
+selFolderId > 0L -> {
+val pkgSet = appFolders.find { it.id == selFolderId }?.packages?.toSet() ?: emptySet()
+apps.filter { it.packageName in pkgSet }
+}
+else -> apps
+}
+base.filter { KoreanChosungMatcher.matches(it.label, q) }
+}
+  LaunchedEffect(flt, q) { if (q.trim().isNotEmpty() && !q.startsWith(" ") && flt.size == 1 && !flt.first().isInterruptEnabled) { val a = flt.first(); q = ""; onLaunch(a) } }
 Column(
 Modifier
 .fillMaxSize()
@@ -226,13 +240,49 @@ Box(Modifier.width(44.dp).height(4.dp).background(Color(0xFF334155), RoundedCorn
 Row(Modifier.fillMaxWidth(), SB, CV) { Text("▼ 앱 서랍 (아래로 내려 닫기)", fontSize = ui.titleSp, fontWeight = FontWeight.Bold, color = CW); TextButton(onClick = onClose) { Text("✕", color = CM) } }
 OutlinedTextField(value = q, onValueChange = { q = it }, placeholder = { Text("초성 검색 (예: ㅋㅋㅇㅌ)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 Spacer(Modifier.height(8.dp))
-LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+ChipBtn("📁전체(${apps.size})", selFolderId == -1L, CG) { selFolderId = -1L }
+ChipBtn("★즐겨찾기(${apps.count { it.isFavorite }})", selFolderId == -2L, CA) { selFolderId = -2L }
+appFolders.forEach { af ->
+val cnt = apps.count { it.packageName in af.packages }
+ChipBtn("📁${af.name}($cnt)", selFolderId == af.id, CG) { selFolderId = af.id }
+}
+ChipBtn("➕폴더·백업", folderMgrOpen, CW) { folderMgrOpen = true }
+}
+Spacer(Modifier.height(6.dp))
+  LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
 items(flt, key = { it.packageName }) { a ->
 Row(Modifier.fillMaxWidth().combinedClickable(onClick = { onLaunch(a) }, onLongClick = { onFav(a) }).padding(vertical = 8.dp), SB, CV) {
-Text(a.label + (if (a.isFavorite) " ★" else ""), fontSize = (ui.bodySp.value + 3).sp, color = Color(0xFFE5E7EB))
-Text(if (a.isInterruptEnabled) "⏳★" else "⏳", fontSize = (ui.subSp.value + 1).sp, color = if (a.isInterruptEnabled) CA else Color(0xFF4B5563), modifier = Modifier.clickable { onInt(a) }.padding(6.dp))
+val assignedNames = appFolders.filter { a.packageName in it.packages }.joinToString(",") { it.name }
+Column(Modifier.weight(1f)) {
+  Text(a.label + (if (a.isFavorite) " ★" else ""), fontSize = (ui.bodySp.value + 2).sp, color = Color(0xFFE5E7EB))
+if (assignedNames.isNotEmpty()) Text("📁 $assignedNames", fontSize = 10.sp, color = CG)
+}
+Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
+Text(if (a.isFavorite) "★" else "☆", fontSize = (ui.subSp.value + 2).sp, color = if (a.isFavorite) CA else Color(0xFF64748B), modifier = Modifier.clickable { onFav(a) }.padding(4.dp))
+Text("📁+", fontSize = ui.subSp, color = CG, modifier = Modifier.clickable {
+if (appFolders.isNotEmpty()) {
+val targetF = appFolders.find { it.id == selFolderId } ?: appFolders.first()
+val nxPkgs = if (a.packageName in targetF.packages) targetF.packages - a.packageName else targetF.packages + a.packageName
+val nx = appFolders.map { if (it.id == targetF.id) it.copy(packages = nxPkgs.distinct()) else it }
+appFolders = nx; FolderRegistry.saveAppFolders(ctx, nx)
+} else folderMgrOpen = true
+}.padding(4.dp))
+  Text(if (a.isInterruptEnabled) "⏳★" else "⏳", fontSize = (ui.subSp.value + 1).sp, color = if (a.isInterruptEnabled) CA else Color(0xFF4B5563), modifier = Modifier.clickable { onInt(a) }.padding(6.dp))
 }
 }
+}
+}
+if (folderMgrOpen) {
+HomeAppFolderDialog(
+ctx = ctx,
+repo = repo,
+allApps = apps,
+folders = appFolders,
+ui = ui,
+onUpdateFolders = { appFolders = it },
+onDismiss = { folderMgrOpen = false }
+)
 }
 }
 }
@@ -252,10 +302,13 @@ Text("항목별로 분리된 탭에서 원하는 설정을 깔끔하게 조절�
 }
 OutlinedButton(onClick = onClose) { Text("✕ 닫기", fontSize = ui.subSp, color = CG) }
 }
-SettingsTabBar(listOf("🔊 음성·TTS", "🦙 AI 모델", "🗂️ 프롬프트", "🎨 화면·홈"), sTab) { sTab = it }
+val settingsRepo = remember { LauncherRepository(ctx) }
+  SettingsTabBar(listOf("🔊 음성·TTS", "🦙 AI 모델", "🗂️ 프롬프트", "🎨 화면·홈", "💾 백업·폴더"), sTab) { sTab = it }
 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 if (sTab in 0..2) {
 AiPromptRagPanel(ctx, aiCfg, ui, onUpdate = { aiCfg = it; saveAiCfg(ctx, it) }, fixedTab = sTab)
+} else if (sTab == 4) {
+  UnifiedBackupSettingsPanel(ctx, settingsRepo, ui)
 } else {
 Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, Color(0xFF23324B)), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

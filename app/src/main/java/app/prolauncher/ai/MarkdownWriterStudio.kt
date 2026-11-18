@@ -686,9 +686,10 @@ fun MarkdownWriterView(
         sp.edit().putInt("writer_font_sp_v1", c).apply()
         statusMsg = "🔤 문서 작성 글자 크기: ${c}pt 적용됨 (편집·미리보기·PDF 연동)"
     }
-    fun setBodyText(s: String) {
+    fun setBodyText(s: String, fromDict: Boolean = false) {
         bodyTfv = TextFieldValue(s, TextRange(s.length))
         sp.edit().putString("writer_active_draft_v1", s).apply()
+        if (!fromDict && writerDictOn) syncDictationBuffer(ctx, s)
     }
     var viewMode by remember { mutableStateOf(0) } // 0: 편집, 1: 미리보기, 2: 동시보기
     var aiMode by remember { mutableStateOf(0) }   // 0: OFF, 1: 화면분할, 2: 플로팅(드래그 창이동)
@@ -772,8 +773,8 @@ fun MarkdownWriterView(
         startOneShotDictation(
             ctx,
             initTx,
-            onPart = { pt -> setBodyText(pt) },
-            onDone = { fn -> writerDictOn = false; setBodyText(fn) },
+            onPart = { pt -> setBodyText(pt, true) },
+            onDone = { fn -> writerDictOn = false; setBodyText(fn, true) },
             onStatus = { st -> statusMsg = st },
             onFallback = {
                 writerDictOn = false
@@ -783,7 +784,7 @@ fun MarkdownWriterView(
             },
             onCmd = { cmd, tx ->
                 writerDictOn = false
-                setBodyText(tx)
+                setBodyText(tx, true)
                 if (cmd == "SAVE_MEMO") saveToInternalShelf()
             }
         )
@@ -816,6 +817,7 @@ fun MarkdownWriterView(
     }
     fun onWriterBodyChange(oldV: TextFieldValue, newV: TextFieldValue): TextFieldValue {
         sp.edit().putString("writer_active_draft_v1", newV.text).apply()
+        if (writerDictOn && newV.text != oldV.text) syncDictationBuffer(ctx, newV.text)
         if (newV.composition != null) return newV
         val oldTx = oldV.text
         val newTx = newV.text

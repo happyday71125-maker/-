@@ -11,7 +11,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -416,22 +415,7 @@ object ScheduleBriefingManager {
         return normalized
     }
 
-    fun loadMorningHour(ctx: Context): Int {
-        val c = loadBriefCfg(ctx)
-        return if (c.enabled) (c.slots.firstOrNull { it.enabled }?.hour ?: -1) else -1
-    }
-
-    fun setMorningHour(ctx: Context, hr: Int): String {
-        val cur = loadBriefCfg(ctx)
-        return if (hr < 0) {
-            saveAndSync(ctx, cur.copy(enabled = false))
-            "🔕 자동 일정 브리핑 해제됨"
-        } else {
-            val nxSlots = if (cur.slots.any { it.hour == hr && it.minute == 0 }) cur.slots else (cur.slots + BriefingSlot(System.currentTimeMillis(), hr, 0, "DAILY", true))
-            saveAndSync(ctx, cur.copy(enabled = true, slots = nxSlots))
-            "⏰ ${formatSlotTime(hr, 0)} 자동 브리핑 예약됨"
-        }
-    }
+    
 
     private fun matchesDayOfWeek(calDayOfWeek: Int, daysMode: String): Boolean = when (daysMode) {
         "WEEKDAY" -> calDayOfWeek in java.util.Calendar.MONDAY..java.util.Calendar.FRIDAY
@@ -504,9 +488,7 @@ object ScheduleBriefingManager {
         }
     }
 
-    fun scheduleMorningAlarm(ctx: Context, hr: Int = -1) {
-        rescheduleAllBriefingAlarms(ctx)
-    }
+    
 
     fun syncNoteAlarms(ctx: Context, notes: List<NoteItem>): Int = runCatching {
         val am = ctx.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager

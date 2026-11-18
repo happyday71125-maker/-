@@ -237,7 +237,7 @@ Text(if (a.isInterruptEnabled) "⏳★" else "⏳", fontSize = (ui.subSp.value +
 }
 }
 @Composable
-fun SettingsSheet(cfg: LauncherConfig, isDefHome: Boolean, ai: LocalAiNoteEngine, onAskHome: () -> Unit, onSysHome: () -> Unit, onCfg: (LauncherConfig) -> Unit, onClose: () -> Unit) {
+fun SettingsSheet(cfg: LauncherConfig, isDefHome: Boolean, onAskHome: () -> Unit, onSysHome: () -> Unit, onCfg: (LauncherConfig) -> Unit, onClose: () -> Unit) {
 val ctx = LocalContext.current
 var aiCfg by remember { mutableStateOf(loadAiCfg(ctx)) }
 val ui = rememberUi(aiCfg.uiScale)

@@ -686,10 +686,15 @@ fun MarkdownWriterView(
         sp.edit().putInt("writer_font_sp_v1", c).apply()
         statusMsg = "🔤 문서 작성 글자 크기: ${c}pt 적용됨 (편집·미리보기·PDF 연동)"
     }
-    fun setBodyText(s: String, fromDict: Boolean = false) {
+    var writerDictOn by remember { mutableStateOf(false) }
+    fun setBodyText(s: String) {
         bodyTfv = TextFieldValue(s, TextRange(s.length))
         sp.edit().putString("writer_active_draft_v1", s).apply()
-        if (!fromDict && writerDictOn) syncDictationBuffer(ctx, s)
+        if (writerDictOn) syncDictationBuffer(ctx, s)
+    }
+    fun setBodyFromDict(s: String) {
+        bodyTfv = TextFieldValue(s, TextRange(s.length))
+        sp.edit().putString("writer_active_draft_v1", s).apply()
     }
     var viewMode by remember { mutableStateOf(0) } // 0: 편집, 1: 미리보기, 2: 동시보기
     var aiMode by remember { mutableStateOf(0) }   // 0: OFF, 1: 화면분할, 2: 플로팅(드래그 창이동)
@@ -703,7 +708,7 @@ fun MarkdownWriterView(
     var aiAns by remember { mutableStateOf("") }
     var aiBusy by remember { mutableStateOf(false) }
     var aiJob by remember { mutableStateOf<Job?>(null) }
-    var writerDictOn by remember { mutableStateOf(false) }
+    
     fun nowLabel() = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date())
     fun saveToInternalShelf() {
         val t = titleTfv.text.trim().ifEmpty {
@@ -773,8 +778,8 @@ fun MarkdownWriterView(
         startOneShotDictation(
             ctx,
             initTx,
-            onPart = { pt -> setBodyText(pt, true) },
-            onDone = { fn -> writerDictOn = false; setBodyText(fn, true) },
+            onPart = { pt -> setBodyFromDict(pt) },
+            onDone = { fn -> writerDictOn = false; setBodyFromDict(fn) },
             onStatus = { st -> statusMsg = st },
             onFallback = {
                 writerDictOn = false
@@ -784,7 +789,7 @@ fun MarkdownWriterView(
             },
             onCmd = { cmd, tx ->
                 writerDictOn = false
-                setBodyText(tx, true)
+                setBodyFromDict(tx)
                 if (cmd == "SAVE_MEMO") saveToInternalShelf()
             }
         )

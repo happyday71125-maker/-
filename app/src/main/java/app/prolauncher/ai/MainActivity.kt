@@ -215,7 +215,15 @@ var settingsOpen by remember { mutableStateOf(false) }
 var interruptApp by remember { mutableStateOf<AppEntry?>(null) }
 val homeRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { isDefHome = repo.isDefaultHomeApp() }
 fun askDefaultHome() { runCatching { homeRoleLauncher.launch(repo.buildRequestDefaultHomeIntent()) }.onFailure { repo.openSystemDefaultAppsSettings() } }
-fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
+LaunchedEffect(LauncherBackupManager.backupRev) {
+if (LauncherBackupManager.backupRev > 0) {
+cfg = repo.loadConfig()
+apps = repo.loadInstalledApps()
+notes = SmartMemoClassifier.sanitizeNotes(repo.loadNotes(), repo)
+books = SmartMemoClassifier.sanitizeBooks(repo.loadBooks(), repo)
+}
+}
+    fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
 BackHandler(enabled = drawerOpen || settingsOpen || interruptApp != null || pager.currentPage != 2) {
 when {
 interruptApp != null -> interruptApp = null
@@ -239,7 +247,9 @@ books, cfg, repo,
 onSaveBooks = { books = it; repo.saveBooks(it) },
 onCfg = { cfg = it; repo.saveConfig(it) },
 onHome = { scope.launch { pager.animateScrollToPage(2) } },
-onBookNote = { bTitle, body, goMemo -> val nx = appendOrCreateBookNote(notes, bTitle, body); notes = nx; repo.saveNotes(nx); if (goMemo) scope.launch { pager.animateScrollToPage(3) } }
+onBookNote = { bTitle, body, _ -> val nx = appendOrCreateBookNote(notes, bTitle, body); notes = nx; repo.saveNotes(nx) },
+notes = notes,
+onUpdateNotes = { notes = it; repo.saveNotes(it) }
 )
 2 -> HomeView(
 apps.filter { it.isFavorite }.take(12), notes.filter { SmartMemoClassifier.isImportant(it) }.take(3), isDefHome, cfg,
@@ -249,11 +259,10 @@ onRightNotes = { scope.launch { pager.animateScrollToPage(3) } },
 onSettings = { settingsOpen = true },
 onRightAi = { scope.launch { pager.animateScrollToPage(4) } },
 onQuickMemo = { raw -> val mc = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = SmartMemoClassifier.guessCategory(raw, mc); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "✅ [" + c0 + "] 메모 저장 + ⏰일정알림 " + sc + "건 예약됨" else "✅ [" + c0 + "] 메모 즉시 저장됨" },
-onQuickAi = { q -> pendingHomeAiQuery = q; scope.launch { pager.scrollToPage(4) } },
 allNotes = notes,
 onNavTab = { pg -> scope.launch { pager.animateScrollToPage(pg.coerceIn(0, 4)) } },
 onToggleCheck = { nid, lIdx -> val nx = notes.map { if (it.id == nid) SmartMemoClassifier.toggleCheckLine(it, lIdx) else it }; notes = nx; repo.saveNotes(nx) },
-onLeftWriter = { scope.launch { pager.animateScrollToPage(0) } }
+onLeftWriter = { scope.launch { pager.animateScrollToPage(0) } }, allApps = apps
 )
 3 -> NotesRagView(notes, books, cfg, ai, onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = false)
 4 -> NotesRagView(notes, books, cfg, ai, onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = true)
@@ -294,7 +303,7 @@ fun HomeView(
 favs: List<AppEntry>, importantNotes: List<NoteItem>, isDefHome: Boolean, cfg: LauncherConfig,
 onAskHome: () -> Unit, onLaunch: (AppEntry) -> Unit, onSwipeUp: () -> Unit,
 onLeftReader: () -> Unit, onRightNotes: () -> Unit, onSettings: () -> Unit,
-onRightAi: () -> Unit = {}, onQuickMemo: (String) -> String = { "" }, onQuickAi: (String) -> Unit = {}, allNotes: List<NoteItem> = emptyList(), onNavTab: (Int) -> Unit = {}, onToggleCheck: (Long, Int) -> Unit = { _, _ -> }, onLeftWriter: () -> Unit = {}
+onRightAi: () -> Unit = {}, onQuickMemo: (String) -> String = { "" }, onQuickAi: (String) -> Unit = {}, allNotes: List<NoteItem> = emptyList(), onNavTab: (Int) -> Unit = {}, onToggleCheck: (Long, Int) -> Unit = { _, _ -> }, onLeftWriter: () -> Unit = {}, allApps: List<AppEntry> = emptyList()
 ) {
 val homeCtx = androidx.compose.ui.platform.LocalContext.current; val ctx = homeCtx; val aiCfg = remember { loadAiCfg(homeCtx) }; val ui = rememberUi(aiCfg.uiScale); val memoCats = remember { SmartMemoClassifier.loadMemoCats(homeCtx) }; var now by remember { mutableStateOf(Date()) }; var dragY by remember { mutableStateOf(0f) }; var aiFolded by remember { mutableStateOf(false) }
 var appColMode by remember { mutableStateOf(homeCtx.getSharedPreferences("pl_ai_v2_prefs", 0).getInt("home_app_col_mode", 1)) }
@@ -302,6 +311,10 @@ var appGapMode by remember { mutableStateOf(homeCtx.getSharedPreferences("pl_ai_
 var cpuPct by remember { mutableStateOf(12) }; var ramPct by remember { mutableStateOf(45) }; var ramTxt by remember { mutableStateOf("0.0/0.0G") }
 var briefCfg by remember { mutableStateOf(ScheduleBriefingManager.loadBriefCfg(homeCtx)) }
 var briefPanelOpen by remember { mutableStateOf(false) }
+val homeRepo = remember { LauncherRepository(homeCtx) }
+var homeAppFolders by remember(LauncherBackupManager.backupRev, allApps.size) { mutableStateOf(FolderRegistry.loadAppFolders(homeCtx, allApps)) }
+var selHomeFolderId by remember { mutableStateOf(-1L) }
+var homeFolderDlgOpen by remember { mutableStateOf(false) }
 fun openSlotTimePicker(initialH: Int, initialM: Int, onPicked: (Int, Int) -> Unit) {
 runCatching {
 android.app.TimePickerDialog(homeCtx, { _, h, m -> onPicked(h, m) }, initialH.coerceIn(0, 23), initialM.coerceIn(0, 59), false).show()
@@ -704,27 +717,42 @@ if (!isDefHome) { Surface(color = Color(0xFF14261F), shape = RoundedCornerShape(
 Surface(color = Color(0xFF0F1624), shape = RoundedCornerShape(16.dp), border = BorderStroke(0.8.dp, Color(0xFF222E44)), modifier = Modifier.fillMaxWidth().clickable { onRightNotes() }) { Column(Modifier.padding(ui.cardPad), verticalArrangement = Arrangement.spacedBy(4.dp)) { Row(Modifier.fillMaxWidth(), SB, CV) { Text("📌 중요 메모 (${importantNotes.size})", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA); Text("→", fontSize = ui.subSp, color = CM) }; if (importantNotes.isEmpty()) { Text("메모에서 ★ 중요 표시를 켜면 홈 화면에서 바로 확인됩니다.", fontSize = (ui.subSp.value + 1).sp, color = CD) } else importantNotes.forEach { n -> val cat = SmartMemoClassifier.categoryOf(n, memoCats); Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) { val ls = n.content.lines().filter { !it.trim().startsWith("#") && it.isNotBlank() }; ls.take(3).forEachIndexed { idx, ln -> val tr = ln.trimStart(); val isChk = tr.startsWith("☐") || tr.startsWith("☑"); val done = tr.startsWith("☑"); val origIdx = n.content.lines().indexOf(ln).coerceAtLeast(idx); Row(Modifier.fillMaxWidth().clickable { if (isChk) onToggleCheck(n.id, origIdx) else onRightNotes() }.padding(vertical = 1.dp), verticalAlignment = CV) { if (idx == 0) Text("[$cat] ", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG); Text(ln, fontSize = (ui.subSp.value + 1).sp, color = if (done) CD else Color(0xFFE5E7EB), textDecoration = if (done) TextDecoration.LineThrough else null, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)) } } } } } }
 }
 if (!isKeyboardOpen) {
-Column(Modifier.fillMaxWidth().heightIn(min = 84.dp, max = favMaxH).padding(horizontal = 4.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+val activeHomeApps = remember(selHomeFolderId, favs, allApps, homeAppFolders) {
+if (selHomeFolderId <= 0L) favs
+else {
+val pkgSet = homeAppFolders.find { it.id == selHomeFolderId }?.packages?.toSet() ?: emptySet()
+allApps.filter { it.packageName in pkgSet }
+}
+}
+Column(Modifier.fillMaxWidth().heightIn(min = 92.dp, max = favMaxH).padding(horizontal = 4.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
   Row(Modifier.fillMaxWidth(), SB, CV) {
-Text("★ 즐겨찾기 앱 (${favs.size}) · 편집 ↑", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onSwipeUp() }.padding(vertical = 2.dp))
+Text("📁 홈 앱 폴더 · 앱서랍 ↑", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onSwipeUp() }.padding(vertical = 2.dp))
 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = CV) {
 Text(when (appGapMode) { 0 -> "🫧 카드(넓게)"; 1 -> "🌿 텍스트(넓게)"; else -> "▫ 기본간격" }, fontSize = 11.sp, color = CG, modifier = Modifier.clickable { val ng = (appGapMode + 1) % 3; appGapMode = ng; homeCtx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putInt("home_app_gap_mode", ng).apply() }.padding(vertical = 2.dp))
 Text(when (appColMode) { 0 -> "◫ 좌·우(양끝)"; 1 -> "◫ 2열(균등)"; else -> "☰ 1열" }, fontSize = 11.sp, color = CA, modifier = Modifier.clickable { val nx = (appColMode + 1) % 3; appColMode = nx; homeCtx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putInt("home_app_col_mode", nx).apply() }.padding(vertical = 2.dp))
 }
 }
-val vGap = when (appGapMode) { 0 -> 10.dp; 1 -> 14.dp; else -> 8.dp }
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = CV) {
+ChipBtn("★즐겨찾기(${favs.size})", selHomeFolderId == -1L, CA) { selHomeFolderId = -1L }
+homeAppFolders.forEach { hf ->
+val cnt = if (allApps.isEmpty()) hf.packages.size else allApps.count { it.packageName in hf.packages }
+ChipBtn("📁${hf.name}($cnt)", selHomeFolderId == hf.id, CG) { selHomeFolderId = hf.id }
+}
+ChipBtn("➕폴더·백업", homeFolderDlgOpen, CW) { homeFolderDlgOpen = true }
+}
+    val vGap = when (appGapMode) { 0 -> 10.dp; 1 -> 14.dp; else -> 8.dp }
 val hGap = when (appGapMode) { 0 -> 14.dp; 1 -> 24.dp; else -> 16.dp }
-if (favs.isEmpty()) {
-Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(12.dp), border = BorderStroke(0.8.dp, Color(0xFF1E2B42)), modifier = Modifier.fillMaxWidth().clickable { onSwipeUp() }) {
-Text("위로 스와이프(↑)하여 자주 쓰는 앱을 ★ 홈에 고정해 보세요", fontSize = ui.bodySp, color = CM, modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp))
+if (activeHomeApps.isEmpty()) {
+Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(12.dp), border = BorderStroke(0.8.dp, Color(0xFF1E2B42)), modifier = Modifier.fillMaxWidth().clickable { if (selHomeFolderId > 0L) homeFolderDlgOpen = true else onSwipeUp() }) {
+Text(if (selHomeFolderId > 0L) "이 폴더가 비어 있습니다. 탭하여 앱을 폴더에 담아 보세요." else "위로 스와이프(↑)하여 자주 쓰는 앱을 ★ 홈에 고정해 보세요", fontSize = ui.bodySp, color = CM, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
 }
 } else if (appColMode == 2) {
 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), horizontalAlignment = align, verticalArrangement = Arrangement.spacedBy(vGap)) {
-favs.forEach { a -> HomeAppTileItem(a, appGapMode, ui.subSp, cfg.textAlign == "RIGHT", onLaunch) }
+activeHomeApps.forEach { a -> HomeAppTileItem(a, appGapMode, ui.subSp, cfg.textAlign == "RIGHT", onLaunch) }
 }
 } else {
-val leftApps = favs.filterIndexed { i, _ -> i % 2 == 0 }
-val rightApps = favs.filterIndexed { i, _ -> i % 2 == 1 }
+val leftApps = activeHomeApps.filterIndexed { i, _ -> i % 2 == 0 }
+val rightApps = activeHomeApps.filterIndexed { i, _ -> i % 2 == 1 }
 Row(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(hGap), verticalAlignment = Alignment.Top) {
 Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(vGap)) {
 leftApps.forEach { a -> HomeAppTileItem(a, appGapMode, ui.subSp, false, onLaunch) }
@@ -738,5 +766,18 @@ rightApps.forEach { a -> HomeAppTileItem(a, appGapMode, ui.subSp, appColMode == 
 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Surface(color = Color(0xFF101624), shape = RoundedCornerShape(50), border = BorderStroke(0.8.dp, Color(0xFF233047)), modifier = Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = CV) { Text("✍️", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CW, modifier = Modifier.clickable { onLeftWriter() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📖", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onLeftReader() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🔼앱서랍", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CW, modifier = Modifier.clickable { onSwipeUp() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📝", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CG, modifier = Modifier.clickable { onRightNotes() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🦙", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CA, modifier = Modifier.clickable { onRightAi() }.padding(horizontal = 8.dp, vertical = 4.dp)) } } }
 }
 }
+ 
+ 
+} 
+if (homeFolderDlgOpen) {
+HomeAppFolderDialog(
+ctx = homeCtx,
+repo = homeRepo,
+allApps = allApps.ifEmpty { favs },
+folders = homeAppFolders,
+ui = ui,
+onUpdateFolders = { homeAppFolders = it },
+onDismiss = { homeFolderDlgOpen = false }
+)
 }
 }

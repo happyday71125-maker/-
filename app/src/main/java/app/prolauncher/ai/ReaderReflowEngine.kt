@@ -95,16 +95,26 @@ return ans
 fun rawStartOf(idx: Int): Int = if (rawStarts.isEmpty()) 0 else rawStarts[idx.coerceIn(0, rawStarts.lastIndex)]
 fun rawEndOf(idx: Int): Int = if (rawEnds.isEmpty()) fullText.length else rawEnds[idx.coerceIn(0, rawEnds.lastIndex)]
 }
-fun buildBookReflowSource(pages: List<String>): BookReflowSource {
-if (pages.isEmpty()) return BookReflowSource("", IntArray(0), IntArray(0))
-val starts = IntArray(pages.size)
+fun buildBookReflowSource(pages: List<String>, smartReflow: Boolean = true, preservePoetry: Boolean = false): BookReflowSource {
+  if (pages.isEmpty()) return BookReflowSource("", IntArray(0), IntArray(0))
+val nl2 = 10.toChar().toString() + 10.toChar().toString()
+  val starts = IntArray(pages.size)
 val ends = IntArray(pages.size)
 val sb = StringBuilder(pages.sumOf { it.length + 2 })
 pages.forEachIndexed { i, raw ->
-if (i > 0) sb.append("\n\n")
+val piece = if (smartReflow) {
+EbookTextReflower.unwrapNaturalParagraphs(raw, preserveStanzas = preservePoetry)
+} else {
+EbookTextReflower.cleanControlChars(raw).trim()
+}
+if (i > 0 && sb.isNotEmpty() && piece.isNotEmpty()) {
+val prevLast = sb.last()
+val midSentence = smartReflow && !preservePoetry && prevLast !in charArrayOf('.', '?', '!', '。', '！', '？', '…', ':', '”', '’', 34.toChar(), 39.toChar(), ')', ']', '】')
+sb.append(if (midSentence) " " else nl2)
+}
 starts[i] = sb.length
-sb.append(raw.trim())
-ends[i] = sb.length
+ sb.append(piece) 
+  ends[i] = sb.length
 }
 return BookReflowSource(sb.toString(), starts, ends)
 }
@@ -155,7 +165,8 @@ selCat: String, onSelCat: (String) -> Unit, onOpenCatCfg: () -> Unit, cfgOpen: B
 sortMode: String, onSetSort: (String) -> Unit, reorderMode: Boolean, onToggleReorder: () -> Unit,
 bookQuery: String, onBookQuery: (String) -> Unit, bookMeta: Map<Long, BookSortMeta>, bms: List<BookmarkEntry>,
 fg: Color, mut: Color, onSaveBooks: (List<BookItem>) -> Unit, onOpenBook: (BookItem, Boolean) -> Unit,
-onTogglePin: (Long) -> Unit, onMoveOrder: (Long, Int) -> Unit, onDeleteBook: (Long) -> Unit
+onTogglePin: (Long) -> Unit, onMoveOrder: (Long, Int) -> Unit, onDeleteBook: (Long) -> Unit,
+ onBackupReader: (String?) -> Unit = {}, onRestoreReader: () -> Unit = {} 
 ) {
 var editId by remember { mutableStateOf<Long?>(null) }
 var editT by remember { mutableStateOf("") }
@@ -163,8 +174,10 @@ var editC by remember { mutableStateOf("") }
 fun metaOf(id: Long, defOrd: Int = 0) = bookMeta[id] ?: BookSortMeta(sortOrder = defOrd)
 Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
-allCats.forEach { c -> val cnt = if (c == "전체") books.size else books.count { (it.category.ifBlank { "기타" }) == c }; ChipBtn("$c($cnt)", selCat == c, CG) { onSelCat(c) } }
-ChipBtn("➕분류", cfgOpen && rCfgTab == 2, CA) { onOpenCatCfg() }
+allCats.forEach { c -> val cnt = if (c == "전체") books.size else books.count { (it.category.ifBlank { "기타" }) == c }; val lb = if (c == "전체") "📁전체($cnt)" else "📁$c($cnt)"; ChipBtn(lb, selCat == c, CG) { onSelCat(c) } }
+ChipBtn("➕폴더관리", cfgOpen && rCfgTab == 2, CA) { onOpenCatCfg() }
+ChipBtn("📤백업", false, CG) { onBackupReader(if (selCat == "전체") null else selCat) }
+ChipBtn("♻️병합복원", false, CW) { onRestoreReader() }
 }
 Surface(color = mut.copy(alpha = 0.08f), shape = RoundedCornerShape(11.dp), border = BorderStroke(0.7.dp, mut.copy(alpha = 0.25f)), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

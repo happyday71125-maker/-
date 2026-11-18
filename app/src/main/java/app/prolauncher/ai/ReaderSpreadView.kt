@@ -80,7 +80,8 @@ fun splitSpreadIntoSegments(raw: String): List<String> {
 fun ReaderView(
     books: List<BookItem>, cfg: LauncherConfig, repo: LauncherRepository,
     onSaveBooks: (List<BookItem>) -> Unit, onCfg: (LauncherConfig) -> Unit,
-    onHome: () -> Unit, onBookNote: (String, String, Boolean) -> Unit = { _, _, _ -> }
+    onHome: () -> Unit, onBookNote: (String, String, Boolean) -> Unit = { _, _, _ -> },
+    notes: List<NoteItem> = emptyList(), onUpdateNotes: (List<NoteItem>) -> Unit = {}
 ) {
     val ctx = LocalContext.current
     val aiCfg = remember { loadAiCfg(ctx) }
@@ -91,11 +92,35 @@ fun ReaderView(
     EmojiHelpDialog()
     SideEffect { ReaderTtsRuntime.syncState(books, repo, onSaveBooks) }
     var twoPageMode by remember { mutableStateOf(readerPrefs.getBoolean("reader_two_page", false)) }
+    var smartReflowOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_smart_reflow", true)) }
     var bCats by remember { mutableStateOf(SmartMemoClassifier.loadBookCats(ctx)) }
     var selCat by remember { mutableStateOf("전체") }
     var catBarOpen by remember { mutableStateOf(false) }
+    var folderDialogOpen by remember { mutableStateOf(false) }
     val allCats = remember(bCats, books) { (listOf("전체") + (bCats + books.map { it.category.ifBlank { "기타" } }).distinct()) }
     var bms by remember { mutableStateOf(loadBookmarks(ctx)) }
+    var readerMemoOpen by remember { mutableStateOf(false) }
+var readerMemoMode by remember { mutableStateOf(readerPrefs.getInt("reader_memo_last_mode", 1).coerceIn(1, 2)) }
+var memoSplitHoriz by remember { mutableStateOf(readerPrefs.getBoolean("reader_memo_split_horiz", false)) }
+    var memoFloatMin by remember { mutableStateOf(false) }
+var memoFloatX by remember { mutableStateOf(readerPrefs.getFloat("reader_memo_fx", 16f)) }
+var memoFloatY by remember { mutableStateOf(readerPrefs.getFloat("reader_memo_fy", 96f)) }
+var pendingMemoExcerpt by remember { mutableStateOf<String?>(null) }
+var pendingReaderExportFolder by remember { mutableStateOf<String?>(null) }
+var readerBackupMsg by remember { mutableStateOf<String?>(null) }
+fun setReaderMemoModePersist(mode: Int, horiz: Boolean = memoSplitHoriz) {
+val m = mode.coerceIn(1, 2)
+readerMemoMode = m
+memoSplitHoriz = horiz
+readerPrefs.edit().putInt("reader_memo_last_mode", m).putBoolean("reader_memo_split_horiz", horiz).apply()
+}
+fun openReaderMemoInLastMode(appendExcerpt: String? = null) {
+if (!appendExcerpt.isNullOrBlank()) pendingMemoExcerpt = appendExcerpt
+memoFloatMin = false
+readerMemoOpen = true
+
+}
+
     var bmOpen by remember { mutableStateOf(false) }
     var selId by remember {
         val savedId = readerPrefs.getLong("reader_last_book_id", -1L)
@@ -115,8 +140,43 @@ fun ReaderView(
     var reorderMode by remember { mutableStateOf(false) }
     var bookQuery by remember { mutableStateOf("") }
     var newCat by remember { mutableStateOf("") }
-    var quoteConfirmText by remember { mutableStateOf<String?>(null) }
     var bookMeta by remember { mutableStateOf(loadBookMetaMap(ctx)) }
+    LaunchedEffect(LauncherBackupManager.backupRev) {
+        if (LauncherBackupManager.backupRev > 0) {
+            bCats = SmartMemoClassifier.loadBookCats(ctx)
+            bms = loadBookmarks(ctx)
+            bookMeta = loadBookMetaMap(ctx)
+            onSaveBooks(repo.loadBooks())
+            onUpdateNotes(repo.loadNotes())
+        }
+    }
+    val readerBackupExp = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            val flt = pendingReaderExportFolder
+            scope.launch(Dispatchers.IO) {
+                val msg = runCatching {
+                    val json = LauncherBackupManager.exportBackupJson(ctx, repo, "READER", flt)
+                    ctx.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                    "✅ 독서대 백업 저장 완료 (${if (flt == null) "전체 도서·책갈피" else "[$flt] 폴더"})"
+                }.getOrElse { "⚠️ 독서대 백업 실패: ${it.message}" }
+                withContext(Dispatchers.Main) { readerBackupMsg = msg; ReaderTtsRuntime.status = msg }
+            }
+        }
+    }
+    val readerBackupImp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                val raw = runCatching { ctx.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: "" }.getOrDefault("")
+                val msg = withContext(Dispatchers.Main) { LauncherBackupManager.importAndMergeBackupJson(ctx, repo, raw) }
+                withContext(Dispatchers.Main) { readerBackupMsg = msg; ReaderTtsRuntime.status = msg }
+            }
+        }
+    }
+    fun triggerReaderBackup(folderFlt: String? = null) {
+        pendingReaderExportFolder = folderFlt
+        val fn = if (folderFlt.isNullOrBlank()) "prolauncher_reader_backup.json" else "prolauncher_reader_${folderFlt}.json"
+        readerBackupExp.launch(fn)
+    }
     fun metaOf(id: Long, defOrd: Int = 0) = bookMeta[id] ?: BookSortMeta(sortOrder = defOrd)
     fun setBookSort(m: String) { sortMode = m; readerPrefs.edit().putString("reader_book_sort", m).apply() }
     fun toggleBookPin(targetId: Long) { val mp = bookMeta.toMutableMap(); val pr = mp[targetId] ?: BookSortMeta(); mp[targetId] = pr.copy(pinned = !pr.pinned); bookMeta = mp; saveBookMetaMap(ctx, mp) }
@@ -261,7 +321,7 @@ fun ReaderView(
                         Text("⚙️ 독서대 전용 설정", fontSize = (ui.subSp.value + 1.5f).sp, fontWeight = FontWeight.Bold, color = CW)
                         Text("✕ 닫기", fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = CG, modifier = Modifier.clickable { cfgOpen = false }.padding(4.dp))
                     }
-                    SettingsTabBar(listOf("📖 화면·글꼴", "🔊 TTS 낭독", "🏷️ 분류 관리"), rCfgTab) { rCfgTab = it }
+                    SettingsTabBar(listOf("📖 화면·글꼴", "🔊 TTS 낭독", "📁 폴더·백업"), rCfgTab) { rCfgTab = it }
                     when (rCfgTab) {
                         0 -> {
                             Surface(color = Color(0xFF09101C), shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
@@ -285,7 +345,7 @@ fun ReaderView(
                                     Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1C2940)))
                                     Row(Modifier.fillMaxWidth(), SB, CV) {
                                         Text("🔤 글자 포인트: ${curPt}pt", fontSize = (ui.subSp.value + 1f).sp, fontWeight = FontWeight.Bold, color = CW, modifier = Modifier.weight(1f))
-                                        ChipBtn(if (cfg.readerUseSerif) "✒️ 명조체" else "🔤 고딕체", true, CG) { onCfg(cfg.copy(readerUseSerif = !cfg.readerUseSerif)) }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = CV) { ChipBtn(if (smartReflowOn) "✨줄바꿈보정" else "📄원문줄바꿈", smartReflowOn, CA) { smartReflowOn = !smartReflowOn; readerPrefs.edit().putBoolean("reader_smart_reflow", smartReflowOn).apply() }; ChipBtn(if (cfg.readerUseSerif) "✒️ 명조체" else "🔤 고딕체", true, CG) { onCfg(cfg.copy(readerUseSerif = !cfg.readerUseSerif)) } }
                                     }
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                                         ReaderPointBtn("➖ 2pt", false, CW, Modifier.weight(1f)) { onCfg(cfg.copy(readerFontSizeSp = (curPt - 2).coerceAtLeast(12))) }
@@ -326,14 +386,23 @@ fun ReaderView(
                         else -> {
                             Surface(color = Color(0xFF09101C), shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("🏷️ 독서대 도서 카테고리 편집 (탭하여 삭제)", fontSize = ui.subSp, color = CA, fontWeight = FontWeight.Bold)
+                                    Row(Modifier.fillMaxWidth(), SB, CV) {
+                                        Text("📁 독서대 폴더 편집 및 도서 백업/복원", fontSize = ui.subSp, color = CA, fontWeight = FontWeight.Bold)
+                                        Text("⚙️상세폴더관리", fontSize = ui.subSp, color = CG, modifier = Modifier.clickable { folderDialogOpen = true })
+                                    }
                                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        bCats.forEach { c -> ChipBtn(if (bCats.size > 1) "$c ✕" else c) { if (bCats.size > 1) { val u = bCats.filterNot { it == c }; bCats = u; SmartMemoClassifier.saveBookCats(ctx, u); if (selCat == c) selCat = "전체" } } }
+                                        bCats.forEach { c -> ChipBtn(if (bCats.size > 1) "📁$c ✕" else "📁$c") { if (bCats.size > 1) { val u = bCats.filterNot { it == c }; bCats = u; SmartMemoClassifier.saveBookCats(ctx, u); if (selCat == c) selCat = "전체" } } }
                                     }
                                     Row(Modifier.fillMaxWidth(), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        OutlinedTextField(value = newCat, onValueChange = { newCat = it }, placeholder = { Text("새 도서 카테고리 이름 (예: 철학, 소설, 역사)", fontSize = ui.subSp) }, singleLine = true, modifier = Modifier.weight(1f))
+                                        OutlinedTextField(value = newCat, onValueChange = { newCat = it }, placeholder = { Text("새 독서대 폴더 이름 (예: 전공PDF, 소설)", fontSize = ui.subSp) }, singleLine = true, modifier = Modifier.weight(1f))
                                         Button(onClick = { val t = newCat.trim(); if (t.isNotEmpty() && !bCats.contains(t)) { val u = bCats + t; bCats = u; SmartMemoClassifier.saveBookCats(ctx, u); newCat = "" } }) { Text("➕", fontSize = ui.subSp) }
                                     }
+                                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                                        ChipBtn("📤 전체 도서·책갈피 백업(.json)", true, CG) { triggerReaderBackup(null) }
+                                        if (selCat != "전체") ChipBtn("📤 [$selCat] 폴더만 백업", false, CW) { triggerReaderBackup(selCat) }
+                                        ChipBtn("♻️ 도서 병합 복원(기존 유지+추가)", false, CA) { readerBackupImp.launch(arrayOf("*/*")) }
+                                    }
+                                    readerBackupMsg?.let { Text(it, fontSize = ui.subSp, color = CG) }
                                 }
                             }
                         }
@@ -344,7 +413,7 @@ fun ReaderView(
         if (shelf || act == null) {
             ReaderShelfSection(
                 ctx = ctx, ui = ui, books = books, bCats = bCats, allCats = allCats,
-                selCat = selCat, onSelCat = { selCat = it }, onOpenCatCfg = { rCfgTab = 2; cfgOpen = true },
+                selCat = selCat, onSelCat = { selCat = it }, onOpenCatCfg = { folderDialogOpen = true },
                 cfgOpen = cfgOpen, rCfgTab = rCfgTab, sortMode = sortMode,
                 onSetSort = { setBookSort(it); if (it != "CUSTOM") reorderMode = false },
                 reorderMode = reorderMode, onToggleReorder = { reorderMode = !reorderMode; if (reorderMode) setBookSort("CUSTOM") },
@@ -352,10 +421,10 @@ fun ReaderView(
                 fg = fg, mut = mut, onSaveBooks = onSaveBooks,
                 onOpenBook = { bk, withTts -> markBookRead(bk.id); selId = bk.id; shelf = false; if (withTts) { ttsBarMin = false; ReaderTtsRuntime.start(ctx, bk, bk.currentPage) } },
                 onTogglePin = { toggleBookPin(it) }, onMoveOrder = { bid, actT -> moveBookOrder(bid, actT) },
-                onDeleteBook = { bid -> val nx = books.filterNot { it.id == bid }; onSaveBooks(nx); if (selId == bid) selId = nx.firstOrNull()?.id ?: 0L }
+                onDeleteBook = { bid -> val nx = books.filterNot { it.id == bid }; onSaveBooks(nx); if (selId == bid) selId = nx.firstOrNull()?.id ?: 0L }, onBackupReader = { flt -> triggerReaderBackup(flt) }, onRestoreReader = { readerBackupImp.launch(arrayOf("*/*")) }
             )
         } else {
-            val reflowSrc = remember(act.id, act.pages) { buildBookReflowSource(act.pages) }
+            val isPoetryBook = act.category.contains("시"); val reflowSrc = remember(act.id, act.pages, smartReflowOn, isPoetryBook) { buildBookReflowSource(act.pages, smartReflow = smartReflowOn, preservePoetry = isPoetryBook) }
             val ttsHere = ReaderTtsRuntime.on && ReaderTtsRuntime.bookId == act.id
             var curCharOff by remember(act.id) {
                 val latestSaved = loadBookMetaMap(ctx)[act.id]?.charOffset ?: bookMeta[act.id]?.charOffset ?: -1
@@ -382,6 +451,8 @@ fun ReaderView(
             val textMeasurer = rememberTextMeasurer()
             val pageTextStyle = remember(curPt, cfg.readerUseSerif, fg) {
                 TextStyle(
+                    lineBreak = LineBreak.Paragraph,
+                    hyphens = Hyphens.Auto,
                     fontSize = curPt.sp,
                     lineHeight = (curPt * 1.58f).sp,
                     fontFamily = if (cfg.readerUseSerif) FontFamily.Serif else FontFamily.SansSerif,
@@ -515,7 +586,7 @@ fun ReaderView(
                     Text(act.title, fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.SemiBold, color = mut, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
-                    ChipBtn(if (hasSel) "✂️선택됨" else "✂️", selectMode || hasSel, CA) { toggleScissorsButton() }
+                    ChipBtn("📝메모", readerMemoOpen, CG) { if (readerMemoOpen) readerMemoOpen = false else openReaderMemoInLastMode() }; ChipBtn(if (hasSel) "✂️선택됨" else "✂️", selectMode || hasSel, CA) { toggleScissorsButton() }
                     ChipBtn(if (ttsHere) "⏹️" else "🔊", ttsHere, CG) {
                         if (ttsHere) ReaderTtsRuntime.stop(ctx) else {
                             val chosen = commitDraftIfEditing()
@@ -557,11 +628,17 @@ fun ReaderView(
                 }
             }
 
+            val bookDedicatedMemo = remember(notes, act.title) { findBookDedicatedNoteBody(notes, act.title) }
+            val saveBookMemoInline: (String) -> Unit = { newBody ->
+                val nx = upsertBookDedicatedNote(notes, act.title, newBody)
+                onUpdateNotes(nx)
+            }
             val ovScroll = rememberScrollState()
             LaunchedEffect(vIdx, act.id) {
                 if (ovScroll.value != 0) ovScroll.scrollTo(0)
             }
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp)) {
+            val renderBookViewport: @Composable (Modifier) -> Unit = { paneMod ->
+            BoxWithConstraints(paneMod) {
                 val availW = this.maxWidth
                 val renderColW = if (twoPageMode) ((availW - outerPad * 2 - spineW) / 2f).coerceAtLeast(80.dp) else (availW - outerPad * 2).coerceAtLeast(100.dp)
 
@@ -653,7 +730,8 @@ fun ReaderView(
                                 }
                                 ReaderPointBtn("📝 메모 발췌", false, CA, Modifier.weight(1f)) {
                                     val target = commitDraftIfEditing().ifBlank { spreadText }
-                                    quoteConfirmText = "[$pgLabel 발췌]\n\"${target.take(450)}\"\n\n메모: "
+                                    selectMode = false
+                                    openReaderMemoInLastMode(34.toChar().toString() + target.take(450) + 34.toChar() + 10.toChar() + "• 메모: ")
                                 }
                                 ReaderPointBtn("🔈 구절 낭독", false, CW, Modifier.weight(1f)) {
                                     val target = commitDraftIfEditing().ifBlank { spreadText }
@@ -777,8 +855,68 @@ fun ReaderView(
                     }
                 }
             }
-            
+            }
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp)) {
+                val areaMaxWPx = with(density) { maxWidth.toPx() }
+                val areaMaxHPx = with(density) { maxHeight.toPx() }
+                val fltW = (maxWidth * 0.88f).coerceIn(250.dp, 400.dp)
+                val fltH = if (memoFloatMin) 42.dp else (maxHeight * 0.56f).coerceIn(210.dp, 360.dp)
+                val fltWPx = with(density) { fltW.toPx() }
+                val fltHPx = with(density) { fltH.toPx() }
 
+                if (readerMemoOpen && readerMemoMode == 1) {
+                    if (memoSplitHoriz) {
+                        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            renderBookViewport(Modifier.weight(0.54f).fillMaxHeight())
+                            ReaderMemoWorkspaceCard(
+                                ctx = ctx, ui = ui, bookId = act.id, bookTitle = act.title, pgLabel = pgLabel,
+                                currentExcerptOrPage = aiTargetText, initialBody = bookDedicatedMemo,
+                                pendingAppendExcerpt = pendingMemoExcerpt, onConsumedPendingExcerpt = { pendingMemoExcerpt = null },
+                                isFloating = false, splitHoriz = true,
+                                onSelectSplitMode = { hz -> setReaderMemoModePersist(1, hz) },
+                                onSelectFloatingMode = { setReaderMemoModePersist(2) },
+                                onSaveBody = saveBookMemoInline, onClose = { readerMemoOpen = false },
+                                modifier = Modifier.weight(0.46f).fillMaxHeight()
+                            )
+                        }
+                    } else {
+                        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            renderBookViewport(Modifier.weight(0.56f).fillMaxWidth())
+                            ReaderMemoWorkspaceCard(
+                                ctx = ctx, ui = ui, bookId = act.id, bookTitle = act.title, pgLabel = pgLabel,
+                                currentExcerptOrPage = aiTargetText, initialBody = bookDedicatedMemo,
+                                pendingAppendExcerpt = pendingMemoExcerpt, onConsumedPendingExcerpt = { pendingMemoExcerpt = null },
+                                isFloating = false, splitHoriz = false,
+                                onSelectSplitMode = { hz -> setReaderMemoModePersist(1, hz) },
+                                onSelectFloatingMode = { setReaderMemoModePersist(2) },
+                                onSaveBody = saveBookMemoInline, onClose = { readerMemoOpen = false },
+                                modifier = Modifier.weight(0.44f).fillMaxWidth()
+                            )
+                        }
+                    }
+                } else {
+                    renderBookViewport(Modifier.fillMaxSize())
+                }
+
+                if (readerMemoOpen && readerMemoMode == 2) {
+                    ReaderFloatingMemoWindow(
+                        ctx = ctx, ui = ui, maxWPx = areaMaxWPx, maxHPx = areaMaxHPx,
+                        floatW = fltW, floatH = fltH, floatWPx = fltWPx, floatHPx = fltHPx,
+                        floatX = memoFloatX, floatY = memoFloatY, floatMin = memoFloatMin,
+                        onMove = { nx, ny ->
+                            memoFloatX = nx; memoFloatY = ny
+                            readerPrefs.edit().putFloat("reader_memo_fx", nx).putFloat("reader_memo_fy", ny).apply()
+                        },
+                        onToggleMin = { memoFloatMin = !memoFloatMin },
+                        onSwitchToSplit = { hz -> setReaderMemoModePersist(1, hz) },
+                        onClose = { readerMemoOpen = false },
+                        bookId = act.id, bookTitle = act.title, pgLabel = pgLabel,
+                        currentExcerptOrPage = aiTargetText, initialBody = bookDedicatedMemo,
+                        pendingAppendExcerpt = pendingMemoExcerpt, onConsumedPendingExcerpt = { pendingMemoExcerpt = null },
+                        onSaveBody = saveBookMemoInline
+                    )
+                }
+            }
             Row(Modifier.fillMaxWidth().padding(bottom = 2.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                 ChipBtn(if (hasSel) "🦙선택해설(${activeExcerpt.length}자)" else "🦙페이지해설", readerAiOpen, CG) {
                     commitDraftIfEditing()
@@ -798,10 +936,17 @@ fun ReaderView(
                         readerAiNotice = "✅ 『${act.title}』 독서노트에 이어서 저장됨!"
                     }
                 }
-                ChipBtn("📝발췌메모", false, CW) {
+                ChipBtn(
+                    if (readerMemoOpen) "📝메모닫기" else if (readerMemoMode == 2) "🪟독서메모" else "◫독서메모",
+                    readerMemoOpen,
+                    CW
+                ) {
+                    if (readerMemoOpen) readerMemoOpen = false else openReaderMemoInLastMode()
+                }
+                ChipBtn("❝발췌추가", false, CA) {
                     val chosen = commitDraftIfEditing()
                     val body = if (chosen.isNotBlank()) chosen else spreadText
-                    quoteConfirmText = "[$pgLabel 발췌]\n\"${body.take(450)}\"\n\n메모: "
+                    openReaderMemoInLastMode(34.toChar().toString() + body.take(450) + 34.toChar() + 10.toChar() + "• 메모: ")
                 }
             }
             if (readerAiOpen) {
@@ -883,25 +1028,38 @@ fun ReaderView(
                 }
             }
         }
-        quoteConfirmText?.let { draft ->
-            var edDraft by remember(draft) { mutableStateOf(TextFieldValue(draft, TextRange(draft.length))) }
-            val bTitle = act?.title ?: "도서"
-            AlertDialog(
-                onDismissRequest = { quoteConfirmText = null },
-                title = { Text("📚 『$bTitle』 독서노트 이어쓰기", fontSize = ui.titleSp) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("같은 책에서 작성한 메모는 새 메모를 어지럽게 늘리지 않고 『$bTitle』 전용 독서노트 하나에 차곡차곡 이어서 기록됩니다.", fontSize = (ui.subSp.value + 0.5f).sp, color = CM)
-                        OutlinedTextField(value = edDraft, onValueChange = { edDraft = it }, singleLine = false, minLines = 4, maxLines = 8, modifier = Modifier.fillMaxWidth())
+        if (folderDialogOpen) {
+            FolderManageDialog(
+                title = "📁 독서대 폴더 관리 및 백업",
+                folders = bCats,
+                selectedFolder = selCat,
+                ui = ui,
+                onAddFolder = { t ->
+                    if (!bCats.contains(t)) {
+                        val nx = bCats + t
+                        bCats = nx
+                        SmartMemoClassifier.saveBookCats(ctx, nx)
                     }
                 },
-                confirmButton = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { val q = edDraft.text.trim(); quoteConfirmText = null; if (q.isNotEmpty()) onBookNote(bTitle, q, true) }) { Text("📝 저장+메모열기", fontSize = ui.subSp) }
-                        Button(onClick = { val q = edDraft.text.trim(); quoteConfirmText = null; if (q.isNotEmpty()) { onBookNote(bTitle, q, false); ReaderTtsRuntime.status = "✅ 『$bTitle』 독서노트에 이어서 기록되었습니다!" } }) { Text("💾 이어저장", fontSize = ui.subSp) }
+                onRenameFolder = { oldN, newN ->
+                    val (nf, nb) = FolderRegistry.renameBookFolder(ctx, repo, oldN, newN, books)
+                    bCats = nf
+                    onSaveBooks(nb)
+                    if (selCat == oldN) selCat = newN
+                },
+                onDeleteFolder = { delN ->
+                    if (bCats.size > 1) {
+                        val nx = bCats.filterNot { it == delN }
+                        bCats = nx
+                        SmartMemoClassifier.saveBookCats(ctx, nx)
+                        if (selCat == delN) selCat = "전체"
                     }
                 },
-                dismissButton = { TextButton(onClick = { quoteConfirmText = null }) { Text("✕ 취소") } }
+                onBackupAllInTab = { triggerReaderBackup(null) },
+                onBackupCurrentFolder = { if (selCat != "전체") triggerReaderBackup(selCat) },
+                onRestoreTab = { readerBackupImp.launch(arrayOf("*/*")) },
+                statusText = readerBackupMsg,
+                onDismiss = { folderDialogOpen = false }
             )
         }
     }

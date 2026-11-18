@@ -43,6 +43,7 @@ var renVal by remember { mutableStateOf("") }
 var mode by remember(isAiPage) { mutableStateOf(if (isAiPage) "AI" else "MEMO") }
 var inputTfv by remember { mutableStateOf(TextFieldValue("")) }
 val input = inputTfv.text
+var dictMode by remember { mutableStateOf(0) }
 fun setInputProg(s: String, fromDict: Boolean = false) { inputTfv = TextFieldValue(s, TextRange(s.length)); if (!fromDict && dictMode == 1) syncDictationBuffer(ctx, s) }
 var memoCfgTab by remember { mutableStateOf(0) }
 var mCat by remember { mutableStateOf("자동") }
@@ -83,7 +84,7 @@ fun applySmartBullet(raw: String): String { val nl = 10.toChar().toString(); if 
 fun handleMemoEnterKey(raw: String): String { val nl = 10.toChar().toString(); val lastTr = raw.lines().lastOrNull()?.trimStart() ?: ""; return when { lastTr == "☐" || lastTr == "☑" || lastTr == "•" -> raw.lines().dropLast(1).joinToString(nl) + nl; lastTr.startsWith("☐") || lastTr.startsWith("☑") -> raw + nl + "☐ "; lastTr.startsWith("•") -> raw + nl + "• "; else -> raw + nl } }
 fun onMemoValueChange(oldTfv: TextFieldValue, tfv: TextFieldValue): TextFieldValue { if (tfv.composition != null) return tfv; val oldTx = oldTfv.text; val newTx = tfv.text; val cur = tfv.selection.end.coerceIn(0, newTx.length); val nl = 10.toChar(); if (cur > 0 && newTx[cur - 1] == nl && newTx.count { it == nl } == oldTx.count { it == nl } + 1) { val ls = newTx.lastIndexOf(nl, (cur - 2).coerceAtLeast(0)) + 1; val prevLn = if (cur - 1 >= ls) newTx.substring(ls, cur - 1).trimStart() else ""; if (prevLn == "☐" || prevLn == "☑" || prevLn == "•") { val cl = newTx.substring(0, ls) + newTx.substring(cur); return TextFieldValue(cl, TextRange(ls.coerceIn(0, cl.length))) }; if (prevLn.startsWith("☐") || prevLn.startsWith("☑")) { val insT = newTx.substring(0, cur) + "☐ " + newTx.substring(cur); return TextFieldValue(insT, TextRange(cur + 2)) }; if (prevLn.startsWith("•")) { val insT = newTx.substring(0, cur) + "• " + newTx.substring(cur); return TextFieldValue(insT, TextRange(cur + 2)) } }; return tfv }
 fun convertOrToggleNoteChecks(n: NoteItem): NoteItem { val nl = 10.toChar().toString(); val ls = n.content.lines().toMutableList(); val hasChk = ls.any { val t = it.trimStart(); t.startsWith("☐") || t.startsWith("☑") }; if (!hasChk) { for (i in ls.indices) { val t = ls[i].trimStart(); if (t.isNotEmpty() && !t.startsWith("#") && !t.startsWith("──")) ls[i] = "☐ " + t.removePrefix("• ").removePrefix("•").trimStart() } } else { val hasUnchk = ls.any { it.trimStart().startsWith("☐") }; for (i in ls.indices) { val t = ls[i].trimStart(); if (hasUnchk && t.startsWith("☐")) ls[i] = "☑ " + t.removePrefix("☐").trimStart() else if (!hasUnchk && t.startsWith("☑")) ls[i] = "☐ " + t.removePrefix("☑").trimStart() } }; return n.copy(content = ls.joinToString(nl)) }
-val chatListState = rememberLazyListState(); EmojiHelpDialog(); var chatJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }; var dictMode by remember { mutableStateOf(0) }; var pendingVoiceSend by remember { mutableStateOf("") }
+val chatListState = rememberLazyListState(); EmojiHelpDialog(); var chatJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }; var pendingVoiceSend by remember { mutableStateOf("") }
 fun execDictCmd(cmd: String, tx: String) {
 val prevDm = dictMode
 dictMode = 0

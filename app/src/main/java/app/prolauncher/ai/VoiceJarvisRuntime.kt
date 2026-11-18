@@ -29,16 +29,259 @@ val HS6 = Arrangement.spacedBy(6.dp)
 val VS6 = Arrangement.spacedBy(6.dp)
 val VS8 = Arrangement.spacedBy(8.dp)
 var msgSeq = System.currentTimeMillis(); fun nextId(): Long { msgSeq += 1L; return msgSeq }; var pendingHomeAiQuery by mutableStateOf("")
-var briefingSpeakingNow by mutableStateOf(false); var vOn by mutableStateOf(false); var ttsOn by mutableStateOf(true); var vSt by mutableStateOf("대기중"); var topOpen by mutableStateOf(false); var btmOpen by mutableStateOf(true); var blkOn by mutableStateOf(false)
+var briefingSpeakingNow by mutableStateOf(false); var vOn by mutableStateOf(false); var ttsOn by mutableStateOf(true); var vSt by mutableStateOf("대기중"); var btmOpen by mutableStateOf(true); var blkOn by mutableStateOf(false)
 var ttsEngine: TextToSpeech? = null; var ttsReady = false; val ttsPending = mutableListOf<Pair<String, Boolean>>(); var ttsLastEnqueueMs = 0L; var ttsActiveCount = 0; var ttsLastActiveMs = 0L
 fun isTtsBusyNow(): Boolean { val engSpk = SupertonicTtsEngine.playing || runCatching { ttsEngine?.isSpeaking == true }.getOrDefault(false); if (engSpk) ttsLastActiveMs = System.currentTimeMillis(); val recentQ = ttsPending.isNotEmpty() || (System.currentTimeMillis() - ttsLastEnqueueMs) <  420L; val tracked = ttsActiveCount > 0 && (System.currentTimeMillis() - ttsLastActiveMs) < 15000L; if (!engSpk && !recentQ && !tracked) ttsActiveCount = 0; return engSpk || recentQ || tracked }
-var sttEngine: SpeechRecognizer? = null; var sttEpoch = 0; var oneShotStt: SpeechRecognizer? = null; var dictEpoch = 0; var oneShotActive by mutableStateOf(false); var dictAccumText: String = ""; var wakeLockRef: PowerManager.WakeLock? = null; var vCb: (String) -> Unit = {}
+var sttEngine: SpeechRecognizer? = null; var sttEpoch = 0; var oneShotStt: SpeechRecognizer? = null; var dictEpoch = 0; var oneShotActive by mutableStateOf(false); var dictAccumText: String = ""; var dictLastEmitted: String = ""; var dictHadPartial = false; var dPartCb: (String) -> Unit = {}; var dDoneCb: (String) -> Unit = {}; var dStatCb: (String) -> Unit = {}; var dFallCb: () -> Unit = {}; var dCmdCb: (String, String) -> Unit = { _, _ -> }; var dPhraseCb: ((String) -> Unit)? = null; var wakeLockRef: PowerManager.WakeLock? = null; var vCb: (String) -> Unit = {}
 var isAiBusy by mutableStateOf(false); var streamActive by mutableStateOf(false); var lastSttBeatMs = 0L; var ttsSpkIdx = 0; var ttsFirstChunk = true
 var lastEcho by mutableStateOf(""); var pauseUntil by mutableStateOf(0L); var vBuf by mutableStateOf(""); var vSeq = 0; var vSpkNow = false; var vWaitSec by mutableStateOf(3)
 fun uiP(d: Long = 0L, f: () -> Unit) { if (d <= 0L && Looper.myLooper() == Looper.getMainLooper()) f() else Handler(Looper.getMainLooper()).postDelayed(Runnable { f() }, d.coerceAtLeast(0L)) }
-fun stopOneShotDictation() = uiP(0L) { dictEpoch += 1; oneShotActive = false; val old = oneShotStt; oneShotStt = null; runCatching { old?.cancel(); old?.destroy() } }
-fun listenDictStep(ep: Int, ctx: Context, onPart: (String) -> Unit, onDone: (String) -> Unit, onStatus: (String) -> Unit, onFallback: () -> Unit, onCmd: (String, String) -> Unit, onPhrase: ((String) -> Unit)? = null): Unit = uiP(0L) { if (!oneShotActive || ep != dictEpoch) return@uiP; if (isTtsBusyNow() || (onPhrase != null && (isAiBusy || streamActive))) { uiP(350L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }; return@uiP }; runCatching { val old = oneShotStt; oneShotStt = null; runCatching { old?.cancel(); old?.destroy() }; val appC = appCtxRef ?: ctx.applicationContext; val targetCtx: Context = if (appInFg && mainActRef != null) mainActRef!! else appC; val sr = runCatching { SpeechRecognizer.createSpeechRecognizer(targetCtx) }.getOrElse { SpeechRecognizer.createSpeechRecognizer(appC) }; oneShotStt = sr; JarvisRuntime.lastBeatMs = System.currentTimeMillis(); sr.setRecognitionListener(object : RecognitionListener { override fun onReadyForSpeech(p: Bundle?) { if (!oneShotActive || ep != dictEpoch) return; srFailStreak = 0; JarvisRuntime.lastBeatMs = System.currentTimeMillis(); onStatus(if (onPhrase != null) (if (JarvisController.sleeping) "🌙 자비스 대기모드 ([${wakeWord}]라고 불러주세요)" else if (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil) "👂 [${wakeWord}] 호출 대기 중 (화면 OFF 유지)..." else "🤖🎙️ 자비스 경청 중... 편하게 말씀하세요") else if (dictAccumText.isBlank()) "🔴 연속 받아쓰기 중... (명령: 메모저장 / 질문전송)" else "🔴 이어서 받아쓰는 중... (명령: 메모저장 / 질문전송)") }; override fun onBeginningOfSpeech() { srFailStreak = 0; JarvisRuntime.lastBeatMs = System.currentTimeMillis() }; override fun onRmsChanged(v: Float) {}; override fun onBufferReceived(b: ByteArray?) {}; override fun onEndOfSpeech() { JarvisRuntime.lastBeatMs = System.currentTimeMillis() }; override fun onPartialResults(b: Bundle?) { if (!oneShotActive || ep != dictEpoch) return; srFailStreak = 0; JarvisRuntime.lastBeatMs = System.currentTimeMillis(); val pt = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""; if (pt.isNotEmpty()) { if (onPhrase != null && (JarvisController.sleeping || (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil))) { val (wk, _) = matchWakePhrase(pt, wakeWord); if (wk) { onPart(pt); onStatus("🗣️ $pt") } } else { val comb = if (dictAccumText.isBlank()) pt else if (dictAccumText.endsWith("\n")) dictAccumText + pt else "$dictAccumText $pt"; onPart(comb); onStatus("🗣️ $pt") } } }; override fun onEvent(t: Int, p: Bundle?) {}; override fun onError(e: Int) { if (!oneShotActive || ep != dictEpoch) return; val cur = oneShotStt; oneShotStt = null; runCatching { cur?.cancel(); cur?.destroy() }; JarvisRuntime.lastBeatMs = System.currentTimeMillis(); if (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) { srFailStreak = 0; val wMs = if (appInFg) 180L else 420L; uiP(wMs) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }; return }; srFailStreak += 1; if (e == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS && ctx.checkSelfPermission("android.permission.RECORD_AUDIO") != 0) { oneShotActive = false; onFallback() } else if (appInFg && onPhrase == null && srFailStreak >= 6) { srFailStreak = 0; oneShotActive = false; onFallback() } else { val waitMs = if (!appInFg) 900L else if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || e == SpeechRecognizer.ERROR_CLIENT) 680L else 340L; uiP(waitMs) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) } } }; override fun onResults(b: Bundle?) { if (!oneShotActive || ep != dictEpoch) return; srFailStreak = 0; val cur = oneShotStt; oneShotStt = null; runCatching { cur?.destroy() }; JarvisRuntime.lastBeatMs = System.currentTimeMillis(); val raw = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""; if (onPhrase != null) { if (raw.isNotEmpty()) onPhrase(raw) else uiP(if (appInFg) 180L else 380L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }; return }; if (raw.isNotEmpty()) { val saveSuf = listOf("메모 저장해줘", "메모 저장", "메모저장", "저장해줘", "메모해줘").firstOrNull { raw.endsWith(it) }; val sendSuf = listOf("질문 전송해줘", "질문 전송", "질문전송", "전송해줘", "물어봐줘", "물어봐").firstOrNull { raw.endsWith(it) }; val stopSuf = listOf("녹음 중지", "녹음중지", "받아쓰기 종료", "입력 종료").firstOrNull { raw.endsWith(it) }; val nlSuf = listOf("줄바꿈", "다음 줄", "엔터").firstOrNull { raw.endsWith(it) }; if (raw in listOf("전체 지우기", "전체지우기", "다 지워", "모두 지워")) { dictAccumText = ""; onPart(""); onStatus("🗑️ 전체 지움 완료! 새로 말씀하세요...") } else if (saveSuf != null) { val rem = raw.removeSuffix(saveSuf).trim(); if (rem.isNotEmpty()) dictAccumText = if (dictAccumText.isBlank()) rem else "$dictAccumText $rem"; val fin = dictAccumText.trim(); onPart(fin); stopOneShotDictation(); onDone(fin); onCmd("SAVE_MEMO", fin); return } else if (sendSuf != null) { val rem = raw.removeSuffix(sendSuf).trim(); if (rem.isNotEmpty()) dictAccumText = if (dictAccumText.isBlank()) rem else "$dictAccumText $rem"; val fin = dictAccumText.trim(); onPart(fin); stopOneShotDictation(); onDone(fin); onCmd("SEND_AI", fin); return } else if (stopSuf != null) { val rem = raw.removeSuffix(stopSuf).trim(); if (rem.isNotEmpty()) dictAccumText = if (dictAccumText.isBlank()) rem else "$dictAccumText $rem"; val fin = dictAccumText.trim(); onPart(fin); stopOneShotDictation(); onDone(fin); onCmd("STOP", fin); return } else if (nlSuf != null) { val rem = raw.removeSuffix(nlSuf).trim(); if (rem.isNotEmpty()) dictAccumText = if (dictAccumText.isBlank()) rem else "$dictAccumText $rem"; dictAccumText += "\n"; onPart(dictAccumText); onStatus("↵ 줄바꿈 적용됨! 계속 말씀하세요...") } else { dictAccumText = if (dictAccumText.isBlank()) raw else if (dictAccumText.endsWith("\n")) dictAccumText + raw else "$dictAccumText $raw"; onPart(dictAccumText); onStatus("✅ 이어쓰기: $raw") } }; uiP(180L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) } } }); sr.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR").putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, targetCtx.packageName).putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3).putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true).putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, if (onPhrase != null) 2200L else 2600L).putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, if (onPhrase != null) 1600L else 2000L)) }.onFailure { if (appInFg && onPhrase == null) { oneShotActive = false; onFallback() } else uiP(1000L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) } } }
-fun startOneShotDictation(ctx: Context, initText: String = "", onPart: (String) -> Unit, onDone: (String) -> Unit, onStatus: (String) -> Unit, onFallback: () -> Unit, onCmd: (String, String) -> Unit = { _, _ -> }, onPhrase: ((String) -> Unit)? = null) = uiP(0L) { if (vOn) vStop(ctx); val old = oneShotStt; oneShotStt = null; runCatching { old?.cancel(); old?.destroy() }; srFailStreak = 0; val ep = ++dictEpoch; dictAccumText = initText.trim(); oneShotActive = true; listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
+fun stopOneShotDictation() = uiP(0L) {
+    dictEpoch += 1
+    oneShotActive = false
+    dictHadPartial = false
+    val old = oneShotStt
+    oneShotStt = null
+    runCatching { old?.cancel(); old?.destroy() }
+}
+fun syncDictationBuffer(ctx: Context, manualText: String) = uiP(0L) {
+    val normalized = manualText.trimEnd()
+    if (!oneShotActive || dPhraseCb != null) {
+        dictAccumText = normalized
+        dictLastEmitted = manualText
+        return@uiP
+    }
+    if (manualText == dictLastEmitted) return@uiP
+    dictAccumText = normalized
+    dictLastEmitted = manualText
+    if (dictHadPartial || oneShotStt != null) {
+        dictHadPartial = false
+        val ep = ++dictEpoch
+        val old = oneShotStt
+        oneShotStt = null
+        runCatching { old?.cancel(); old?.destroy() }
+        uiP(120L) {
+            if (oneShotActive && ep == dictEpoch) {
+                listenDictStep(ep, ctx, dPartCb, dDoneCb, dStatCb, dFallCb, dCmdCb, dPhraseCb)
+            }
+        }
+    }
+}
+
+fun listenDictStep(
+    ep: Int,
+    ctx: Context,
+    onPart: (String) -> Unit,
+    onDone: (String) -> Unit,
+    onStatus: (String) -> Unit,
+    onFallback: () -> Unit,
+    onCmd: (String, String) -> Unit,
+    onPhrase: ((String) -> Unit)? = null
+): Unit = uiP(0L) {
+    if (!oneShotActive || ep != dictEpoch) return@uiP
+    if (isTtsBusyNow() || (onPhrase != null && (isAiBusy || streamActive))) {
+        uiP(350L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
+        return@uiP
+    }
+    runCatching {
+        val old = oneShotStt
+        oneShotStt = null
+        runCatching { old?.cancel(); old?.destroy() }
+        dictHadPartial = false
+        val appC = appCtxRef ?: ctx.applicationContext
+        val targetCtx: Context = if (appInFg && mainActRef != null) mainActRef!! else appC
+        val sr = runCatching { SpeechRecognizer.createSpeechRecognizer(targetCtx) }.getOrElse { SpeechRecognizer.createSpeechRecognizer(appC) }
+        oneShotStt = sr
+        JarvisRuntime.lastBeatMs = System.currentTimeMillis()
+        fun emitPart(tx: String) {
+            dictLastEmitted = tx
+            onPart(tx)
+        }
+        sr.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(p: Bundle?) {
+                if (!oneShotActive || ep != dictEpoch) return
+                srFailStreak = 0
+                JarvisRuntime.lastBeatMs = System.currentTimeMillis()
+                onStatus(
+                    if (onPhrase != null) (
+                        if (JarvisController.sleeping) "🌙 자비스 대기모드 ([${wakeWord}]라고 불러주세요)"
+                        else if (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil) "👂 [${wakeWord}] 호출 대기 중 (화면 OFF 유지)..."
+                        else "🤖🎙️ 자비스 경청 중... 편하게 말씀하세요"
+                        )
+                    else if (dictAccumText.isBlank()) "🔴 연속 받아쓰기 중... (명령: 메모저장 / 질문전송)"
+                    else "🔴 이어서 받아쓰는 중... (명령: 메모저장 / 질문전송)"
+                )
+            }
+            override fun onBeginningOfSpeech() {
+                srFailStreak = 0
+                dictHadPartial = true
+                JarvisRuntime.lastBeatMs = System.currentTimeMillis()
+            }
+            override fun onRmsChanged(v: Float) {}
+            override fun onBufferReceived(b: ByteArray?) {}
+            override fun onEndOfSpeech() { JarvisRuntime.lastBeatMs = System.currentTimeMillis() }
+            override fun onPartialResults(b: Bundle?) {
+                if (!oneShotActive || ep != dictEpoch) return
+                srFailStreak = 0
+                JarvisRuntime.lastBeatMs = System.currentTimeMillis()
+                val pt = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""
+                if (pt.isNotEmpty()) {
+                    dictHadPartial = true
+                    if (onPhrase != null && (JarvisController.sleeping || (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil))) {
+                        val (wk, _) = matchWakePhrase(pt, wakeWord)
+                        if (wk) { emitPart(pt); onStatus("🗣️ $pt") }
+                    } else {
+                        val comb = if (dictAccumText.isBlank()) pt else if (dictAccumText.endsWith(10.toChar())) dictAccumText + pt else "$dictAccumText $pt"
+                        emitPart(comb)
+                        onStatus("🗣️ $pt")
+                    }
+                }
+            }
+            override fun onEvent(t: Int, p: Bundle?) {}
+            override fun onError(e: Int) {
+                if (!oneShotActive || ep != dictEpoch) return
+                dictHadPartial = false
+                val cur = oneShotStt
+                oneShotStt = null
+                runCatching { cur?.cancel(); cur?.destroy() }
+                JarvisRuntime.lastBeatMs = System.currentTimeMillis()
+                if (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    srFailStreak = 0
+                    val wMs = if (appInFg) 180L else 420L
+                    uiP(wMs) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
+                    return
+                }
+                srFailStreak += 1
+                if (e == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS && ctx.checkSelfPermission("android.permission.RECORD_AUDIO") != 0) {
+                    oneShotActive = false
+                    onFallback()
+                } else if (appInFg && onPhrase == null && srFailStreak >= 6) {
+                    srFailStreak = 0
+                    oneShotActive = false
+                    onFallback()
+                } else {
+                    val waitMs = if (!appInFg) 900L else if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || e == SpeechRecognizer.ERROR_CLIENT) 680L else 340L
+                    uiP(waitMs) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
+                }
+            }
+            override fun onResults(b: Bundle?) {
+                if (!oneShotActive || ep != dictEpoch) return
+                srFailStreak = 0
+                dictHadPartial = false
+                val cur = oneShotStt
+                oneShotStt = null
+                runCatching { cur?.destroy() }
+                JarvisRuntime.lastBeatMs = System.currentTimeMillis()
+                val raw = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""
+                if (onPhrase != null) {
+                    if (raw.isNotEmpty()) onPhrase(raw)
+                    else uiP(if (appInFg) 180L else 380L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
+                    return
+                }
+                if (raw.isNotEmpty()) {
+                    val saveSuf = listOf("메모 저장해줘", "메모 저장", "메모저장", "저장해줘", "메모해줘").firstOrNull { raw.endsWith(it) }
+                    val sendSuf = listOf("질문 전송해줘", "질문 전송", "질문전송", "전송해줘", "물어봐줘", "물어봐").firstOrNull { raw.endsWith(it) }
+                    val stopSuf = listOf("녹음 중지", "녹음중지", "받아쓰기 종료", "입력 종료").firstOrNull { raw.endsWith(it) }
+                    val nlSuf = listOf("줄바꿈", "다음 줄", "엔터").firstOrNull { raw.endsWith(it) }
+                    if (raw in listOf("전체 지우기", "전체지우기", "다 지워", "모두 지워")) {
+                        dictAccumText = ""
+                        emitPart("")
+                        onStatus("🗑️ 전체 지움 완료! 새로 말씀하세요...")
+                    } else if (saveSuf != null) {
+                        val rem = raw.removeSuffix(saveSuf).trim()
+                        if (rem.isNotEmpty()) dictAccumText = if (dictAccumText.isBlank()) rem else "$dictAccumText $rem"
+                        val fin = dictAccumText.trim()
+                        emitPart(fin)
+                        stopOneShotDictation()
+                        dictLastEmitted = fin
+                        onDone(fin)
+                        onCmd("SAVE_MEMO", fin)
+                        return
+                    } else if (sendSuf != null) {
+                        val rem = raw.removeSuffix(sendSuf).trim()
+                        if (rem.isNotEmpty()) dictAccumText = if (dictAccumText.isBlank()) rem else "$dictAccumText $rem"
+                        val fin = dictAccumText.trim()
+                        emitPart(fin)
+                        stopOneShotDictation()
+                        dictLastEmitted = fin
+                        onDone(fin)
+                        onCmd("SEND_AI", fin)
+                        return
+                    } else if (stopSuf != null) {
+                        val rem = raw.removeSuffix(stopSuf).trim()
+                        if (rem.isNotEmpty()) dictAccumText = if (dictAccumText.isBlank()) rem else "$dictAccumText $rem"
+                        val fin = dictAccumText.trim()
+                        emitPart(fin)
+                        stopOneShotDictation()
+                        dictLastEmitted = fin
+                        onDone(fin)
+                        onCmd("STOP", fin)
+                        return
+                    } else if (nlSuf != null) {
+                        val rem = raw.removeSuffix(nlSuf).trim()
+                        if (rem.isNotEmpty()) dictAccumText = if (dictAccumText.isBlank()) rem else "$dictAccumText $rem"
+                        dictAccumText += 10.toChar()
+                        emitPart(dictAccumText)
+                        onStatus("↵ 줄바꿈 적용됨! 계속 말씀하세요...")
+                    } else {
+                        dictAccumText = if (dictAccumText.isBlank()) raw else if (dictAccumText.endsWith(10.toChar())) dictAccumText + raw else "$dictAccumText $raw"
+                        emitPart(dictAccumText)
+                        onStatus("✅ 이어쓰기: $raw")
+                    }
+                }
+                uiP(180L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
+            }
+        })
+        sr.startListening(
+            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+                .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, targetCtx.packageName)
+                .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, if (onPhrase != null) 2200L else 2600L)
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, if (onPhrase != null) 1600L else 2000L)
+        )
+    }.onFailure {
+        if (appInFg && onPhrase == null) {
+            oneShotActive = false
+            onFallback()
+        } else {
+            uiP(1000L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
+        }
+    }
+}
+
+fun startOneShotDictation(
+    ctx: Context,
+    initText: String = "",
+    onPart: (String) -> Unit,
+    onDone: (String) -> Unit,
+    onStatus: (String) -> Unit,
+    onFallback: () -> Unit,
+    onCmd: (String, String) -> Unit = { _, _ -> },
+    onPhrase: ((String) -> Unit)? = null
+) = uiP(0L) {
+    if (vOn) vStop(ctx)
+    val old = oneShotStt
+    oneShotStt = null
+    runCatching { old?.cancel(); old?.destroy() }
+    srFailStreak = 0
+    val ep = ++dictEpoch
+    val trimmed = initText.trimEnd()
+    dictAccumText = trimmed
+    dictLastEmitted = initText
+    dictHadPartial = false
+    dPartCb = onPart
+    dDoneCb = onDone
+    dStatCb = onStatus
+    dFallCb = onFallback
+    dCmdCb = onCmd
+    dPhraseCb = onPhrase
+    oneShotActive = true
+    listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase)
+}
+
 fun keepAw(ctx: Context, on: Boolean) = runCatching { if (on) { if (wakeLockRef == null) wakeLockRef = (ctx.applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PL:JarvisMicLock").apply { setReferenceCounted(false) }; if (wakeLockRef?.isHeld == false) wakeLockRef?.acquire(86400000L); runCatching { val itn = Intent(ctx.applicationContext, JarvisMicService::class.java); if (Build.VERSION.SDK_INT >= 26) ctx.applicationContext.startForegroundService(itn) else ctx.applicationContext.startService(itn) } } else { if (!JarvisRuntime.on && !vOn && !ReaderTtsRuntime.on && !SupertonicTtsEngine.playing && !briefingSpeakingNow) { if (wakeLockRef?.isHeld == true) wakeLockRef?.release(); runCatching { ctx.applicationContext.stopService(Intent(ctx.applicationContext, JarvisMicService::class.java)) } } }; Unit }
 object JarvisRuntime { val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate); var on by mutableStateOf(false); var busy by mutableStateOf(false); var input by mutableStateOf(""); var status by mutableStateOf<String?>(null); var hist = listOf<ChatMsg>(); var lastBeatMs = 0L; var navCb: (Int) -> Unit = {}; var memoCb: (String) -> String = { "" }; var notesCb: () -> List<NoteItem> = { emptyList() }; var fallbackCb: () -> Unit = {}; var watchJob: kotlinx.coroutines.Job? = null
 fun bindCallbacks(ctx: Context, onNav: (Int) -> Unit, onMemo: (String) -> String, getN: () -> List<NoteItem>) { appCtxRef = ctx.applicationContext; navCb = onNav; memoCb = onMemo; notesCb = getN }

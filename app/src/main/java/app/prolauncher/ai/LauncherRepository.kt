@@ -7,13 +7,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
 import android.provider.Settings
-import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
-import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.text.PDFTextStripper
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedInputStream
-import java.util.zip.ZipInputStream
 
 data class AppEntry(
 val label: String,
@@ -223,12 +218,15 @@ val lower = name.lowercase()
 val text = when {
 lower.endsWith(".pdf") -> extractPdfText(uri)
 lower.endsWith(".epub") -> extractEpubText(uri)
-else -> context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+else -> {
+  val rawTxt = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+  EbookTextReflower.unwrapNaturalParagraphs(rawTxt, preserveStanzas = false)
 }
-val clean = text.replace("\r\n", "\n").trim()
-if (clean.isEmpty()) return null
-val pages = splitBookIntoNaturalSections(clean, 1100)
-val cat = when {
+}
+val clean = EbookTextReflower.cleanControlChars(text).trim()
+  if (clean.isEmpty()) return null
+val pages = splitBookIntoNaturalSections(clean, 1400)
+  val cat = when {
 lower.endsWith(".pdf") -> "PDF 문서"
 lower.endsWith(".epub") -> "전자책"
 else -> "텍스트북"
@@ -269,42 +267,9 @@ rem = rem.substring(cut).trimStart()
 return out.ifEmpty { listOf(clean) }
 }
 
-private fun extractPdfText(uri: Uri): String {
-PDFBoxResourceLoader.init(context)
-context.contentResolver.openInputStream(uri)?.use { input ->
-PDDocument.load(input).use { doc ->
-val stripper = PDFTextStripper()
-val sb = StringBuilder()
-for (p in 1..doc.numberOfPages) {
-stripper.startPage = p
-stripper.endPage = p
-sb.append("— PDF ").append(p).append(" / ").append(doc.numberOfPages).append("쪽 —\n\n")
-sb.append(stripper.getText(doc).trim()).append("\n\n")
-}
-return sb.toString()
-}
-}
-return ""
-}
+private fun extractPdfText(uri: Uri): String = EbookTextReflower.extractCleanPdf(context, uri)
 
-private fun extractEpubText(uri: Uri): String {
-val sb = StringBuilder()
-context.contentResolver.openInputStream(uri)?.use { raw ->
-ZipInputStream(BufferedInputStream(raw)).use { zis ->
-var entry = zis.nextEntry
-while (entry != null) {
-val n = entry.name.lowercase()
-if (!entry.isDirectory && (n.endsWith(".xhtml") || n.endsWith(".html") || n.endsWith(".htm"))) {
-val html = zis.bufferedReader().readText()
-val stripped = html.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
-if (stripped.length > 30) sb.append(stripped).append("\n\n")
-}
-entry = zis.nextEntry
-}
-}
-}
-return sb.toString()
-}
+private fun extractEpubText(uri: Uri): String = EbookTextReflower.extractCleanEpub(context, uri)
 
 private fun defaultNotes(): List<NoteItem> = listOf(
 NoteItem(

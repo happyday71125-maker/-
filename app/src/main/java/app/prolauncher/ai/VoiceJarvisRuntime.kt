@@ -35,6 +35,8 @@ fun isTtsBusyNow(): Boolean { val engSpk = SupertonicTtsEngine.playing || runCat
 var sttEngine: SpeechRecognizer? = null; var sttEpoch = 0; var oneShotStt: SpeechRecognizer? = null; var dictEpoch = 0; var oneShotActive by mutableStateOf(false); var dictAccumText: String = ""; var dictLastEmitted: String = ""; var dictHadPartial = false; var dPartCb: (String) -> Unit = {}; var dDoneCb: (String) -> Unit = {}; var dStatCb: (String) -> Unit = {}; var dFallCb: () -> Unit = {}; var dCmdCb: (String, String) -> Unit = { _, _ -> }; var dPhraseCb: ((String) -> Unit)? = null; var wakeLockRef: PowerManager.WakeLock? = null; var vCb: (String) -> Unit = {}
 var isAiBusy by mutableStateOf(false); var streamActive by mutableStateOf(false); var lastSttBeatMs = 0L; var ttsSpkIdx = 0; var ttsFirstChunk = true
 var lastEcho by mutableStateOf(""); var pauseUntil by mutableStateOf(0L); var vBuf by mutableStateOf(""); var vSeq = 0; var vSpkNow = false; var vWaitSec by mutableStateOf(3)
+fun loadVoiceWaitSec(ctx: Context): Int { val s = ctx.getSharedPreferences("pl_ai_v2_prefs", 0).getInt("voice_wait_sec_v1", 3).coerceIn(1, 30); vWaitSec = s; return s }
+fun setVoiceWaitSec(ctx: Context, sec: Int): Int { val s = sec.coerceIn(1, 30); vWaitSec = s; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putInt("voice_wait_sec_v1", s).apply(); return s }
 fun uiP(d: Long = 0L, f: () -> Unit) { if (d <= 0L && Looper.myLooper() == Looper.getMainLooper()) f() else Handler(Looper.getMainLooper()).postDelayed(Runnable { f() }, d.coerceAtLeast(0L)) }
 fun stopOneShotDictation() = uiP(0L) {
     dictEpoch += 1
@@ -68,7 +70,8 @@ fun syncDictationBuffer(ctx: Context, manualText: String) = uiP(0L) {
     }
 }
 
-fun listenDictStep(
+onPhrase: \(\(String\) -> Unit\)\? = null
+\): Unit = uiP\(0L\) \{(
     ep: Int,
     ctx: Context,
     onPart: (String) -> Unit,
@@ -76,22 +79,25 @@ fun listenDictStep(
     onStatus: (String) -> Unit,
     onFallback: () -> Unit,
     onCmd: (String, String) -> Unit,
-    onPhrase: ((String) -> Unit)? = null
+    onPhrase: ((String) -> Unit)? = null, reuseExisting: Boolean = false
 ): Unit = uiP(0L) {
     if (!oneShotActive || ep != dictEpoch) return@uiP
     if (isTtsBusyNow() || (onPhrase != null && (isAiBusy || streamActive))) {
-        uiP(350L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
+        uiP(280L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase, false) }
         return@uiP
     }
     runCatching {
-        val old = oneShotStt
-        oneShotStt = null
-        runCatching { old?.cancel(); old?.destroy() }
         dictHadPartial = false
         val appC = appCtxRef ?: ctx.applicationContext
         val targetCtx: Context = if (appInFg && mainActRef != null) mainActRef!! else appC
-        val sr = runCatching { SpeechRecognizer.createSpeechRecognizer(targetCtx) }.getOrElse { SpeechRecognizer.createSpeechRecognizer(appC) }
-        oneShotStt = sr
+        val sr = if (reuseExisting && oneShotStt != null) {
+            oneShotStt!!
+        } else {
+            val old = oneShotStt
+            oneShotStt = null
+            runCatching { old?.cancel(); old?.destroy() }
+            runCatching { SpeechRecognizer.createSpeechRecognizer(targetCtx) }.getOrElse { SpeechRecognizer.createSpeechRecognizer(appC) }.also { oneShotStt = it }
+        }
         JarvisRuntime.lastBeatMs = System.currentTimeMillis()
         fun emitPart(tx: String) {
             dictLastEmitted = tx
@@ -141,41 +147,18 @@ fun listenDictStep(
             override fun onError(e: Int) {
                 if (!oneShotActive || ep != dictEpoch) return
                 dictHadPartial = false
-                val cur = oneShotStt
-                oneShotStt = null
-                runCatching { cur?.cancel(); cur?.destroy() }
                 JarvisRuntime.lastBeatMs = System.currentTimeMillis()
-                if (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                    srFailStreak = 0
-                    val wMs = if (appInFg) 180L else 420L
-                    uiP(wMs) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
-                    return
-                }
-                srFailStreak += 1
-                if (e == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS && ctx.checkSelfPermission("android.permission.RECORD_AUDIO") != 0) {
-                    oneShotActive = false
-                    onFallback()
-                } else if (appInFg && onPhrase == null && srFailStreak >= 6) {
-                    srFailStreak = 0
-                    oneShotActive = false
-                    onFallback()
-                } else {
-                    val waitMs = if (!appInFg) 900L else if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || e == SpeechRecognizer.ERROR_CLIENT) 680L else 340L
-                    uiP(waitMs) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
-                }
-            }
-            override fun onResults(b: Bundle?) {
-                if (!oneShotActive || ep != dictEpoch) return
-                srFailStreak = 0
-                dictHadPartial = false
-                val cur = oneShotStt
-                oneShotStt = null
-                runCatching { cur?.destroy() }
-                JarvisRuntime.lastBeatMs = System.currentTimeMillis()
+                    if (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                        srFailStreak = 0
+                        val wMs = if (appInFg) 35L else 140L
+                        uiP(wMs) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase, true) }
+                        return
+                    }
+                    JarvisRuntime.lastBeatMs = System.currentTimeMillis()
                 val raw = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""
                 if (onPhrase != null) {
                     if (raw.isNotEmpty()) onPhrase(raw)
-                    else uiP(if (appInFg) 180L else 380L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
+                    else uiP(if (appInFg) 35L else 140L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase, true) }
                     return
                 }
                 if (raw.isNotEmpty()) {
@@ -229,7 +212,7 @@ fun listenDictStep(
                         onStatus("✅ 이어쓰기: $raw")
                     }
                 }
-                uiP(180L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase) }
+                uiP(35L) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase, true) }
             }
         })
         sr.startListening(
@@ -239,8 +222,8 @@ fun listenDictStep(
                 .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, targetCtx.packageName)
                 .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, if (onPhrase != null) 2200L else 2600L)
-                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, if (onPhrase != null) 1600L else 2000L)
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, (vWaitSec.coerceIn(1, 30) * 1000L).coerceAtLeast(1500L))
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, (vWaitSec.coerceIn(1, 30) * 800L).coerceAtLeast(1200L))
         )
     }.onFailure {
         if (appInFg && onPhrase == null) {
@@ -303,7 +286,8 @@ object JarvisRuntime {
  fun start(ctx: Context, onFall: () -> Unit = {}) {
   fallbackCb = onFall
   if (vOn) vStop(ctx)
-  loadAiCfg(ctx)
+        loadAiCfg(ctx)
+        loadVoiceWaitSec(ctx)
   on = true; busy = false; JarvisController.sleeping = false
   if (wakeOnly) wakeFollowUpUntil = System.currentTimeMillis() + 18000L
   keepAw(ctx, true)
@@ -709,7 +693,7 @@ fun speakBriefingWithStream(ctx: Context, text: String, forceAlarmStream: Boolea
 fun stopOneShotTts() { SupertonicTtsEngine.stop(); uiP(0L) { ttsPending.clear(); ttsActiveCount = 0; runCatching { ttsEngine?.stop() } } }
 fun flushV(ctx: Context) { val msg = vBuf.trim(); if (msg.isEmpty()) return; if (isAiBusy || streamActive || isTtsBusyNow()) { schedV(ctx, 900L); return }; vBuf = ""; vSpkNow = false; vSeq++; lastSttBeatMs = System.currentTimeMillis(); uiP(0L) { sttEpoch += 1; val old = sttEngine; sttEngine = null; runCatching { old?.cancel(); old?.destroy() } }; isAiBusy = true; vSt = "🧠 " + msg.take(12); vCb(msg) }
 fun schedV(ctx: Context, ex: Long = 0L) { val tk = ++vSeq; val d = (vWaitSec * 1000L + ex).coerceAtLeast(1100L); uiP(d) { if (tk == vSeq && vOn) { if (isAiBusy || streamActive || isTtsBusyNow()) schedV(ctx, 900L) else if (vSpkNow) schedV(ctx, 1100L) else if (vBuf.isNotBlank()) flushV(ctx) } } }
-fun sttGo(ctx: Context, recreate: Boolean = false): Unit = uiP(0L) { if (!vOn || isAiBusy || streamActive || isTtsBusyNow()) return@uiP; if (JarvisRuntime.on) JarvisRuntime.stop(ctx); stopOneShotDictation(); if (System.currentTimeMillis() < pauseUntil) { uiP(500L) { sttGo(ctx, false) }; return@uiP }; runCatching { lastSttBeatMs = System.currentTimeMillis(); val ep = ++sttEpoch; if (recreate && sttEngine != null) { val old = sttEngine; sttEngine = null; runCatching { old?.cancel(); old?.destroy() } }; val appC = appCtxRef ?: ctx.applicationContext; val tCtx: Context = if (appInFg && mainActRef != null) mainActRef!! else appC; if (sttEngine == null) sttEngine = runCatching { SpeechRecognizer.createSpeechRecognizer(tCtx) }.getOrElse { SpeechRecognizer.createSpeechRecognizer(appC) }; sttEngine?.setRecognitionListener(object : RecognitionListener { override fun onReadyForSpeech(p: Bundle?) { if (ep != sttEpoch) return; lastSttBeatMs = System.currentTimeMillis(); if (!isAiBusy && !streamActive) vSt = if (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil) "👂" else if (vBuf.isBlank()) "듣는중" else "이어듣기" }; override fun onBeginningOfSpeech() { if (ep != sttEpoch) return; lastSttBeatMs = System.currentTimeMillis(); vSpkNow = true; vSeq++ }; override fun onRmsChanged(v: Float) {}; override fun onBufferReceived(b: ByteArray?) {}; override fun onEndOfSpeech() { if (ep != sttEpoch) return; lastSttBeatMs = System.currentTimeMillis(); vSpkNow = false }; override fun onPartialResults(b: Bundle?) { if (ep != sttEpoch) return; val pt = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""; if (pt.isNotEmpty() && !isAiBusy && !streamActive) { lastSttBeatMs = System.currentTimeMillis(); vSpkNow = true; vSeq++; sharedAiChatIn = if (vBuf.isBlank()) pt else vBuf + " " + pt; vSt = pt.take(8) } }; override fun onEvent(t: Int, p: Bundle?) {}; override fun onError(e: Int) { if (ep != sttEpoch) return; val had = vSpkNow; vSpkNow = false; lastSttBeatMs = System.currentTimeMillis(); val old = sttEngine; sttEngine = null; runCatching { old?.cancel(); old?.destroy() }; if (vOn && !isAiBusy && !streamActive && !isTtsBusyNow()) { if (vBuf.isNotBlank()) schedV(ctx, if (had) -600L else 0L); uiP(if (!appInFg) 800L else if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 750L else 380L) { sttGo(ctx, true) } } }; override fun onResults(b: Bundle?) { if (ep != sttEpoch) return; vSpkNow = false; lastSttBeatMs = System.currentTimeMillis(); if (!vOn || isAiBusy || streamActive || isTtsBusyNow()) return; val raw = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""; if (raw.isEmpty()) { if (vOn) uiP(300L) { sttGo(ctx, true) }; return }; var q = raw.replace(Regex("^[.,!? ]+"), "").trim(); if (lastEcho.isNotEmpty() && (q == lastEcho || (q.length >= 4 && lastEcho.contains(q)))) { uiP(400L) { sttGo(ctx, true) }; return }; if (wakeOnly && vBuf.isBlank() && System.currentTimeMillis() >= wakeFollowUpUntil) { val (wk, rem) = matchWakePhrase(q, wakeWord); if (!wk) { uiP(260L) { if (vOn) sttGo(ctx, true) }; return }; wakeFollowUpUntil = System.currentTimeMillis() + 18000L; q = rem; if (q.isEmpty()) { vSt = "🗣️말씀하세요"; speakOneShot(ctx, "네, 듣고 있습니다."); uiP(1200L) { if (vOn) sttGo(ctx, true) }; return } }; if (vBuf.isBlank() && q in listOf("잠깐", "잠시만", "기다려", "대기", "스톱")) { pauseUntil = System.currentTimeMillis() + 5000L; vSt = "대기"; uiP(1500L) { if (vOn) sttGo(ctx, true) }; return }; val cleanQ = q.replace(Regex("[음어아그쉿 ]+"), ""); if (cleanQ.length <= 1 && vBuf.isBlank()) { uiP(380L) { if (vOn) sttGo(ctx, true) }; return }; if (cleanQ.isNotEmpty()) { vBuf = if (vBuf.isBlank()) q else vBuf + " " + q; sharedAiChatIn = vBuf }; val inc = listOf("는데", "거든", "니까", "해서", "하고", "그리고", "그래서", "근데").any { q.endsWith(it) }; vSt = "이어듣기"; schedV(ctx, if (inc) 1400L else 0L); uiP(240L) { if (vOn && !isAiBusy && !streamActive) sttGo(ctx, true) } } }); sttEngine?.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR").putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, tCtx.packageName).putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3).putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true).putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3200L).putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2600L)) } }
+fun sttGo(ctx: Context, recreate: Boolean = false): Unit = uiP(0L) { if (!vOn || isAiBusy || streamActive || isTtsBusyNow()) return@uiP; if (JarvisRuntime.on) JarvisRuntime.stop(ctx); stopOneShotDictation(); if (System.currentTimeMillis() < pauseUntil) { uiP(500L) { sttGo(ctx, false) }; return@uiP }; runCatching { lastSttBeatMs = System.currentTimeMillis(); val ep = ++sttEpoch; if (recreate && sttEngine != null) { val old = sttEngine; sttEngine = null; runCatching { old?.cancel(); old?.destroy() } }; val appC = appCtxRef ?: ctx.applicationContext; val tCtx: Context = if (appInFg && mainActRef != null) mainActRef!! else appC; if (sttEngine == null) sttEngine = runCatching { SpeechRecognizer.createSpeechRecognizer(tCtx) }.getOrElse { SpeechRecognizer.createSpeechRecognizer(appC) }; sttEngine?.setRecognitionListener(object : RecognitionListener { override fun onReadyForSpeech(p: Bundle?) { if (ep != sttEpoch) return; lastSttBeatMs = System.currentTimeMillis(); if (!isAiBusy && !streamActive) vSt = if (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil) "👂" else if (vBuf.isBlank()) "듣는중" else "이어듣기" }; override fun onBeginningOfSpeech() { if (ep != sttEpoch) return; lastSttBeatMs = System.currentTimeMillis(); vSpkNow = true; vSeq++ }; override fun onRmsChanged(v: Float) {}; override fun onBufferReceived(b: ByteArray?) {}; override fun onEndOfSpeech() { if (ep != sttEpoch) return; lastSttBeatMs = System.currentTimeMillis(); vSpkNow = false }; override fun onPartialResults(b: Bundle?) { if (ep != sttEpoch) return; val pt = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""; if (pt.isNotEmpty() && !isAiBusy && !streamActive) { lastSttBeatMs = System.currentTimeMillis(); vSpkNow = true; vSeq++; sharedAiChatIn = if (vBuf.isBlank()) pt else vBuf + " " + pt; vSt = pt.take(8) } }; override fun onEvent(t: Int, p: Bundle?) {}; override fun onError(e: Int) { if (ep != sttEpoch) return; val had = vSpkNow; vSpkNow = false; lastSttBeatMs = System.currentTimeMillis(); val isSoft = (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT); if (!isSoft) { val old = sttEngine; sttEngine = null; runCatching { old?.cancel(); old?.destroy() } }; if (vOn && !isAiBusy && !streamActive && !isTtsBusyNow()) { if (vBuf.isNotBlank()) schedV(ctx, if (had) -600L else 0L); val w = if (isSoft) (if (!appInFg) 150L else 40L) else (if (!appInFg) 800L else if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 750L else 380L); uiP(w) { sttGo(ctx, !isSoft) } } }; override fun onResults(b: Bundle?) { if (ep != sttEpoch) return; vSpkNow = false; lastSttBeatMs = System.currentTimeMillis(); if (!vOn || isAiBusy || streamActive || isTtsBusyNow()) return; val raw = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""; if (raw.isEmpty()) { if (vOn) uiP(300L) { sttGo(ctx, true) }; return }; var q = raw.replace(Regex("^[.,!? ]+"), "").trim(); if (lastEcho.isNotEmpty() && (q == lastEcho || (q.length >= 4 && lastEcho.contains(q)))) { uiP(400L) { sttGo(ctx, true) }; return }; if (wakeOnly && vBuf.isBlank() && System.currentTimeMillis() >= wakeFollowUpUntil) { val (wk, rem) = matchWakePhrase(q, wakeWord); if (!wk) { uiP(260L) { if (vOn) sttGo(ctx, true) }; return }; wakeFollowUpUntil = System.currentTimeMillis() + 18000L; q = rem; if (q.isEmpty()) { vSt = "🗣️말씀하세요"; speakOneShot(ctx, "네, 듣고 있습니다."); uiP(1200L) { if (vOn) sttGo(ctx, true) }; return } }; if (vBuf.isBlank() && q in listOf("잠깐", "잠시만", "기다려", "대기", "스톱")) { pauseUntil = System.currentTimeMillis() + 5000L; vSt = "대기"; uiP(1500L) { if (vOn) sttGo(ctx, true) }; return }; val cleanQ = q.replace(Regex("[음어아그쉿 ]+"), ""); if (cleanQ.length <= 1 && vBuf.isBlank()) { uiP(380L) { if (vOn) sttGo(ctx, true) }; return }; if (cleanQ.isNotEmpty()) { vBuf = if (vBuf.isBlank()) q else vBuf + " " + q; sharedAiChatIn = vBuf }; val inc = listOf("는데", "거든", "니까", "해서", "하고", "그리고", "그래서", "근데").any { q.endsWith(it) }; vSt = "이어듣기"; schedV(ctx, if (inc) 1400L else 0L); uiP(40L) { if (vOn && !isAiBusy && !streamActive) sttGo(ctx, false) } } }); sttEngine?.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR").putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, tCtx.packageName).putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3).putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true).putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, (vWaitSec.coerceIn(1, 30) * 1000L).coerceAtLeast(1500L)).putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, (vWaitSec.coerceIn(1, 30) * 800L).coerceAtLeast(1200L))) } }
 fun pushTtsChunk(ctx: Context, piece: String) { val cl = piece.replace("*", "").replace("`", "").replace("▍", "").trim(); if (cl.isEmpty()) return; lastEcho = cl.take(28).trim(); ttsLastEnqueueMs = System.currentTimeMillis(); ttsLastActiveMs = System.currentTimeMillis(); uiP(0L) { runCatching { sttEngine?.cancel() }; isAiBusy = true; vSt = "답변중"; val fl = ttsFirstChunk; ttsFirstChunk = false; ensureTtsAndSpeak(ctx, cl, fl) } }
 fun feedStreamTts(ctx: Context, cur: String, done: Boolean) {
     if ((!vOn && !JarvisRuntime.on && !ttsOn) || !ttsOn) {

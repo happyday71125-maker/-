@@ -108,21 +108,43 @@ context.startActivity(intent)
 }
 
 fun getFavoritePackages(): Set<String> =
-prefs.getStringSet("fav_pkgs", setOf("전화", "메시지", "카메라", "카카오톡", "캘린더", "브라우저")) ?: emptySet()
+HashSet(prefs.getStringSet("fav_pkgs", setOf("전화", "메시지", "카메라", "카카오톡", "캘린더", "브라우저")) ?: emptySet())
 
-fun toggleFavorite(pkgOrLabel: String) {
-val cur = getFavoritePackages().toMutableSet()
-if (cur.contains(pkgOrLabel)) cur.remove(pkgOrLabel) else cur.add(pkgOrLabel)
-prefs.edit().putStringSet("fav_pkgs", cur).apply()
+fun toggleFavorite(pkgOrLabel: String, label: String = "") {
+val cur = HashSet(getFavoritePackages())
+val had = cur.contains(pkgOrLabel) || (label.isNotBlank() && cur.contains(label))
+if (had) {
+cur.remove(pkgOrLabel)
+if (label.isNotBlank()) cur.remove(label)
+} else {
+cur.add(pkgOrLabel)
+}
+prefs.edit().putStringSet("fav_pkgs", HashSet(cur)).apply()
 }
 
 fun getInterruptPackages(): Set<String> =
-prefs.getStringSet("int_pkgs", setOf("YouTube", "유튜브", "Instagram", "인스타그램")) ?: emptySet()
+HashSet(prefs.getStringSet("int_pkgs", setOf("YouTube", "유튜브", "Instagram", "인스타그램")) ?: emptySet())
 
-fun toggleInterrupt(pkgOrLabel: String) {
-val cur = getInterruptPackages().toMutableSet()
-if (cur.contains(pkgOrLabel)) cur.remove(pkgOrLabel) else cur.add(pkgOrLabel)
-prefs.edit().putStringSet("int_pkgs", cur).apply()
+fun toggleInterrupt(pkgOrLabel: String, label: String = "") {
+val cur = HashSet(getInterruptPackages())
+val legacyKeys = mutableSetOf<String>()
+legacyKeys.add(pkgOrLabel)
+if (label.isNotBlank()) legacyKeys.add(label)
+val lowPkg = pkgOrLabel.lowercase()
+val lowLbl = label.lowercase()
+if (lowPkg.contains("youtube") || lowLbl == "youtube" || label == "유튜브") {
+legacyKeys.add("YouTube"); legacyKeys.add("유튜브")
+}
+if (lowPkg.contains("instagram") || lowLbl == "instagram" || label == "인스타그램") {
+legacyKeys.add("Instagram"); legacyKeys.add("인스타그램")
+}
+val had = legacyKeys.any { cur.contains(it) }
+if (had) {
+cur.removeAll(legacyKeys)
+} else {
+cur.add(pkgOrLabel)
+}
+prefs.edit().putStringSet("int_pkgs", HashSet(cur)).apply()
 }
 
 fun loadConfig(): LauncherConfig = LauncherConfig(

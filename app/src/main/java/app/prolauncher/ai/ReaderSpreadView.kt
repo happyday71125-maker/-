@@ -1088,8 +1088,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
           onSaveBody = rootSaveMemo
          )
         }
-        if
-        if (!shelf && act != null && readerAiOpen && readerAiMode == 2) {
+if (!shelf && act != null && readerAiOpen && readerAiMode == 2) {
          val fltHasSel = liveActiveExcerpt.isNotBlank()
          ReaderDraggableFloatBox(
           title = "✥ 이동 · 🦙 플로팅 해설",

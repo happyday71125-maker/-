@@ -283,14 +283,122 @@ fun startOneShotDictation(
 }
 
 fun keepAw(ctx: Context, on: Boolean) = runCatching { if (on) { if (wakeLockRef == null) wakeLockRef = (ctx.applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PL:JarvisMicLock").apply { setReferenceCounted(false) }; if (wakeLockRef?.isHeld == false) wakeLockRef?.acquire(86400000L); runCatching { val itn = Intent(ctx.applicationContext, JarvisMicService::class.java); if (Build.VERSION.SDK_INT >= 26) ctx.applicationContext.startForegroundService(itn) else ctx.applicationContext.startService(itn) } } else { if (!JarvisRuntime.on && !vOn && !ReaderTtsRuntime.on && !SupertonicTtsEngine.playing && !briefingSpeakingNow) { if (wakeLockRef?.isHeld == true) wakeLockRef?.release(); runCatching { ctx.applicationContext.stopService(Intent(ctx.applicationContext, JarvisMicService::class.java)) } } }; Unit }
-object JarvisRuntime { val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate); var on by mutableStateOf(false); var busy by mutableStateOf(false); var input by mutableStateOf(""); var status by mutableStateOf<String?>(null); var hist = listOf<ChatMsg>(); var lastBeatMs = 0L; var navCb: (Int) -> Unit = {}; var memoCb: (String) -> String = { "" }; var notesCb: () -> List<NoteItem> = { emptyList() }; var fallbackCb: () -> Unit = {}; var watchJob: kotlinx.coroutines.Job? = null
-fun bindCallbacks(ctx: Context, onNav: (Int) -> Unit, onMemo: (String) -> String, getN: () -> List<NoteItem>) { appCtxRef = ctx.applicationContext; navCb = onNav; memoCb = onMemo; notesCb = getN }
-fun start(ctx: Context, onFall: () -> Unit = {}) { fallbackCb = onFall; if (vOn) vStop(ctx); loadAiCfg(ctx); on = true; busy = false; JarvisController.sleeping = false; keepAw(ctx, true); status = if (wakeOnly) "👂🎙️ 호출어([${wakeWord}]) 대기 ON! 화면이 꺼져도 [${wakeWord}]라고 부르면 응답합니다." else "🤖🎙️ 자비스 상시 음성 비서 ON! 화면이 꺼져도 명령이나 질문을 계속 경청합니다."; listenNow(ctx); watchJob?.cancel(); watchJob = scope.launch { while (on) { delay(3200L); if (wakeLockRef?.isHeld != true) keepAw(ctx, true); if (on && !busy && !isAiBusy && !streamActive && !isTtsBusyNow() && (!oneShotActive || System.currentTimeMillis() - lastBeatMs > 7500L)) { listenNow(mainActRef ?: appCtxRef ?: ctx) } } } }
-fun stop(ctx: Context) { on = false; busy = false; isAiBusy = false; streamActive = false; watchJob?.cancel(); stopOneShotDictation(); stopOneShotTts(); keepAw(ctx, false); status = "⏹️ 자비스 상시 음성 비서 OFF" }
-fun onActivityResume() { val c = mainActRef ?: appCtxRef ?: return; if (on && !busy && !isAiBusy && !isTtsBusyNow() && (!oneShotActive || System.currentTimeMillis() - lastBeatMs > 3000L)) uiP(250L) { if (on && !busy) listenNow(c) } }
-fun listenNow(ctx: Context) { if (!on || busy) return; lastBeatMs = System.currentTimeMillis(); startOneShotDictation(ctx, "", { pt -> if (!JarvisController.sleeping) input = pt }, { _ -> }, { st -> if (st.startsWith("🗣️") || status == null || status!!.startsWith("🤖🎙️") || status!!.startsWith("👂") || status!!.startsWith("🌙")) status = st }, { if (on && appInFg) { on = false; fallbackCb() } }, { _, _ -> }, onPhrase = { ph -> processUtterance(ctx, ph, true) }) }
-fun waitTtsAndResume(ctx: Context, myGen: Long = activeGenId) { scope.launch { delay(350L); var gd = 0; while (on && gd < 600 && myGen == activeGenId) { if (!isTtsBusyNow() && (System.currentTimeMillis() - ttsLastEnqueueMs) >= 650L) break; delay(200L); gd++ }; busy = false; isAiBusy = false; streamActive = false; if (on) { if (wakeOnly && !JarvisController.sleeping) wakeFollowUpUntil = System.currentTimeMillis() + 12000L; val tail = if (JarvisController.sleeping) "\n🌙 [대기모드] [${wakeWord}]라고 불러주세요" else if (wakeOnly) "\n👂 [연속대화 12초 열림 · 이후 [${wakeWord}] 호출 대기]" else "\n🤖🎙️ [경청중] 다음 명령을 말씀하세요..."; status = (status ?: "").substringBefore("\n🤖🎙️").substringBefore("\n👂").substringBefore("\n🌙") + tail; uiP(300L) { if (on && !busy) listenNow(mainActRef ?: appCtxRef ?: ctx) } } } }
-fun processUtterance(ctx: Context, raw: String, fromVoice: Boolean = true) { val tx = raw.trim(); if (tx.isEmpty()) { if (on && !busy) uiP(200L) { listenNow(ctx) }; return }; if (fromVoice && lastEcho.isNotEmpty() && (tx == lastEcho || (tx.length >= 4 && lastEcho.contains(tx)))) { if (on && !busy) uiP(260L) { listenNow(ctx) }; return }; val cc0 = loadAiCfg(ctx); val callNm = cc0.apiModel.trim().ifBlank { wakeWord }; val (handled, rep) = JarvisController.handle(mainActRef ?: appCtxRef ?: ctx, tx, callNm, navCb, memoCb, notesCb, fromVoice); if (handled) { if (rep.isBlank()) { if (on && !busy) uiP(180L) { listenNow(ctx) }; return }; stopOneShotDictation(); if (rep == "STOP_JARVIS") { speakOneShot(ctx, "자비스 음성 비서를 종료합니다."); stop(ctx); return }; busy = true; input = ""; status = rep; lastEcho = rep.replace(Regex("[^가-힣a-zA-Z0-9 ]"), "").trim().take(24); if (on || ttsOn) speakOneShot(ctx, rep); if (on) waitTtsAndResume(ctx) else busy = false; return }; val qClean = if (fromVoice) matchWakePhrase(tx, callNm).second.ifBlank { tx } else tx; stopOneShotDictation(); busy = true; isAiBusy = true; streamActive = true; input = ""; ttsSpkIdx = 0; ttsFirstChunk = true; ttsPending.clear(); val g = ++activeGenId; status = "🤖 [$qClean] 답변 생성 중... ▍"; val prevH = hist; scope.launch { val cc = loadAiCfg(ctx); val rag = if (cc.ragOn) withContext(Dispatchers.IO) { buildRagContextSmart(qClean, cc, notesCb(), emptyList(), SmartMemoClassifier.loadMemoCats(ctx)) } else ""; val ans = withContext(Dispatchers.IO) { callLlmHttp(cc.sysPrompt, rag, prevH, qClean, cc.apiUrl, cc.apiModel, cc.apiKey, { lv -> if (g == activeGenId && lv.isNotBlank()) uiP(0L) { status = "🤖 $lv ▍"; if (ttsOn) feedStreamTts(ctx, lv, false) } }, g, cc.temp, cc.ctxSize, cc.maxTok.coerceAtLeast(512), cc.cpuMode, cc.histTurns) }; if (g == activeGenId) { val fa = ans ?: "⚠️ 로컬 GGUF 모델을 먼저 [⚙️ AI 세팅]에서 등록해 주세요."; hist = (prevH + ChatMsg(nextId(), true, qClean, cc.ragOn) + ChatMsg(nextId(), false, fa, cc.ragOn)).takeLast(20); status = "🤖 $fa"; lastEcho = fa.substringBefore("\n\n⏱️").take(24); if (ttsOn) feedStreamTts(ctx, fa, true); if (on) waitTtsAndResume(ctx, g) else { busy = false; isAiBusy = false; streamActive = false } } } } }
+object JarvisRuntime {
+ val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate)
+ var on by mutableStateOf(false)
+ var busy by mutableStateOf(false)
+ var input by mutableStateOf("")
+ var status by mutableStateOf<String?>(null)
+ var hist = listOf<ChatMsg>()
+ var lastBeatMs = 0L
+ var navCb: (Int) -> Unit = {}
+ var memoCb: (String) -> String = { "" }
+ var notesCb: () -> List<NoteItem> = { emptyList() }
+ var booksCb: () -> List<BookItem> = { emptyList() }
+ var fallbackCb: () -> Unit = {}
+ var watchJob: kotlinx.coroutines.Job? = null
+ fun bindCallbacks(ctx: Context, onNav: (Int) -> Unit, onMemo: (String) -> String, getBooks: () -> List<BookItem> = booksCb, getN: () -> List<NoteItem>) {
+  appCtxRef = ctx.applicationContext; navCb = onNav; memoCb = onMemo; booksCb = getBooks; notesCb = getN
+ }
+ fun start(ctx: Context, onFall: () -> Unit = {}) {
+  fallbackCb = onFall
+  if (vOn) vStop(ctx)
+  loadAiCfg(ctx)
+  on = true; busy = false; JarvisController.sleeping = false
+  if (wakeOnly) wakeFollowUpUntil = System.currentTimeMillis() + 18000L
+  keepAw(ctx, true)
+  status = if (wakeOnly) "👂🎙️ 자비스 ON (18초 즉시 경청 · 이후 [${wakeWord}] 호출 대기)" else "🤖🎙️ 자비스 상시 음성 비서 ON! 명령이나 질문을 편하게 말씀하세요."
+  listenNow(ctx)
+  watchJob?.cancel()
+  watchJob = scope.launch {
+   while (on) {
+    delay(3200L)
+    if (wakeLockRef?.isHeld != true) keepAw(ctx, true)
+    if (on && !busy && !isAiBusy && !streamActive && !isTtsBusyNow() && (!oneShotActive || System.currentTimeMillis() - lastBeatMs > 7500L)) {
+     listenNow(mainActRef ?: appCtxRef ?: ctx)
+    }
+   }
+  }
+ }
+ fun stop(ctx: Context) {
+  on = false; busy = false; isAiBusy = false; streamActive = false; wakeFollowUpUntil = 0L
+  watchJob?.cancel(); stopOneShotDictation(); stopOneShotTts(); keepAw(ctx, false)
+  status = "⏹️ 자비스 상시 음성 비서 OFF"
+ }
+ fun onActivityResume() {
+  val c = mainActRef ?: appCtxRef ?: return
+  if (on && !busy && !isAiBusy && !isTtsBusyNow() && (!oneShotActive || System.currentTimeMillis() - lastBeatMs > 3000L)) uiP(250L) { if (on && !busy) listenNow(c) }
+ }
+ fun listenNow(ctx: Context) {
+  if (!on || busy) return
+  lastBeatMs = System.currentTimeMillis()
+  startOneShotDictation(ctx, "", { pt -> if (!JarvisController.sleeping) input = pt }, { _ -> }, { st -> if (st.startsWith("🗣️") || status == null || status!!.startsWith("🤖🎙️") || status!!.startsWith("👂") || status!!.startsWith("🌙")) status = st }, { if (on && appInFg) { on = false; fallbackCb() } }, { _, _ -> }, onPhrase = { ph -> processUtterance(ctx, ph, true) })
+ }
+ fun waitTtsAndResume(ctx: Context, myGen: Long = activeGenId) {
+  scope.launch {
+   try {
+    delay(350L)
+    var gd = 0
+    while (on && gd < 600 && myGen == activeGenId) {
+     if (!isTtsBusyNow() && (System.currentTimeMillis() - ttsLastEnqueueMs) >= 650L) break
+     delay(200L); gd++
+    }
+   } finally {
+    busy = false; isAiBusy = false; streamActive = false
+   }
+   if (on && myGen == activeGenId) {
+    if (wakeOnly && !JarvisController.sleeping) wakeFollowUpUntil = System.currentTimeMillis() + 14000L
+    val nl = 10.toChar().toString()
+    val tail = if (JarvisController.sleeping) "${nl}🌙 [대기모드] [${wakeWord}]라고 불러주세요" else if (wakeOnly) "${nl}👂 [연속대화 14초 열림 · 이후 [${wakeWord}] 호출 대기]" else "${nl}🤖🎙️ [경청중] 다음 명령을 말씀하세요..."
+    status = (status ?: "").substringBefore("${nl}🤖🎙️").substringBefore("${nl}👂").substringBefore("${nl}🌙") + tail
+    uiP(300L) { if (on && !busy) listenNow(mainActRef ?: appCtxRef ?: ctx) }
+   }
+  }
+ }
+ fun processUtterance(ctx: Context, raw: String, fromVoice: Boolean = true) {
+  val tx = raw.trim()
+  if (tx.isEmpty()) { if (on && !busy) uiP(200L) { listenNow(ctx) }; return }
+  if (fromVoice && lastEcho.isNotEmpty() && (tx == lastEcho || (tx.length >= 4 && lastEcho.contains(tx)))) { if (on && !busy) uiP(260L) { listenNow(ctx) }; return }
+  loadAiCfg(ctx)
+  val callNm = wakeWord.trim().ifBlank { "자비스" }
+  val (handled, rep) = JarvisController.handle(mainActRef ?: appCtxRef ?: ctx, tx, callNm, navCb, memoCb, notesCb, fromVoice)
+  if (handled) {
+   if (rep.isBlank()) { if (on && !busy) uiP(180L) { listenNow(ctx) }; return }
+   stopOneShotDictation()
+   if (rep == "STOP_JARVIS") { speakOneShot(ctx, "자비스 음성 비서를 종료합니다."); stop(ctx); return }
+   busy = true; input = ""; status = rep
+   lastEcho = rep.replace(Regex("[^가-힣a-zA-Z0-9 ]"), "").trim().take(24)
+   if (on || ttsOn) speakOneShot(ctx, rep)
+   if (on) waitTtsAndResume(ctx) else busy = false
+   return
+  }
+  val qClean = if (fromVoice) matchWakePhrase(tx, callNm).second.ifBlank { tx } else tx
+  stopOneShotDictation()
+  busy = true; isAiBusy = true; streamActive = true; input = ""
+  ttsSpkIdx = 0; ttsFirstChunk = true; ttsPending.clear()
+  val g = ++activeGenId
+  status = "🤖 [$qClean] 답변 생성 중... ▍"
+  val prevH = hist
+  scope.launch {
+   val cc = loadAiCfg(ctx)
+   val rag = if (cc.ragOn) withContext(Dispatchers.IO) { buildRagContextSmart(qClean, cc, notesCb(), booksCb(), SmartMemoClassifier.loadMemoCats(ctx)) } else ""
+   val ans = withContext(Dispatchers.IO) {
+    callLlmHttp(cc.sysPrompt, rag, prevH, qClean, cc.apiUrl, cc.apiModel, cc.apiKey, { lv ->
+     if (g == activeGenId && lv.isNotBlank()) uiP(0L) { status = "🤖 $lv ▍"; if (ttsOn) feedStreamTts(ctx, lv, false) }
+    }, g, cc.temp, cc.ctxSize, cc.maxTok.coerceAtLeast(512), cc.cpuMode, cc.histTurns)
+   }
+   if (g == activeGenId) {
+    val nl = 10.toChar().toString()
+    val fa = ans ?: "⚠️ 로컬 GGUF 모델을 먼저 [⚙️ 설정]에서 등록해 주세요."
+    hist = (prevH + ChatMsg(nextId(), true, qClean, cc.ragOn) + ChatMsg(nextId(), false, fa, cc.ragOn)).takeLast(20)
+    status = "🤖 $fa"
+    lastEcho = fa.substringBefore("${nl}${nl}⏱️").take(24)
+    if (ttsOn) feedStreamTts(ctx, fa, true)
+    if (on) waitTtsAndResume(ctx, g) else { busy = false; isAiBusy = false; streamActive = false }
+   }
+  }
+ }
+}
 fun normalizeTextForNaturalTts(raw: String): String {
     val clean0 = raw
         .substringBefore("\n\n⏱️")

@@ -177,7 +177,7 @@ LaunchedEffect(lastBubbleLen, isThinking) { val now = System.currentTimeMillis()
 LaunchedEffect(notes.size) { ScheduleBriefingManager.syncNoteAlarms(ctx, notes) }
 LaunchedEffect(aiCfg.idleMin) { while (aiCfg.idleMin > 0) { delay(30000L); if (!isThinking && !isAiBusy && checkIdleUnload(aiCfg.idleMin)) { val lb = if (aiCfg.idleMin == 180) "3시간" else "${aiCfg.idleMin}분"; aiMsg = "🧹 ${lb} 유휴 경과로 GGUF 모델을 메모리에서 내렸습니다 (사용 시 자동 재로드)" } } }
 fun stopChat() { activeGenId++; if (ProLlamaJni.ready) runCatching { ProLlamaJni.abortGeneration() }; chatJob?.cancel(); chatJob = null; isThinking = false; streamActive = false; isAiBusy = false; stopOneShotTts(); chatMsgs = chatMsgs.mapIndexed { idx, m -> if (idx == chatMsgs.lastIndex && !m.isUser) m.copy(text = m.text.removeSuffix(" ▍")) else m }; if (vOn) uiP(400L) { sttGo(ctx, true) } }
-fun sendChat(txt: String) { val q = txt.trim(); if (q.isEmpty() || isThinking) return; val callNm = aiCfg.apiModel.trim().ifBlank { wakeWord }; val (jHit, jRep) = JarvisController.handle(mainActRef ?: ctx, q, callNm, JarvisRuntime.navCb, { raw -> val c0 = SmartMemoClassifier.guessCategory(raw, cats); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; onSaveNotes(nx); "✅ [$c0] 메모 저장됨" }, { notes }, false); if (jHit) { if (jRep == "STOP_JARVIS") { vStop(ctx); aiMsg = "⏹️ 자비스 종료됨"; return }; if (jRep.isNotBlank()) { chatMsgs = chatMsgs + ChatMsg(nextId(), true, q, aiCfg.ragOn) + ChatMsg(nextId(), false, jRep, aiCfg.ragOn); aiMsg = jRep; if (vOn || ttsOn) speakOneShot(ctx, jRep); if (vOn) scope.launch { delay(350L); var gd = 0; while (gd < 300 && isTtsBusyNow()) { delay(200L); gd++ }; isAiBusy = false; streamActive = false; sttGo(ctx, true) }; return } }; val prevH = chatMsgs; val uId = nextId(); val bId = nextId(); val myGen = ++activeGenId; isAiBusy = true; streamActive = true; ttsSpkIdx = 0; ttsFirstChunk = true; ttsPending.clear(); ttsActiveCount = 0; uiP(0L) { sttEpoch += 1; val old = sttEngine; sttEngine = null; runCatching { old?.cancel(); old?.destroy(); ttsEngine?.stop() } }; chatMsgs = chatMsgs + ChatMsg(uId, true, q, aiCfg.ragOn) + ChatMsg(bId, false, if (streamOn) "⚡ 0.0초 ▍" else "⏳...", aiCfg.ragOn); vBuf = ""; vSpkNow = false; vSeq++; sharedAiChatIn = ""; isThinking = true; chatJob = scope.launch { keepAw(ctx, true); var firstTok = false; var latestLive = ""; val t0 = System.currentTimeMillis(); val wt = launch { while (myGen == activeGenId && !firstTok && isThinking) { val ds = (System.currentTimeMillis() - t0) / 100L; chatMsgs = chatMsgs.map { if (it.id == bId) it.copy(text = "⚡ ${ds / 10}.${ds % 10}초 ▍") else it }; delay(200L) } }; try { val r = withContext(Dispatchers.IO) { buildAiChatReply(q, aiCfg, prevH, notes, books, cats, ai, { lv -> if (myGen == activeGenId && lv.isNotBlank()) { firstTok = true; latestLive = lv; if (streamOn) uiP(0L) { if (myGen == activeGenId) { chatMsgs = chatMsgs.map { if (it.id == bId) it.copy(text = lv + " ▍") else it }; feedStreamTts(ctx, lv, false) } } } }, myGen) }; if (myGen == activeGenId) { firstTok = true; wt.cancel(); val fa = r.ifBlank { latestLive.ifBlank { "⚠️ 응답 생성 실패" } }; chatMsgs = chatMsgs.map { if (it.id == bId) it.copy(text = fa) else it }; isThinking = false; feedStreamTts(ctx, fa, true); if (vOn || ttsOn) { delay(350L); var gd = 0; while (myGen == activeGenId && gd < 600) { if (!isTtsBusyNow() && (System.currentTimeMillis() - ttsLastEnqueueMs) >= 650L) break; delay(220L); gd++ } }; if (myGen == activeGenId) { delay(300L); streamActive = false; isAiBusy = false; if (vOn) { if (wakeOnly) wakeFollowUpUntil = System.currentTimeMillis() + 15000L; vSt = "듣는중"; sttGo(ctx, true) } else keepAw(ctx, false) } } } finally { wt.cancel(); if (myGen == activeGenId && isThinking) { isThinking = false; streamActive = false; isAiBusy = false; if (vOn) uiP(450L) { sttGo(ctx, true) } } } } }
+fun sendChat(txt: String) { val q = txt.trim(); if (q.isEmpty() || isThinking) return; val callNm = wakeWord.trim().ifBlank { "자비스" }; val (jHit, jRep) = JarvisController.handle(mainActRef ?: ctx, q, callNm, JarvisRuntime.navCb, { raw -> val c0 = SmartMemoClassifier.guessCategory(raw, cats); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; onSaveNotes(nx); "✅ [$c0] 메모 저장됨" }, { notes }, false); if (jHit) { if (jRep == "STOP_JARVIS") { vStop(ctx); aiMsg = "⏹️ 자비스 종료됨"; return }; if (jRep.isNotBlank()) { chatMsgs = chatMsgs + ChatMsg(nextId(), true, q, aiCfg.ragOn) + ChatMsg(nextId(), false, jRep, aiCfg.ragOn); aiMsg = jRep; if (vOn || ttsOn) speakOneShot(ctx, jRep); if (vOn) scope.launch { delay(350L); var gd = 0; while (gd < 300 && isTtsBusyNow()) { delay(200L); gd++ }; isAiBusy = false; streamActive = false; sttGo(ctx, true) }; return } }; val prevH = chatMsgs; val uId = nextId(); val bId = nextId(); val myGen = ++activeGenId; isAiBusy = true; streamActive = true; ttsSpkIdx = 0; ttsFirstChunk = true; ttsPending.clear(); ttsActiveCount = 0; uiP(0L) { sttEpoch += 1; val old = sttEngine; sttEngine = null; runCatching { old?.cancel(); old?.destroy(); ttsEngine?.stop() } }; chatMsgs = chatMsgs + ChatMsg(uId, true, q, aiCfg.ragOn) + ChatMsg(bId, false, if (streamOn) "⚡ 0.0초 ▍" else "⏳...", aiCfg.ragOn); vBuf = ""; vSpkNow = false; vSeq++; sharedAiChatIn = ""; isThinking = true; chatJob = scope.launch { keepAw(ctx, true); var firstTok = false; var latestLive = ""; val t0 = System.currentTimeMillis(); val wt = launch { while (myGen == activeGenId && !firstTok && isThinking) { val ds = (System.currentTimeMillis() - t0) / 100L; chatMsgs = chatMsgs.map { if (it.id == bId) it.copy(text = "⚡ ${ds / 10}.${ds % 10}초 ▍") else it }; delay(200L) } }; try { val r = withContext(Dispatchers.IO) { buildAiChatReply(q, aiCfg, prevH, notes, books, cats, ai, { lv -> if (myGen == activeGenId && lv.isNotBlank()) { firstTok = true; latestLive = lv; if (streamOn) uiP(0L) { if (myGen == activeGenId) { chatMsgs = chatMsgs.map { if (it.id == bId) it.copy(text = lv + " ▍") else it }; feedStreamTts(ctx, lv, false) } } } }, myGen) }; if (myGen == activeGenId) { firstTok = true; wt.cancel(); val fa = r.ifBlank { latestLive.ifBlank { "⚠️ 응답 생성 실패" } }; chatMsgs = chatMsgs.map { if (it.id == bId) it.copy(text = fa) else it }; isThinking = false; feedStreamTts(ctx, fa, true); if (vOn || ttsOn) { delay(350L); var gd = 0; while (myGen == activeGenId && gd < 600) { if (!isTtsBusyNow() && (System.currentTimeMillis() - ttsLastEnqueueMs) >= 650L) break; delay(220L); gd++ } }; if (myGen == activeGenId) { delay(300L); streamActive = false; isAiBusy = false; if (vOn) { if (wakeOnly) wakeFollowUpUntil = System.currentTimeMillis() + 15000L; vSt = "듣는중"; sttGo(ctx, true) } else keepAw(ctx, false) } } } finally { wt.cancel(); if (myGen == activeGenId && isThinking) { isThinking = false; streamActive = false; isAiBusy = false; if (vOn) uiP(450L) { sttGo(ctx, true) } } } } }
 val latestSendChat by rememberUpdatedState<(String) -> Unit> { q -> sendChat(q) }; SideEffect { vCb = latestSendChat }
 LaunchedEffect(isAiPage, pendingHomeAiQuery) { if (isAiPage && pendingHomeAiQuery.isNotBlank()) { val hq = pendingHomeAiQuery.trim(); mode = "AI"; sendChat(hq); pendingHomeAiQuery = "" } }
 LaunchedEffect(pendingVoiceSend) { if (pendingVoiceSend.isNotBlank()) { val vq = pendingVoiceSend.trim(); mode = "AI"; sendChat(vq); pendingVoiceSend = "" } }
@@ -286,16 +286,16 @@ listOf("AUTO" to "자동(맞춤)", "COMPACT" to "작게", "NORMAL" to "표준", 
 }
 }
 }
-if (mode == "AI") { Spacer(Modifier.height(4.dp)); Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) { ChipBtn("💬", !aiCfg.ragOn && !vOn, CW) { vStop(ctx); aiCfg = aiCfg.copy(ragOn = false); saveAiCfg(ctx, aiCfg); aiMsg = "💬 일반 챗봇 모드" }; ChipBtn("🗂️", aiCfg.ragOn, CG) { aiCfg = aiCfg.copy(ragOn = !aiCfg.ragOn); saveAiCfg(ctx, aiCfg); aiMsg = if (aiCfg.ragOn) "🗂️ 메모 RAG 켜짐" else "💬 일반 챗봇 모드" }; val cpuIcon = when (aiCfg.cpuMode) { 1 -> "🔋"; 3 -> "🚀"; else -> "⚖️" }; ChipBtn(cpuIcon, true, CG) { val nxM = if (aiCfg.cpuMode == 1) 2 else if (aiCfg.cpuMode == 2) 3 else 1; val nx = aiCfg.copy(cpuMode = nxM); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = when (nxM) { 1 -> "🔋 절전(2코어·저발열)"; 3 -> "🚀 고성능(4코어·최고속)"; else -> "⚖️ 균형(3코어·권장)" } }; val curTk = aiCfg.maxTok.coerceAtLeast(512); ChipBtn("📏${curTk}", true, CA) { val nxTk = when (curTk) { 512 -> 1024; 1024 -> 2048; 2048 -> 4096; else -> 512 }; val nx = aiCfg.copy(maxTok = nxTk, ctxSize = maxOf(aiCfg.ctxSize, nxTk + 512)); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = "📏 최대 출력 토큰: ${nxTk}토큰" }; ChipBtn("🔗${aiCfg.histTurns}", aiCfg.histTurns > 0, CG) { val nxH = when (aiCfg.histTurns) { 0 -> 2; 2 -> 4; 4 -> 6; 6 -> 10; else -> 0 }; val nx = aiCfg.copy(histTurns = nxH); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = if (nxH == 0) "🔗 기억 대화 0개 (단발·최고속)" else "🔗 이전 대화 ${nxH}개 연속 기억" }; val idLb = when (aiCfg.idleMin) { 0 -> "🧹∞"; 180 -> "🧹3h"; else -> "🧹${aiCfg.idleMin}m" }; ChipBtn(idLb, aiCfg.idleMin > 0, CW) { val nxI = when (aiCfg.idleMin) { 30 -> 60; 60 -> 180; 180 -> 0; else -> 30 }; val nx = aiCfg.copy(idleMin = nxI); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = if (nxI == 0) "🧹 모델 상주 모드 (자동 해제 OFF)" else "🧹 ${if (nxI == 180) "3시간" else "${nxI}분"} 유휴 시 모델 RAM 자동 해제" }; ChipBtn(if (thinkOn) "🧠" else "⚡", thinkOn, CA) { setThinkOn(ctx, !thinkOn); aiMsg = if (thinkOn) "🧠 심층 추론 ON" else "⚡ 초고속 직답 모드" }; ChipBtn(if (streamOn) "🌊" else "📄", streamOn, CG) { setStreamOn(ctx, !streamOn); aiMsg = if (streamOn) "🌊 실시간 토큰 스트리밍" else "📄 일괄 출력" }; ChipBtn(if (vOn) "🔴" else "🎙️", vOn, CA) { if (vOn) vStop(ctx) else vStart() }; ChipBtn(if (wakeOnly) "👂" else "🎙️", wakeOnly, CA) { setWakeOnly(ctx, !wakeOnly); aiMsg = if (wakeOnly) "👂 호출어 대기 ON: [${wakeWord}] 부를 때만 반응" else "🎙️ 상시 반응 모드" }; ChipBtn("⏱️${vWaitSec}", vOn, CW) { vWaitSec = if (vWaitSec == 2) 3 else if (vWaitSec == 3) 5 else 2; aiMsg = "⏱️ 음성 대기 ${vWaitSec}초" }; ChipBtn(if (ttsOn) "🔊" else "🔇", ttsOn, CG) { ttsOn = !ttsOn; if (!ttsOn) stopOneShotTts() }; ChipBtn("🌙", blkOn, CW) { keepAw(ctx, true); blkOn = true }; ChipBtn("❓", false, CA) { showEmojiHelp = true } }
+if (mode == "AI") {
 Spacer(Modifier.height(4.dp))
 Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) {
-ChipBtn("📂대화폴더(${aiSessions.size})", aiShelfOpen, CA) { aiShelfOpen = !aiShelfOpen }
+ChipBtn("📂보관함(${aiSessions.size})", aiShelfOpen, CA) { aiShelfOpen = !aiShelfOpen }
 ChipBtn("📁$curAiFolder", false, CW) {
 val idx = aiFolders.indexOf(curAiFolder)
 curAiFolder = if (idx >= 0 && aiFolders.isNotEmpty()) aiFolders[(idx + 1) % aiFolders.size] else "기본 대화"
 aiMsg = "📁 현재 대화 저장 폴더: [$curAiFolder]"
 }
-ChipBtn("💾대화저장", false, CG) {
+ChipBtn("💾저장", false, CG) {
 val meaningful = chatMsgs.filter { it.id != 1L }
 if (meaningful.isEmpty()) {
 aiMsg = "⚠️ 먼저 AI와 나눈 대화가 있어야 저장할 수 있습니다."
@@ -312,10 +312,27 @@ aiMsg = "💾 [📁$curAiFolder] 폴더에 '$titleGuess' 대화를 저장했습�
 }
 ChipBtn("➕새대화", false, CM) {
 curAiSessionId = 0L
-chatMsgs = listOf(ChatMsg(1L, false, "새 대화를 시작합니다. 궁금한 내용을 편하게 물어보세요!", false))
+chatMsgs = listOf(ChatMsg(1L, false, "새 대화를 시작합니다. 궁금한 내용을 편하게 물어보세요!", aiCfg.ragOn))
 aiMsg = "✨ 새 대화창이 열렸습니다."
 }
-ChipBtn("⚙️폴더·백업", aiFolderDlgOpen, CG) { aiFolderDlgOpen = true }
+}
+Spacer(Modifier.height(4.dp))
+Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) {
+ChipBtn(if (aiCfg.ragOn) "🗂️RAG" else "💬일반", aiCfg.ragOn, CG) { aiCfg = aiCfg.copy(ragOn = !aiCfg.ragOn); saveAiCfg(ctx, aiCfg); aiMsg = if (aiCfg.ragOn) "🗂️ 내 메모·독서 RAG 켜짐" else "💬 일반 AI 챗봇 모드" }
+val cpuIcon = when (aiCfg.cpuMode) { 1 -> "🔋"; 3 -> "🚀"; else -> "⚖️" }
+ChipBtn(cpuIcon, true, CG) { val nxM = if (aiCfg.cpuMode == 1) 2 else if (aiCfg.cpuMode == 2) 3 else 1; val nx = aiCfg.copy(cpuMode = nxM); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = when (nxM) { 1 -> "🔋 절전(2코어·저발열)"; 3 -> "🚀 고성능(4코어·최고속)"; else -> "⚖️ 균형(3코어·권장)" } }
+val curTk = aiCfg.maxTok.coerceAtLeast(512)
+ChipBtn("📏${curTk}", true, CA) { val nxTk = when (curTk) { 512 -> 1024; 1024 -> 2048; 2048 -> 4096; else -> 512 }; val nx = aiCfg.copy(maxTok = nxTk, ctxSize = maxOf(aiCfg.ctxSize, nxTk + 512)); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = "📏 최대 출력 토큰: ${nxTk}토큰" }
+ChipBtn("🔗${aiCfg.histTurns}", aiCfg.histTurns > 0, CG) { val nxH = when (aiCfg.histTurns) { 0 -> 2; 2 -> 4; 4 -> 6; 6 -> 10; else -> 0 }; val nx = aiCfg.copy(histTurns = nxH); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = if (nxH == 0) "🔗 기억 대화 0개 (단발·최고속)" else "🔗 이전 대화 ${nxH}개 연속 기억" }
+val idLb = when (aiCfg.idleMin) { 0 -> "🧹∞"; 180 -> "🧹3h"; else -> "🧹${aiCfg.idleMin}m" }
+ChipBtn(idLb, aiCfg.idleMin > 0, CW) { val nxI = when (aiCfg.idleMin) { 30 -> 60; 60 -> 180; 180 -> 0; else -> 30 }; val nx = aiCfg.copy(idleMin = nxI); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = if (nxI == 0) "🧹 모델 상주 모드 (자동 해제 OFF)" else "🧹 ${if (nxI == 180) "3시간" else "${nxI}분"} 유휴 시 모델 RAM 자동 해제" }
+ChipBtn(if (thinkOn) "🧠" else "⚡", thinkOn, CA) { setThinkOn(ctx, !thinkOn); aiMsg = if (thinkOn) "🧠 심층 추론 ON" else "⚡ 초고속 직답 모드" }
+ChipBtn(if (streamOn) "🌊" else "📄", streamOn, CG) { setStreamOn(ctx, !streamOn); aiMsg = if (streamOn) "🌊 실시간 토큰 스트리밍" else "📄 일괄 출력" }
+ChipBtn(if (vOn) "🔴음성중" else "🎙️음성대화", vOn, CA) { if (vOn) vStop(ctx) else vStart() }
+ChipBtn(if (wakeOnly) "👂호출어" else "🗣️상시", wakeOnly, CA) { setWakeOnly(ctx, !wakeOnly); aiMsg = if (wakeOnly) "👂 호출어 대기 ON: [${wakeWord}] 부를 때만 반응" else "🗣️ 상시 반응 모드" }
+if (vOn) ChipBtn("⏱️${vWaitSec}s", true, CW) { vWaitSec = if (vWaitSec == 2) 3 else if (vWaitSec == 3) 5 else 2; aiMsg = "⏱️ 음성 대기 ${vWaitSec}초" }
+ChipBtn(if (ttsOn) "🔊" else "🔇", ttsOn, CG) { ttsOn = !ttsOn; if (!ttsOn) stopOneShotTts() }
+ChipBtn("🌙", blkOn, CW) { keepAw(ctx, true); blkOn = true }
 }
 if (aiShelfOpen) {
 Spacer(Modifier.height(4.dp))
@@ -335,7 +352,7 @@ Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, ve
 val cnt = if (af == "전체") aiSessions.size else aiSessions.count { it.folder == af }
 ChipBtn("📁$af($cnt)", aiShelfFilter == af, CG) { aiShelfFilter = af }
 }
-ChipBtn("➕폴더", false, CA) { aiFolderDlgOpen = true }
+ChipBtn("⚙️폴더관리", false, CA) { aiFolderDlgOpen = true }
 }
 if (visSessions.isEmpty()) {
 Text("이 폴더에 저장된 대화가 없습니다. 상단 [💾대화저장]으로 중요한 대화를 폴더별로 보관하세요.", fontSize = ui.subSp, color = CM)
@@ -493,7 +510,7 @@ withContext(Dispatchers.Main) { aiMsg = fullRep; chatMsgs = chatMsgs + ChatMsg(n
 }
 }
 ChipBtn(if (btmOpen) "🔽" else "🔼", false, CM) { btmOpen = !btmOpen }
-ChipBtn("❓", false, CA) { showEmojiHelp = true }; ChipBtn("🗑️", false, CM) { chatMsgs = listOf(ChatMsg(nextId(), false, "대화가 초기화되었습니다. 무엇이든 편하게 질문해 주세요!", aiCfg.ragOn)) }
+ChipBtn("❓", false, CA) { showEmojiHelp = true }
 if (pickMemoOpen && notes.isNotEmpty()) {
 notes.take(15).forEach { mn -> val pv = mn.content.lines().firstOrNull { it.isNotBlank() }?.take(12) ?: "메모"; ChipBtn("➕ " + pv, false, CA) { copyMemoToAi(mn.content); aiMsg = "🤖 메모가 구분선과 함께 입력창에 추가되었습니다." } }
 }

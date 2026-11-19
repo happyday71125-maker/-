@@ -270,8 +270,8 @@ onLeftWriter = { scope.launch { pager.animateScrollToPage(0) } }, allApps = apps
 }
 AnimatedVisibility(visible = drawerOpen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
 DrawerSheet(apps, onClose = { drawerOpen = false }, onLaunch = ::launchOrInterrupt,
-onFav = { repo.toggleFavorite(it.packageName); apps = repo.loadInstalledApps() },
-onInt = { repo.toggleInterrupt(it.packageName); apps = repo.loadInstalledApps() })
+onFav = { repo.toggleFavorite(it.packageName, it.label); apps = repo.loadInstalledApps() },
+onInt = { repo.toggleInterrupt(it.packageName, it.label); apps = repo.loadInstalledApps() })
 }
 AnimatedVisibility(visible = settingsOpen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
 SettingsSheet(cfg, isDefHome, onAskHome = ::askDefaultHome, onSysHome = { repo.openSystemDefaultAppsSettings() },

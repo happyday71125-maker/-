@@ -15,7 +15,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -646,6 +649,210 @@ fun UnifiedBackupSettingsPanel(ctx: Context, repo: LauncherRepository, ui: Respo
      Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
       ChipBtn("📤개별백업", false, CG) { triggerExport(sc, fn) }
       ChipBtn("♻️병합복원", false, CA) { importLauncher.launch(arrayOf("*/*")) }
+     }
+    }
+   }
+  }
+ }
+}
+fun buildHighlightedBookPage(text: String, query: String, isNight: Boolean): AnnotatedString {
+ val q = query.trim()
+ if (q.isEmpty() || text.isEmpty()) return AnnotatedString(text)
+ val ranges = BookPassageSearcher.findMatchRangesInText(text, q, maxHits = 60)
+ if (ranges.isEmpty()) return AnnotatedString(text)
+ val hlBg = if (isNight) Color(0x99D97706) else Color(0x88FACC15)
+ val hlFg = if (isNight) Color(0xFFFFFBEB) else Color(0xFF1C1917)
+ return buildAnnotatedString {
+  append(text)
+  ranges.forEach { r ->
+   val s = r.first.coerceIn(0, text.length)
+   val e = (r.last + 1).coerceIn(s, text.length)
+   if (s < e) addStyle(SpanStyle(background = hlBg, color = hlFg), s, e)
+  }
+ }
+}
+@Composable
+fun ReaderTopGlobalSearchBar(
+ books: List<BookItem>,
+ activeBook: BookItem?,
+ smartReflow: Boolean,
+ query: String,
+ onQueryChange: (String) -> Unit,
+ scopeAllBooks: Boolean,
+ onScopeChange: (Boolean) -> Unit,
+ ui: ResponsiveUi,
+ onSelectHit: (BookSearchHit) -> Unit,
+ onClose: () -> Unit
+) {
+ val targetBooks = remember(books, activeBook, scopeAllBooks) {
+  if (scopeAllBooks || activeBook == null) books else listOf(activeBook)
+ }
+ var hits by remember { mutableStateOf<List<BookSearchHit>>(emptyList()) }
+ var searching by remember { mutableStateOf(false) }
+ LaunchedEffect(query, targetBooks, smartReflow) {
+  val q = query.trim()
+  if (q.isEmpty()) {
+   hits = emptyList()
+   searching = false
+  } else {
+   searching = true
+   val computed = withContext(Dispatchers.Default) {
+    BookPassageSearcher.searchAllBooks(targetBooks, q, smartReflow = smartReflow, maxTotalHits = 80)
+   }
+   hits = computed
+   searching = false
+  }
+ }
+ val matchedBookCount = remember(hits) { hits.map { it.bookId }.distinct().size }
+ Surface(
+  color = Color(0xF50E1628),
+  shape = RoundedCornerShape(13.dp),
+  border = BorderStroke(1.dp, CA.copy(alpha = 0.8f)),
+  modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+ ) {
+  Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+   Row(Modifier.fillMaxWidth(), SB, CV) {
+    Text("🔎 독서대 구절·본문 통합 검색", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CA)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
+     if (query.isNotEmpty()) {
+      Text("지우기", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { onQueryChange("") })
+     }
+     Text("✕ 닫기", fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = CG, modifier = Modifier.clickable { onClose() })
+    }
+   }
+   Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+    ChipBtn("📚 독서대 전체 도서(${books.size}권)", scopeAllBooks, CA) { onScopeChange(true) }
+    if (activeBook != null) {
+     ChipBtn("📖 현재 책만(${activeBook.title.take(10)})", !scopeAllBooks, CG) { onScopeChange(false) }
+    }
+   }
+   OutlinedTextField(
+    value = query,
+    onValueChange = onQueryChange,
+    placeholder = { Text("다른 기기에서 읽던 문장·단어·책제목 입력...", fontSize = ui.subSp) },
+    singleLine = true,
+    modifier = Modifier.fillMaxWidth()
+   )
+   if (query.trim().isEmpty()) {
+    Text("💡 기억나는 단어나 문장 일부를 입력하면 서재 내 모든 도서 본문에서 해당 구절이 있는지 찾아 바로 그 페이지로 이동합니다.", fontSize = 10.sp, color = CM)
+   } else if (searching) {
+    Text("⏳ 도서 본문에서 '${query.trim()}' 위치를 탐색 중입니다...", fontSize = ui.subSp, color = CA)
+   } else if (hits.isEmpty()) {
+    Text("❌ ${if (scopeAllBooks) "등록된 모든 도서(${books.size}권)" else "현재 도서"}에서 '${query.trim()}' 구절을 찾지 못했습니다.", fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = Color(0xFFF87171))
+   } else {
+    Text("✅ ${matchedBookCount}권에서 총 ${hits.size}곳 발견! 항목을 탭하면 해당 페이지로 즉시 이동합니다.", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG)
+    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 210.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+     items(hits, key = { "${it.bookId}_${it.charOffset}" }) { h ->
+      Surface(
+       color = Color(0xFF131E33),
+       shape = RoundedCornerShape(9.dp),
+       border = BorderStroke(0.7.dp, CG.copy(alpha = 0.45f)),
+       modifier = Modifier.fillMaxWidth().clickable { onSelectHit(h) }
+      ) {
+       Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(Modifier.fillMaxWidth(), SB, CV) {
+         Text("📖 ${h.bookTitle}", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CW, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+         Text("📁${h.category} · 약 ${h.approxPct}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = CA)
+        }
+        Text(h.snippet, fontSize = 11.sp, color = Color(0xFFD1FAE5), maxLines = 2, overflow = TextOverflow.Ellipsis)
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}
+@Composable
+fun ReaderInBookSearchBar(
+ book: BookItem,
+ fullText: String,
+ vPages: List<PageSlice>,
+ curVIdx: Int,
+ query: String,
+ onQueryChange: (String) -> Unit,
+ ui: ResponsiveUi,
+ onJumpToCharOffset: (Int) -> Unit,
+ onClose: () -> Unit
+) {
+ val hits = remember(book.id, fullText, query) {
+  if (query.trim().isEmpty()) emptyList()
+  else BookPassageSearcher.searchBookBody(book, fullText, query, maxHits = 80)
+ }
+ var activeHitIdx by remember(query, book.id) { mutableStateOf(0) }
+ fun pageNumberOf(off: Int): Int {
+  val idx = vPages.indexOfLast { it.s <= off }
+  return (if (idx >= 0) idx else 0) + 1
+ }
+ Surface(
+  color = Color(0xF50E1628),
+  shape = RoundedCornerShape(12.dp),
+  border = BorderStroke(1.dp, CG.copy(alpha = 0.75f)),
+  modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+ ) {
+  Column(Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+   Row(Modifier.fillMaxWidth(), SB, CV) {
+    Text("🔎 현재 책 본문 검색 · 『${book.title.take(14)}』 (현재 ${curVIdx + 1}/${vPages.size}쪽)", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
+     if (query.isNotEmpty()) {
+      Text("지우기", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { onQueryChange("") })
+     }
+     Text("✕ 닫기", fontSize = ui.subSp, color = CA, modifier = Modifier.clickable { onClose() })
+    }
+   }
+   Row(Modifier.fillMaxWidth(), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    OutlinedTextField(
+     value = query,
+     onValueChange = onQueryChange,
+     placeholder = { Text("이 책에서 찾고 싶은 문장·단어 입력...", fontSize = ui.subSp) },
+     singleLine = true,
+     modifier = Modifier.weight(1f)
+    )
+    if (hits.isNotEmpty()) {
+     OutlinedButton(
+      onClick = {
+       val prev = if (activeHitIdx - 1 < 0) hits.lastIndex else activeHitIdx - 1
+       activeHitIdx = prev
+       onJumpToCharOffset(hits[prev].charOffset)
+      },
+      contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+     ) { Text("◀", fontSize = ui.subSp, color = CG) }
+     OutlinedButton(
+      onClick = {
+       val nxt = (activeHitIdx + 1) % hits.size
+       activeHitIdx = nxt
+       onJumpToCharOffset(hits[nxt].charOffset)
+      },
+      contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+     ) { Text("▶", fontSize = ui.subSp, color = CA) }
+    }
+   }
+   if (query.trim().isNotEmpty()) {
+    if (hits.isEmpty()) {
+     Text("❌ 이 책 본문에 '${query.trim()}' 구절이 없습니다.", fontSize = ui.subSp, color = Color(0xFFF87171))
+    } else {
+     val curSafe = activeHitIdx.coerceIn(0, hits.lastIndex)
+     Text("✅ 이 책에서 총 ${hits.size}곳 발견 (${curSafe + 1}/${hits.size}번째 · 탭하여 바로 이동)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CG)
+     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 155.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      items(hits.size) { i ->
+       val h = hits[i]
+       val pNo = pageNumberOf(h.charOffset)
+       val sel = i == curSafe
+       Surface(
+        color = if (sel) CG.copy(alpha = 0.18f) else Color(0xFF121C2E),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(0.7.dp, if (sel) CG else Color(0xFF24344F)),
+        modifier = Modifier.fillMaxWidth().clickable {
+         activeHitIdx = i
+         onJumpToCharOffset(h.charOffset)
+        }
+       ) {
+        Row(Modifier.padding(horizontal = 9.dp, vertical = 6.dp), SB, CV) {
+         Text("p.${pNo}쪽 (${h.approxPct}%)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CA, modifier = Modifier.padding(end = 8.dp))
+         Text(h.snippet, fontSize = 11.sp, color = CW, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        }
+       }
+      }
      }
     }
    }

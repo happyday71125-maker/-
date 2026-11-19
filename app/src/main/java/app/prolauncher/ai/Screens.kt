@@ -73,7 +73,9 @@ var curAiFolder by remember { mutableStateOf(aiFolders.firstOrNull() ?: "기본 
 var aiShelfOpen by remember { mutableStateOf(false) }
 var aiShelfFilter by remember { mutableStateOf("전체") }
 var aiFolderDlgOpen by remember { mutableStateOf(false) }
-LaunchedEffect(LauncherBackupManager.backupRev) {
+var waitDlgOpen by remember { mutableStateOf(false) }
+var waitSecDraft by remember { mutableStateOf(loadVoiceWaitSec(ctx).toString()) }
+  LaunchedEffect(LauncherBackupManager.backupRev) {
 if (LauncherBackupManager.backupRev > 0) {
 cats = SMC.loadMemoCats(ctx)
 onSaveNotes(repo.loadNotes())
@@ -330,7 +332,7 @@ ChipBtn(if (thinkOn) "🧠" else "⚡", thinkOn, CA) { setThinkOn(ctx, !thinkOn)
 ChipBtn(if (streamOn) "🌊" else "📄", streamOn, CG) { setStreamOn(ctx, !streamOn); aiMsg = if (streamOn) "🌊 실시간 토큰 스트리밍" else "📄 일괄 출력" }
 ChipBtn(if (vOn) "🔴음성중" else "🎙️음성대화", vOn, CA) { if (vOn) vStop(ctx) else vStart() }
 ChipBtn(if (wakeOnly) "👂호출어" else "🗣️상시", wakeOnly, CA) { setWakeOnly(ctx, !wakeOnly); aiMsg = if (wakeOnly) "👂 호출어 대기 ON: [${wakeWord}] 부를 때만 반응" else "🗣️ 상시 반응 모드" }
-if (vOn) ChipBtn("⏱️${vWaitSec}s", true, CW) { vWaitSec = if (vWaitSec == 2) 3 else if (vWaitSec == 3) 5 else 2; aiMsg = "⏱️ 음성 대기 ${vWaitSec}초" }
+ChipBtn("⏱️${vWaitSec}초", waitDlgOpen || vOn, CW) { waitSecDraft = vWaitSec.toString(); waitDlgOpen = true }
 ChipBtn(if (ttsOn) "🔊" else "🔇", ttsOn, CG) { ttsOn = !ttsOn; if (!ttsOn) stopOneShotTts() }
 ChipBtn("🌙", blkOn, CW) { keepAw(ctx, true); blkOn = true }
 }
@@ -582,6 +584,47 @@ onBackupCurrentFolder = { if (selTab !in listOf("전체", "★", "☑")) { pendi
 onRestoreTab = { bkImp.launch(arrayOf("*/*")) },
 statusText = aiMsg,
 onDismiss = { memoFolderDlgOpen = false }
+)
+}
+if (waitDlgOpen) {
+AlertDialog(
+onDismissRequest = { waitDlgOpen = false },
+title = { Text("⏱️ 음성 대기 시간 설정 (1~30초)", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = CG) },
+text = {
+Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+Text("말을 멈춘 뒤 AI가 전송·응답하기까지 기다리는 시간입니다. 프리셋을 누르거나 아래에 초 단위로 직접 입력하세요.", fontSize = ui.subSp, color = CM)
+Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) {
+listOf(1, 2, 3, 5, 8, 10, 15).forEach { sec ->
+ChipBtn("${sec}초", vWaitSec == sec, CG) {
+val nv = setVoiceWaitSec(ctx, sec)
+waitSecDraft = nv.toString()
+aiMsg = "⏱️ 음성 대기 시간이 ${nv}초로 저장되었습니다."
+}
+}
+}
+  Row(FMW, verticalAlignment = CV, horizontalArrangement = HS6) {
+OutlinedButton(onClick = { val nv = setVoiceWaitSec(ctx, vWaitSec - 1); waitSecDraft = nv.toString() }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)) { Text("−1초", fontSize = ui.subSp, color = CW) }
+OutlinedTextField(
+value = waitSecDraft,
+onValueChange = { raw -> waitSecDraft = raw.filter { it.isDigit() }.take(2) },
+label = { Text("직접 입력 (초)") },
+singleLine = true,
+modifier = Modifier.weight(1f)
+)
+OutlinedButton(onClick = { val nv = setVoiceWaitSec(ctx, vWaitSec + 1); waitSecDraft = nv.toString() }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)) { Text("+1초", fontSize = ui.subSp, color = CA) }
+}
+}
+},
+confirmButton = {
+Button(onClick = {
+val parsed = waitSecDraft.toIntOrNull() ?: vWaitSec
+val nv = setVoiceWaitSec(ctx, parsed)
+waitSecDraft = nv.toString()
+aiMsg = "⏱️ 음성 대기 시간이 ${nv}초로 적용되었습니다."
+waitDlgOpen = false
+}) { Text("적용") }
+},
+dismissButton = { TextButton(onClick = { waitDlgOpen = false }) { Text("닫기") } }
 )
 }
 if (aiFolderDlgOpen) {

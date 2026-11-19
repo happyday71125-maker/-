@@ -154,7 +154,12 @@ fun listenDictStep(
                         uiP(wMs) { if (oneShotActive && ep == dictEpoch) listenDictStep(ep, ctx, onPart, onDone, onStatus, onFallback, onCmd, onPhrase, true) }
                         return
                     }
-                    JarvisRuntime.lastBeatMs = System.currentTimeMillis()
+            }
+                   override fun onResults(b: Bundle?) {
+                       if (!oneShotActive || ep != dictEpoch) return
+                       srFailStreak = 0
+                       dictHadPartial = false
+                       JarvisRuntime.lastBeatMs = System.currentTimeMillis()
                 val raw = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""
                 if (onPhrase != null) {
                     if (raw.isNotEmpty()) onPhrase(raw)

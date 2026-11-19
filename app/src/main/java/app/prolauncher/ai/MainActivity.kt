@@ -320,7 +320,7 @@ runCatching {
 android.app.TimePickerDialog(homeCtx, { _, h, m -> onPicked(h, m) }, initialH.coerceIn(0, 23), initialM.coerceIn(0, 59), false).show()
 }
 }
-SideEffect { JarvisRuntime.bindCallbacks(homeCtx, onNavTab, onQuickMemo, getN = { allNotes.ifEmpty { importantNotes } }); SupertonicTtsEngine.init(homeCtx) }; LaunchedEffect(JarvisRuntime.status) { if (!JarvisRuntime.status.isNullOrBlank()) aiFolded = false }; EmojiHelpDialog()
+SideEffect { JarvisRuntime.bindCallbacks(homeCtx, onNavTab, onQuickMemo, getN = { allNotes.ifEmpty { importantNotes } }); SupertonicTtsEngine.init(homeCtx); loadVoiceWaitSec(homeCtx) }; LaunchedEffect(JarvisRuntime.status) { if (!JarvisRuntime.status.isNullOrBlank()) aiFolded = false }; EmojiHelpDialog()
 LaunchedEffect(Unit) { var lastCpu = android.os.Process.getElapsedCpuTime(); var lastWall = android.os.SystemClock.elapsedRealtime(); val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1); while (true) { now = Date(); val curCpu = android.os.Process.getElapsedCpuTime(); val curWall = android.os.SystemClock.elapsedRealtime(); val dWall = (curWall - lastWall).coerceAtLeast(1L); val rawC = (((curCpu - lastCpu) * 100L) / (dWall * cores.coerceAtMost(4))).toInt(); val activeBoost = if (isAiBusy || streamActive || SupertonicTtsEngine.playing || SupertonicTtsEngine.dlBusy) 28 else 6; val cVal = (rawC + activeBoost).coerceIn(4, 98); lastCpu = curCpu; lastWall = curWall; val am = homeCtx.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager; val mi = android.app.ActivityManager.MemoryInfo(); am.getMemoryInfo(mi); val totG = mi.totalMem.toFloat() / 1073741824f; val usedG = (mi.totalMem - mi.availMem).toFloat() / 1073741824f; val rVal = (((mi.totalMem - mi.availMem) * 100L) / mi.totalMem.coerceAtLeast(1L)).toInt().coerceIn(5, 99); cpuPct = cVal; ramPct = rVal; ramTxt = String.format(Locale.US, "%.1f/%.1fG", usedG, totG); delay(2000L) } }
 val tf = remember { SimpleDateFormat("HH:mm", Locale.KOREA) }; val df = remember { SimpleDateFormat("M월 d일 EEEE", Locale.KOREA) }
 val align = when (cfg.textAlign) { "CENTER" -> Alignment.CenterHorizontally; "RIGHT" -> Alignment.End; else -> Alignment.Start }
@@ -516,34 +516,7 @@ Surface(
         val isAutoActive = briefCfg.enabled && activeSlotCnt > 0
         val nextBadge = ScheduleBriefingManager.nextSummaryBadge(briefCfg, now.time)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
-            ChipBtn(
-             text = if (JarvisRuntime.on) (if (JarvisController.sleeping) "🌙 자비스 대기중" else "🤖 자비스 ON") else "🤖 자비스 OFF",
-             sel = JarvisRuntime.on,
-             col = CG
-            ) {
-             if (JarvisRuntime.on) JarvisRuntime.stop(homeCtx)
-             else if (homeCtx.checkSelfPermission("android.permission.RECORD_AUDIO") == 0) {
-              aiFolded = false
-              JarvisRuntime.start(homeCtx) {
-               runCatching {
-                hFallbackLauncher.launch(
-                 android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                  .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                  .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
-                )
-               }
-              }
-             } else hMicP.launch("android.permission.RECORD_AUDIO")
-            }
-            ChipBtn(
-             text = if (wakeOnly) "👂 호출어:[${wakeWord}]" else "🗣️ 상시반응",
-             sel = wakeOnly,
-             col = CA
-            ) {
-             setWakeOnly(homeCtx, !wakeOnly)
-             JarvisRuntime.status = if (wakeOnly) "👂 호출어 전용 ON: [${wakeWord}]라고 부를 때 반응합니다." else "🗣️ 상시 반응 ON: 호출어 없이 바로 명령·질문할 수 있습니다."
-            }
-            if (ProJarvisAccessibilityService.inst == null) {
+          if (ProJarvisAccessibilityService.inst == null) {
              ChipBtn("♿ 접근성", false, CW) {
               runCatching { homeCtx.startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
               JarvisRuntime.status = "⚙️ [Pro Launcher 자비스 음성제어]를 켜면 뒤로가기·스크롤·화면잠금·캡처 음성 제어가 동작합니다."

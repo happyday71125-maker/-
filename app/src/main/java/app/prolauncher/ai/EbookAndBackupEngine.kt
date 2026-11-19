@@ -1010,3 +1010,109 @@ fun upsertBookDedicatedNote(notes: List<NoteItem>, bookTitle: String, fullBody: 
   listOf(created) + notes
  }
 }
+data class BookSearchHit(
+ val bookId: Long,
+ val bookTitle: String,
+ val category: String,
+ val charOffset: Int,
+ val matchEndOffset: Int,
+ val approxPct: Int,
+ val snippet: String,
+ val isTitleMatch: Boolean = false
+)
+object BookPassageSearcher {
+ fun findMatchRangesInText(fullText: String, rawQuery: String, maxHits: Int = 80): List<IntRange> {
+  val q = rawQuery.trim()
+  if (q.isEmpty() || fullText.isEmpty()) return emptyList()
+  val tokens = q.split(' ', CH_NL, CH_CR, CH_TAB).map { it.trim() }.filter { it.isNotEmpty() }
+  if (tokens.isEmpty()) return emptyList()
+  val out = ArrayList<IntRange>()
+  val n = fullText.length
+  var searchFrom = 0
+  while (searchFrom < n && out.size < maxHits) {
+   val firstIdx = fullText.indexOf(tokens[0], searchFrom, ignoreCase = true)
+   if (firstIdx < 0) break
+   var cur = firstIdx + tokens[0].length
+   var allOk = true
+   for (tIdx in 1 until tokens.size) {
+    var wsCount = 0
+    while (cur < n && (fullText[cur].isWhitespace() || fullText[cur] == CH_NL || fullText[cur] == CH_CR)) {
+     cur++
+     wsCount++
+    }
+    val tk = tokens[tIdx]
+    if (wsCount == 0 || wsCount > 16 || cur + tk.length > n || !fullText.regionMatches(cur, tk, 0, tk.length, ignoreCase = true)) {
+     allOk = false
+     break
+    }
+    cur += tk.length
+   }
+   if (allOk) {
+    out.add(firstIdx until cur)
+    searchFrom = (firstIdx + tokens[0].length).coerceAtLeast(firstIdx + 1)
+   } else {
+    searchFrom = firstIdx + 1
+   }
+  }
+  return out
+ }
+ fun buildContextSnippet(fullText: String, range: IntRange, radius: Int = 32): String {
+  if (fullText.isEmpty()) return ""
+  val s = (range.first - radius).coerceAtLeast(0)
+  val e = (range.last + 1 + radius).coerceAtMost(fullText.length)
+  val pre = fullText.substring(s, range.first).replace(CH_NL, ' ').replace(CH_CR, ' ').trimStart()
+  val mid = fullText.substring(range.first, (range.last + 1).coerceAtMost(fullText.length)).replace(CH_NL, ' ')
+  val post = fullText.substring((range.last + 1).coerceAtMost(fullText.length), e).replace(CH_NL, ' ').replace(CH_CR, ' ').trimEnd()
+  val prefixEllip = if (s > 0) "…" else ""
+  val suffixEllip = if (e < fullText.length) "…" else ""
+  return "$prefixEllip$pre 【$mid】 $post$suffixEllip"
+ }
+ fun searchBookBody(book: BookItem, fullText: String, rawQuery: String, maxHits: Int = 60): List<BookSearchHit> {
+  val ranges = findMatchRangesInText(fullText, rawQuery, maxHits)
+  if (ranges.isEmpty()) return emptyList()
+  val totalLen = fullText.length.coerceAtLeast(1)
+  return ranges.map { r ->
+   val pct = (((r.first + 1) * 100) / totalLen).coerceIn(1, 100)
+   BookSearchHit(
+    bookId = book.id,
+    bookTitle = book.title,
+    category = book.category.ifBlank { "기타" },
+    charOffset = r.first,
+    matchEndOffset = r.last + 1,
+    approxPct = pct,
+    snippet = buildContextSnippet(fullText, r),
+    isTitleMatch = false
+   )
+  }
+ }
+ fun searchAllBooks(books: List<BookItem>, rawQuery: String, smartReflow: Boolean = true, maxTotalHits: Int = 80): List<BookSearchHit> {
+  val q = rawQuery.trim()
+  if (q.isEmpty() || books.isEmpty()) return emptyList()
+  val out = ArrayList<BookSearchHit>()
+  for (b in books) {
+   if (out.size >= maxTotalHits) break
+   val isPoetry = b.category.contains("시")
+   val src = buildBookReflowSource(b.pages, smartReflow = smartReflow, preservePoetry = isPoetry)
+   val remain = (maxTotalHits - out.size).coerceAtLeast(1)
+   val bodyHits = searchBookBody(b, src.fullText, q, maxHits = minOf(15, remain))
+   if (bodyHits.isNotEmpty()) {
+    out.addAll(bodyHits)
+   } else if (KoreanChosungMatcher.matches(b.title + " " + b.author, q)) {
+    val preview = src.fullText.take(64).replace(CH_NL, ' ').trim()
+    out.add(
+     BookSearchHit(
+      bookId = b.id,
+      bookTitle = b.title,
+      category = b.category.ifBlank { "기타" },
+      charOffset = 0,
+      matchEndOffset = 0,
+      approxPct = (((b.currentPage + 1) * 100) / b.pages.size.coerceAtLeast(1)).coerceIn(1, 100),
+      snippet = "📕 제목·저자 일치 (${b.author}) · $preview…",
+      isTitleMatch = true
+     )
+    )
+   }
+  }
+  return out
+ }
+}

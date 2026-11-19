@@ -1068,6 +1068,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                 }
             }
         }
+}
         if (!shelf && act != null && readerMemoOpen && readerMemoMode == 2) {
          val rootBookMemo = remember(notes, act.title) { findBookDedicatedNoteBody(notes, act.title) }
          val rootSaveMemo: (String) -> Unit = { nb -> onUpdateNotes(upsertBookDedicatedNote(notes, act.title, nb)) }

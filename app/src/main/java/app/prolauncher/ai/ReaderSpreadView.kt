@@ -99,48 +99,56 @@ fun ReaderView(
     var folderDialogOpen by remember { mutableStateOf(false) }
     val allCats = remember(bCats, books) { (listOf("전체") + (bCats + books.map { it.category.ifBlank { "기타" } }).distinct()) }
     var bms by remember { mutableStateOf(loadBookmarks(ctx)) }
+    // Built-in Reader Memo & AI Floating states — exact MarkdownWriterStudio free-drag MutableState architecture!
     var readerMemoOpen by remember { mutableStateOf(false) }
 var readerMemoMode by remember { mutableStateOf(readerPrefs.getInt("reader_memo_last_mode", 1).coerceIn(1, 2)) }
 var memoSplitHoriz by remember { mutableStateOf(readerPrefs.getBoolean("reader_memo_split_horiz", false)) }
-    var memoFloatMin by remember { mutableStateOf(false) }
-var memoFloatX by remember { mutableStateOf(readerPrefs.getFloat("reader_memo_fx", 16f)) }
-var memoFloatY by remember { mutableStateOf(readerPrefs.getFloat("reader_memo_fy", 96f)) }
+var memoFloatMin by remember { mutableStateOf(false) }
+var memoFloatCompact by remember { mutableStateOf(readerPrefs.getBoolean("reader_memo_compact", false)) }
+val memoFloatXState = remember { mutableStateOf(readerPrefs.getFloat("reader_memo_fx", 16f)) }
+val memoFloatYState = remember { mutableStateOf(readerPrefs.getFloat("reader_memo_fy", 108f)) }
+var readerAiMode by remember { mutableStateOf(readerPrefs.getInt("reader_ai_last_mode", 1).coerceIn(1, 2)) }
+var aiFloatMin by remember { mutableStateOf(false) }
+var aiFloatCompact by remember { mutableStateOf(readerPrefs.getBoolean("reader_ai_compact", false)) }
+val aiFloatXState = remember { mutableStateOf(readerPrefs.getFloat("reader_ai_fx", 20f)) }
+val aiFloatYState = remember { mutableStateOf(readerPrefs.getFloat("reader_ai_fy", 240f)) }
+var livePgLabel by remember { mutableStateOf("1쪽") }
+var liveSpreadText by remember { mutableStateOf("") }
+var liveActiveExcerpt by remember { mutableStateOf("") }
+var commitExcerptHook by remember { mutableStateOf<() -> String>({ "" }) }
 var pendingMemoExcerpt by remember { mutableStateOf<String?>(null) }
 var pendingReaderExportFolder by remember { mutableStateOf<String?>(null) }
 var readerBackupMsg by remember { mutableStateOf<String?>(null) }
 fun setReaderMemoModePersist(mode: Int, horiz: Boolean = memoSplitHoriz) {
 val m = mode.coerceIn(1, 2)
-readerMemoMode = m
-memoSplitHoriz = horiz
+readerMemoMode = m; memoSplitHoriz = horiz; memoFloatMin = false
 readerPrefs.edit().putInt("reader_memo_last_mode", m).putBoolean("reader_memo_split_horiz", horiz).apply()
+}
+fun setReaderAiModePersist(mode: Int) {
+val m = mode.coerceIn(1, 2)
+readerAiMode = m; aiFloatMin = false
+readerPrefs.edit().putInt("reader_ai_last_mode", m).apply()
 }
 fun openReaderMemoInLastMode(appendExcerpt: String? = null) {
 if (!appendExcerpt.isNullOrBlank()) pendingMemoExcerpt = appendExcerpt
-memoFloatMin = false
-readerMemoOpen = true
-
+memoFloatMin = false; readerMemoOpen = true
 }
-
-    var bmOpen by remember { mutableStateOf(false) }
-    var selId by remember {
-        val savedId = readerPrefs.getLong("reader_last_book_id", -1L)
-        val initId = books.find { it.id == savedId }?.id ?: books.firstOrNull()?.id ?: 1001L
-        mutableStateOf(initId)
-    }
-    LaunchedEffect(selId) {
-        readerPrefs.edit().putLong("reader_last_book_id", selId).apply()
-    }
-    var pendingJump by remember { mutableStateOf<Pair<Long, Int>?>(null) }
-    var shelf by remember { mutableStateOf(false) }
-    var cfgOpen by remember { mutableStateOf(false) }
-    var rCfgTab by remember { mutableStateOf(0) }
-    var ttsBarMin by remember { mutableStateOf(false) }
-    var sliderOpen by remember { mutableStateOf(false) }
-    var topGlobalSearchOpen by remember { mutableStateOf(false) }
-    var topGlobalQuery by remember { mutableStateOf("") }
-    var topSearchAllBooks by remember { mutableStateOf(true) }
-    var inBookSearchOpen by remember { mutableStateOf(false) }
-    var inBookQuery by remember { mutableStateOf("") }
+var bmOpen by remember { mutableStateOf(false) }
+var selId by remember {
+val savedId = readerPrefs.getLong("reader_last_book_id", -1L)
+val initId = books.find { it.id == savedId }?.id ?: books.firstOrNull()?.id ?: 1001L
+mutableStateOf(initId)
+}
+LaunchedEffect(selId) { readerPrefs.edit().putLong("reader_last_book_id", selId).apply() }
+var pendingJump by remember { mutableStateOf<Pair<Long, Int>?>(null) }
+var shelf by remember { mutableStateOf(false) }
+var cfgOpen by remember { mutableStateOf(false) }
+var rCfgTab by remember { mutableStateOf(0) }
+var ttsBarMin by remember { mutableStateOf(false) }
+var sliderOpen by remember { mutableStateOf(false) }
+var searchOpen by remember { mutableStateOf(false) }
+var searchQuery by remember { mutableStateOf("") }
+var searchAllBooks by remember { mutableStateOf(false) }
     var sortMode by remember { mutableStateOf(readerPrefs.getString("reader_book_sort", "CUSTOM") ?: "CUSTOM") }
     var reorderMode by remember { mutableStateOf(false) }
     var bookQuery by remember { mutableStateOf("") }
@@ -243,52 +251,43 @@ readerMemoOpen = true
     val topTtsVisible = ReaderTtsRuntime.on && !ttsBarMin
     val topStatusVisible = !ReaderTtsRuntime.on && ReaderTtsRuntime.status?.startsWith("✅") == true
 
-    Column(Modifier.fillMaxSize().background(bg).padding(horizontal = ui.hPad, vertical = ui.vPad)) {
-        Row(Modifier.fillMaxWidth(), SB, CV) {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
-                TextButton(onClick = { shelf = !shelf; bmOpen = false }) { Text(if (shelf) "📖" else "📚${books.size}", fontSize = ui.bodySp, color = fg, fontWeight = FontWeight.Bold) }
-                OutlinedButton(onClick = { bmOpen = !bmOpen; if (bmOpen) shelf = false }) { Text("🔖${bms.size}", fontSize = ui.subSp, color = if (bmOpen) CA else fg) }
-                OutlinedButton(onClick = { twoPageMode = !twoPageMode; readerPrefs.edit().putBoolean("reader_two_page", twoPageMode).apply() }) { Text(if (twoPageMode) "📖2쪽" else "📄1쪽", fontSize = ui.subSp, color = if (twoPageMode) CG else fg) }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
-                OutlinedButton(
-                    onClick = { topGlobalSearchOpen = !topGlobalSearchOpen },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                ) { Text("🔎검색", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (topGlobalSearchOpen) CA else fg) }
-                OutlinedButton(
-                    onClick = { picker.launch(arrayOf("*/*")) },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                ) { Text("📂", fontSize = ui.subSp, color = fg) }
-                OutlinedButton(
-                    onClick = { cfgOpen = !cfgOpen },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                ) { Text("⚙️", fontSize = ui.subSp, color = if (cfgOpen) CG else fg) }
-                TextButton(onClick = onHome) { Text("🏠", fontSize = (ui.subSp.value + 1).sp, color = mut) }
-            }
-        }
-        if (topGlobalSearchOpen) {
-            ReaderTopGlobalSearchBar(
-                books = books,
-                activeBook = act,
-                smartReflow = smartReflowOn,
-                query = topGlobalQuery,
-                onQueryChange = { topGlobalQuery = it },
-                scopeAllBooks = topSearchAllBooks,
-                onScopeChange = { topSearchAllBooks = it },
-                ui = ui,
-                onSelectHit = { hit ->
-                    val qTrim = topGlobalQuery.trim()
-                    inBookQuery = qTrim
-                    selId = hit.bookId
-                    shelf = false
-                    bmOpen = false
-                    markBookRead(hit.bookId, hit.charOffset)
-                    pendingJump = hit.bookId to hit.charOffset
-                    topGlobalSearchOpen = false
-                },
-                onClose = { topGlobalSearchOpen = false }
-            )
-        }
+    BoxWithConstraints(Modifier.fillMaxSize().background(bg)) {
+val rootBoxW = this.maxWidth
+val rootBoxH = this.maxHeight
+val density = LocalDensity.current
+val rootMaxWPx = with(density) { rootBoxW.toPx() }
+val rootMaxHPx = with(density) { rootBoxH.toPx() }
+val memoFloatW = if (memoFloatMin) 190.dp else if (memoFloatCompact) (rootBoxW * 0.66f).coerceIn(210.dp, 290.dp) else (rootBoxW * 0.84f).coerceIn(245.dp, 360.dp)
+val memoFloatH = if (memoFloatMin) 44.dp else (rootBoxH * 0.46f).coerceIn(225.dp, 340.dp)
+val memoFloatWPx = with(density) { memoFloatW.toPx() }
+val memoFloatHPx = with(density) { memoFloatH.toPx() }
+val aiFloatW = if (aiFloatMin) 190.dp else if (aiFloatCompact) (rootBoxW * 0.66f).coerceIn(210.dp, 290.dp) else (rootBoxW * 0.84f).coerceIn(245.dp, 360.dp)
+val aiFloatH = if (aiFloatMin) 44.dp else (rootBoxH * 0.45f).coerceIn(220.dp, 335.dp)
+val aiFloatWPx = with(density) { aiFloatW.toPx() }
+val aiFloatHPx = with(density) { aiFloatH.toPx() }
+Column(Modifier.fillMaxSize().padding(horizontal = ui.hPad, vertical = ui.vPad)) {
+Row(Modifier.fillMaxWidth(), SB, CV) {
+Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
+TextButton(onClick = { shelf = !shelf; bmOpen = false }) { Text(if (shelf) "📖" else "📚${books.size}", fontSize = ui.bodySp, color = fg, fontWeight = FontWeight.Bold) }
+OutlinedButton(onClick = { bmOpen = !bmOpen; if (bmOpen) shelf = false }) { Text("🔖${bms.size}", fontSize = ui.subSp, color = if (bmOpen) CA else fg) }
+OutlinedButton(onClick = { twoPageMode = !twoPageMode; readerPrefs.edit().putBoolean("reader_two_page", twoPageMode).apply() }) { Text(if (twoPageMode) "📖2쪽" else "📄1쪽", fontSize = ui.subSp, color = if (twoPageMode) CG else fg) }
+}
+Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
+OutlinedButton(onClick = { if (!searchOpen) searchAllBooks = shelf || act == null; searchOpen = !searchOpen }, contentPadding = PaddingValues(horizontal = 9.dp, vertical = 6.dp)) { Text("🔎검색", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (searchOpen || searchQuery.isNotBlank()) CA else fg) }
+OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, contentPadding = PaddingValues(horizontal = 9.dp, vertical = 6.dp)) { Text("📂", fontSize = ui.subSp, color = fg) }
+OutlinedButton(onClick = { cfgOpen = !cfgOpen }, contentPadding = PaddingValues(horizontal = 9.dp, vertical = 6.dp)) { Text("⚙️${curPt}pt", fontSize = ui.subSp, color = if (cfgOpen) CG else fg) }
+TextButton(onClick = onHome) { Text("🏠", fontSize = (ui.subSp.value + 1).sp, color = mut) }
+}
+}
+if (searchOpen && (shelf || act == null)) {
+val actPreviewFull = remember(act?.id, act?.pages, smartReflowOn) { act?.let { buildBookReflowSource(it.pages, smartReflow = smartReflowOn, preservePoetry = it.category.contains("시")).fullText } ?: "" }
+ReaderUnifiedSearchBar(
+books = books, activeBook = act, activeBookFullText = actPreviewFull, activeBookPages = emptyList(), activeCurVIdx = 0, smartReflow = smartReflowOn,
+query = searchQuery, onQueryChange = { searchQuery = it }, scopeAllBooks = true, onScopeChange = { searchAllBooks = it }, ui = ui,
+onSelectHit = { hit -> selId = hit.bookId; shelf = false; bmOpen = false; searchAllBooks = false; markBookRead(hit.bookId, hit.charOffset); pendingJump = hit.bookId to hit.charOffset; searchOpen = false },
+onClose = { searchOpen = false }
+)
+}
         if (topTtsVisible) {
             SideEffect { SupertonicTtsEngine.init(ctx) }
             val bNow = books.find { it.id == ReaderTtsRuntime.bookId }
@@ -460,7 +459,7 @@ readerMemoOpen = true
                 onTogglePin = { toggleBookPin(it) }, onMoveOrder = { bid, actT -> moveBookOrder(bid, actT) },
                 onDeleteBook = { bid -> val nx = books.filterNot { it.id == bid }; onSaveBooks(nx); if (selId == bid) selId = nx.firstOrNull()?.id ?: 0L }, onBackupReader = { flt -> triggerReaderBackup(flt) }, onRestoreReader = { readerBackupImp.launch(arrayOf("*/*")) },
                 onOpenBookAtOffset = { bk, off, q ->
-                    inBookQuery = q
+                    searchQuery = q
                     selId = bk.id
                     shelf = false
                     markBookRead(bk.id, off)
@@ -503,7 +502,6 @@ readerMemoOpen = true
                     color = fg
                 )
             }
-            val density = LocalDensity.current
             val outerPad = if (twoPageMode) 12.dp else 14.dp
             val spineW = if (twoPageMode) 20.dp else 0.dp
             val fixedBookW = (conf.screenWidthDp.dp - ui.hPad * 2).coerceAtLeast(220.dp)
@@ -603,6 +601,12 @@ readerMemoOpen = true
                 }
                 return activeExcerpt
             }
+SideEffect {
+livePgLabel = pgLabel
+liveSpreadText = spreadText
+liveActiveExcerpt = activeExcerpt
+commitExcerptHook = ::commitDraftIfEditing
+}
             fun goToVPage(targetV: Int) {
                 if (vPages.isEmpty()) return
                 val aligned = if (twoPageMode) (targetV / 2) * 2 else targetV
@@ -633,37 +637,80 @@ readerMemoOpen = true
                     ReaderTtsRuntime.jumpToPage(ctx, newRaw, remRaw)
                 }
             }
-            val activeHighlightQ = if (inBookSearchOpen) inBookQuery else if (topGlobalSearchOpen && !topSearchAllBooks) topGlobalQuery else inBookQuery
             val isNightTheme = cfg.readerTheme == "NIGHT"
-            val leftPageDisplay = remember(leftPageTx, activeHighlightQ, isNightTheme) {
-                buildHighlightedBookPage(leftPageTx, activeHighlightQ, isNightTheme)
-            }
-            val rightPageDisplay = remember(rightPageTx, activeHighlightQ, isNightTheme) {
-                buildHighlightedBookPage(rightPageTx, activeHighlightQ, isNightTheme)
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), SB, CV) {
-                Row(verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.weight(1f)) {
-                    Surface(color = CG.copy(alpha = 0.18f), shape = RoundedCornerShape(6.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.65f)), modifier = Modifier.clickable { catBarOpen = !catBarOpen }) {
-                        Text("${act.category.ifBlank { "분류" }} ▾", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG, modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp))
-                    }
-                    Text(act.title, fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.SemiBold, color = mut, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
-                    ChipBtn("🔎", inBookSearchOpen || inBookQuery.isNotBlank(), CA) { inBookSearchOpen = !inBookSearchOpen }; ChipBtn("📝메모", readerMemoOpen, CG) { if (readerMemoOpen) readerMemoOpen = false else openReaderMemoInLastMode() }; ChipBtn(if (hasSel) "✂️선택됨" else "✂️", selectMode || hasSel, CA) { toggleScissorsButton() }
-                    ChipBtn(if (ttsHere) "⏹️" else "🔊", ttsHere, CG) {
-                        if (ttsHere) ReaderTtsRuntime.stop(ctx) else {
-                            val chosen = commitDraftIfEditing()
-                            val startEx = if (chosen.isNotBlank()) chosen else reflowSrc.fullText.substring(leftSlice.s.coerceIn(0, reflowSrc.fullText.length), reflowSrc.rawEndOf(curRawIdx).coerceIn(0, reflowSrc.fullText.length)).trim()
-                            ReaderTtsRuntime.start(ctx, act, curRawIdx, startEx)
-                        }
-                    }
-                    ChipBtn(if (isBm) "🔖★" else "🔖", isBm, CA) {
-                        val nx = if (isBm) bms.filterNot { it.bookId == act.id && (if (it.charOffset >= 0) it.charOffset in leftSlice.s..curSpreadEndChar else it.pageIndex == curRawIdx) }
-                        else listOf(BookmarkEntry(act.id, act.title, curRawIdx, aiTargetText.replace("\n", " ").take(45), leftSlice.s)) + bms
-                        bms = nx; saveBookmarks(ctx, nx)
-                    }
-                }
-            }
+val leftPageDisplay = remember(leftPageTx, searchQuery, isNightTheme) { buildHighlightedBookPage(leftPageTx, searchQuery, isNightTheme) }
+val rightPageDisplay = remember(rightPageTx, searchQuery, isNightTheme) { buildHighlightedBookPage(rightPageTx, searchQuery, isNightTheme) }
+if (searchOpen) {
+ReaderUnifiedSearchBar(
+books = books, activeBook = act, activeBookFullText = reflowSrc.fullText, activeBookPages = vPages, activeCurVIdx = vIdx, smartReflow = smartReflowOn,
+query = searchQuery, onQueryChange = { searchQuery = it }, scopeAllBooks = searchAllBooks, onScopeChange = { searchAllBooks = it }, ui = ui,
+onSelectHit = { hit ->
+if (hit.bookId == act.id) jumpToCharOffset(hit.charOffset)
+else { selId = hit.bookId; shelf = false; bmOpen = false; searchAllBooks = false; markBookRead(hit.bookId, hit.charOffset); pendingJump = hit.bookId to hit.charOffset }
+},
+onClose = { searchOpen = false }
+)
+}
+Row(Modifier.fillMaxWidth().padding(top = 4.dp), SB, CV) {
+Row(verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.weight(1f)) {
+Surface(color = CG.copy(alpha = 0.18f), shape = RoundedCornerShape(6.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.65f)), modifier = Modifier.clickable { catBarOpen = !catBarOpen }) {
+Text("📁${act.category.ifBlank { "분류" }} ▾", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG, modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp))
+}
+Text(act.title, fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.SemiBold, color = mut, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
+if (searchQuery.isNotBlank() && !searchOpen) { ChipBtn("🖍️지움", false, CM) { searchQuery = "" } }
+ChipBtn(if (isBm) "🔖★" else "🔖북마크", isBm, CA) {
+val nx = if (isBm) bms.filterNot { it.bookId == act.id && (if (it.charOffset >= 0) it.charOffset in leftSlice.s..curSpreadEndChar else it.pageIndex == curRawIdx) }
+else listOf(BookmarkEntry(act.id, act.title, curRawIdx, aiTargetText.replace(10.toChar(), ' ').take(45), leftSlice.s)) + bms
+bms = nx; saveBookmarks(ctx, nx)
+}
+}
+}
+Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
+Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = CV) {
+ChipBtn(if (hasSel) "🦙선택해설(${activeExcerpt.length}자)" else if (readerAiMode == 2) "🪟페이지해설" else "🦙페이지해설", readerAiOpen, CG) { commitDraftIfEditing(); aiFloatMin = false; readerAiOpen = !readerAiOpen }
+ChipBtn(if (selectMode) "✂️본문보기" else if (hasSel) "✂️구절편집" else "✂️구절선택", selectMode || hasSel, CA) { toggleScissorsButton() }
+ChipBtn(if (ttsHere) "⏹️낭독중지" else "🔊낭독", ttsHere, CG) {
+if (ttsHere) ReaderTtsRuntime.stop(ctx) else {
+val chosen = commitDraftIfEditing()
+val startEx = if (chosen.isNotBlank()) chosen else reflowSrc.fullText.substring(leftSlice.s.coerceIn(0, reflowSrc.fullText.length), reflowSrc.rawEndOf(curRawIdx).coerceIn(0, reflowSrc.fullText.length)).trim()
+ReaderTtsRuntime.start(ctx, act, curRawIdx, startEx)
+}
+}
+if (ReaderTtsRuntime.on && ttsBarMin) { ChipBtn("🔼낭독바", false, CG) { ttsBarMin = false } }
+ChipBtn(if (readerMemoOpen) "📝메모닫기" else if (readerMemoMode == 2) "🪟독서메모" else "◫독서메모", readerMemoOpen, CW) {
+if (readerMemoOpen) readerMemoOpen = false else openReaderMemoInLastMode()
+}
+}
+}
+if (readerAiOpen && readerAiMode == 1) {
+Surface(color = Color(0xF50E1525), shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, if (hasSel) CA.copy(alpha = 0.75f) else CG.copy(alpha = 0.6f)), modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp).height(212.dp)) {
+Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+Text(if (hasSel) "🎯${activeExcerpt.length}자" else "📖$pgLabel", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (hasSel) CA else CG)
+ChipBtn("📌요약", false, CG) { val t = commitDraftIfEditing(); askPageAi("핵심 내용을 3줄로 요약해줘.", act.title, pgLabel, t.ifBlank { spreadText }, t.isNotBlank()) }
+ChipBtn("💡해설", false, CA) { val t = commitDraftIfEditing(); askPageAi("맥락과 의미를 알기 쉽게 해설해줘.", act.title, pgLabel, t.ifBlank { spreadText }, t.isNotBlank()) }
+ChipBtn("✨핵심문장", false, CW) { val t = commitDraftIfEditing(); askPageAi("가장 인상 깊은 핵심 문장 1개를 뽑고 설명해줘.", act.title, pgLabel, t.ifBlank { spreadText }, t.isNotBlank()) }
+if (readerAiAns.isNotBlank() && !readerAiBusy) {
+ChipBtn("💾노트저장", false, CA) { onBookNote(act.title, "[$pgLabel${if (hasSel) " · 선택구절" else ""} AI 해설]" + 10.toChar() + readerAiAns.removeSuffix(" ▍").trim(), false); readerAiNotice = "✅ 『${act.title}』 독서노트에 이어서 저장됨!" }
+ChipBtn("🔈낭독", false, CG) { speakOneShot(ctx, readerAiAns.removeSuffix(" ▍")) }
+}
+ChipBtn("🪟플로팅", false, CA) { setReaderAiModePersist(2) }
+ChipBtn("✕", false, CM) { readerAiOpen = false }
+}
+readerAiNotice?.let { nt -> Text(nt, fontSize = ui.subSp, color = CG, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+Text(readerAiAns.ifBlank { if (hasSel) "🎯 선택한 구절(${activeExcerpt.length}자) 대기 중입니다. 위 [📌요약 / 💡해설 / ✨핵심문장] 버튼을 누르거나 아래에 질문을 입력해 [↑]를 누르면 AI가 시작됩니다." else "📖 자동 실행이 꺼져 있습니다. 위 [📌요약 / 💡해설 / ✨핵심문장] 버튼을 누르거나 아래에 질문을 입력하면 그때 AI가 진행됩니다." }, fontSize = ui.bodySp, color = CW)
+}
+Row(Modifier.fillMaxWidth(), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+OutlinedTextField(value = readerAiQ, onValueChange = { readerAiQ = it }, placeholder = { Text(if (hasSel) "선택한 구절 질문 입력 후 ↑..." else "페이지 질문 입력 후 ↑...", fontSize = ui.subSp) }, singleLine = true, modifier = Modifier.weight(1f))
+if (readerAiBusy) { Button(onClick = { activeGenId++; readerAiJob?.cancel(); if (ProLlamaJni.ready) runCatching { ProLlamaJni.abortGeneration() }; readerAiBusy = false; readerAiAns = readerAiAns.removeSuffix(" ▍") }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))) { Text("⏹️", fontSize = ui.subSp) } }
+else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t = commitDraftIfEditing(); readerAiQ = ""; askPageAi(q, act.title, pgLabel, t.ifBlank { spreadText }, t.isNotBlank()) } }) { Text("↑", fontSize = ui.subSp) } }
+}
+}
+}
+}
             if (catBarOpen) {
                 Surface(color = Color(0xFF111927), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.5f)), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                     Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {

@@ -70,8 +70,7 @@ fun syncDictationBuffer(ctx: Context, manualText: String) = uiP(0L) {
     }
 }
 
-onPhrase: \(\(String\) -> Unit\)\? = null
-\): Unit = uiP\(0L\) \{(
+fun listenDictStep(
     ep: Int,
     ctx: Context,
     onPart: (String) -> Unit,
@@ -79,7 +78,8 @@ onPhrase: \(\(String\) -> Unit\)\? = null
     onStatus: (String) -> Unit,
     onFallback: () -> Unit,
     onCmd: (String, String) -> Unit,
-    onPhrase: ((String) -> Unit)? = null, reuseExisting: Boolean = false
+    onPhrase: ((String) -> Unit)? = null, 
+    reuseExisting: Boolean = false
 ): Unit = uiP(0L) {
     if (!oneShotActive || ep != dictEpoch) return@uiP
     if (isTtsBusyNow() || (onPhrase != null && (isAiBusy || streamActive))) {

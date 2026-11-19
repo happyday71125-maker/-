@@ -166,7 +166,7 @@ sortMode: String, onSetSort: (String) -> Unit, reorderMode: Boolean, onToggleReo
 bookQuery: String, onBookQuery: (String) -> Unit, bookMeta: Map<Long, BookSortMeta>, bms: List<BookmarkEntry>,
 fg: Color, mut: Color, onSaveBooks: (List<BookItem>) -> Unit, onOpenBook: (BookItem, Boolean) -> Unit,
 onTogglePin: (Long) -> Unit, onMoveOrder: (Long, Int) -> Unit, onDeleteBook: (Long) -> Unit,
- onBackupReader: (String?) -> Unit = {}, onRestoreReader: () -> Unit = {} 
+ onBackupReader: (String?) -> Unit = {}, onRestoreReader: () -> Unit = {} , onOpenBookAtOffset: (BookItem, Int, String) -> Unit = { bk, _, _ -> onOpenBook(bk, false) }
 ) {
 var editId by remember { mutableStateOf<Long?>(null) }
 var editT by remember { mutableStateOf("") }
@@ -188,13 +188,26 @@ ChipBtn(lb, sortMode == k, CA) { onSetSort(k) }
 }
 ChipBtn(if (reorderMode) "✅순서편집 완료" else "↕️순서직접수정", reorderMode, CG) { onToggleReorder() }
 }
-OutlinedTextField(value = bookQuery, onValueChange = { onBookQuery(it) }, placeholder = { Text("🔎 도서 제목·저자·초성 검색...", fontSize = ui.subSp) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+OutlinedTextField(value = bookQuery, onValueChange = { onBookQuery(it) }, placeholder = { Text("🔎 도서 제목·저자·초성 또는 책 속 문장 검색...", fontSize = ui.subSp) }, singleLine = true, modifier = Modifier.fillMaxWidth())
 }
 }
-val filteredBooks = remember(books, selCat, sortMode, bookQuery, bookMeta) {
+val shelfPassageHits = remember(books, selCat, bookQuery) {
+val q = bookQuery.trim()
+if (q.length < 2) emptyMap()
+else {
+val byCat = if (selCat == "전체") books else books.filter { (it.category.ifBlank { "기타" }) == selCat }
+val mp = HashMap<Long, BookSearchHit>()
+byCat.forEach { bk ->
+val src = buildBookReflowSource(bk.pages, smartReflow = true, preservePoetry = bk.category.contains("시"))
+BookPassageSearcher.searchBookBody(bk, src.fullText, q, maxHits = 1).firstOrNull()?.let { mp[bk.id] = it }
+}
+mp
+}
+}
+val filteredBooks = remember(books, selCat, sortMode, bookQuery, bookMeta, shelfPassageHits) {
 val ordMap = books.mapIndexed { idx, bk -> bk.id to idx }.toMap()
 val byCat = if (selCat == "전체") books else books.filter { (it.category.ifBlank { "기타" }) == selCat }
-val byQ = if (bookQuery.isBlank()) byCat else byCat.filter { KoreanChosungMatcher.matches(it.title + " " + it.author, bookQuery) }
+val byQ = if (bookQuery.isBlank()) byCat else byCat.filter { KoreanChosungMatcher.matches(it.title + " " + it.author, bookQuery) || shelfPassageHits.containsKey(it.id) }
 val baseCmp = Comparator<BookItem> { a, b ->
 val ma = bookMeta[a.id] ?: BookSortMeta(sortOrder = ordMap[a.id] ?: 0)
 val mb = bookMeta[b.id] ?: BookSortMeta(sortOrder = ordMap[b.id] ?: 0)
@@ -229,7 +242,11 @@ Button(onClick = { if (editT.isNotBlank()) { onSaveBooks(books.map { if (it.id =
 }
 }
 } else {
-Column(Modifier.padding(ui.cardPad).fillMaxWidth().clickable { onOpenBook(b, false) }, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+val bodyHit = shelfPassageHits[b.id]
+Column(Modifier.padding(ui.cardPad).fillMaxWidth().clickable {
+if (bodyHit != null && bookQuery.isNotBlank()) onOpenBookAtOffset(b, bodyHit.charOffset, bookQuery.trim())
+else onOpenBook(b, false)
+}, verticalArrangement = Arrangement.spacedBy(5.dp)) {
 Row(Modifier.fillMaxWidth(), SB, CV) {
 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
 Row(verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -240,6 +257,9 @@ Text(b.title, fontSize = ui.bodySp, fontWeight = FontWeight.Bold, color = fg, ma
 }
 val bmStr = if (bmCnt > 0) " · 🔖 ${bmCnt}개" else ""
 Text("${b.author} · 진도 ${pct}%$bmStr", fontSize = ui.subSp, color = mut)
+if (bodyHit != null && bookQuery.isNotBlank()) {
+Text("🎯 본문 위치(약 ${bodyHit.approxPct}%): ${bodyHit.snippet}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CG, maxLines = 2, overflow = TextOverflow.Ellipsis)
+}
 }
 Row(verticalAlignment = CV) {
 TextButton(onClick = { onTogglePin(b.id) }) { Text(if (isPin) "📌" else "📍", fontSize = ui.subSp, color = if (isPin) CA else mut) }

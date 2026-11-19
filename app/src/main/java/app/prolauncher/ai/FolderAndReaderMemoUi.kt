@@ -238,35 +238,33 @@ fun ReaderMemoWorkspaceCard(
  }
 }
 @Composable
-fun ReaderFloatingMemoWindow(
- ctx: Context,
- ui: ResponsiveUi,
+fun ReaderDraggableFloatBox(
+ title: String,
  maxWPx: Float,
  maxHPx: Float,
  floatW: Dp,
  floatH: Dp,
  floatWPx: Float,
  floatHPx: Float,
- floatX: Float,
- floatY: Float,
+ floatXState: MutableState<Float>,
+ floatYState: MutableState<Float>,
  floatMin: Boolean,
- onMove: (Float, Float) -> Unit,
+ compactWidth: Boolean,
+ onToggleCompactWidth: () -> Unit,
+ onPersistPos: (Float, Float) -> Unit,
  onToggleMin: () -> Unit,
- onSwitchToSplit: (Boolean) -> Unit,
  onClose: () -> Unit,
- bookId: Long,
- bookTitle: String,
- pgLabel: String,
- currentExcerptOrPage: String,
- initialBody: String,
- pendingAppendExcerpt: String?,
- onConsumedPendingExcerpt: () -> Unit,
- onSaveBody: (String) -> Unit
+ extraHeaderActions: @Composable RowScope.() -> Unit = {},
+ body: @Composable () -> Unit
 ) {
- val clampedX = floatX.coerceIn(4f, (maxWPx - floatWPx - 4f).coerceAtLeast(4f))
- val clampedY = floatY.coerceIn(8f, (maxHPx - floatHPx - 8f).coerceAtLeast(8f))
+ var fx by floatXState
+ var fy by floatYState
+ val maxX = (maxWPx - floatWPx - 4f).coerceAtLeast(4f)
+ val maxY = (maxHPx - floatHPx - 8f).coerceAtLeast(8f)
+ val clampedX = fx.coerceIn(4f, maxX)
+ val clampedY = fy.coerceIn(8f, maxY)
  Surface(
-  color = Color(0xF70E1628),
+  color = Color(0xF50E1628),
   shape = RoundedCornerShape(14.dp),
   shadowElevation = 12.dp,
   border = BorderStroke(1.2.dp, CA.copy(alpha = 0.88f)),
@@ -281,48 +279,104 @@ fun ReaderFloatingMemoWindow(
      .fillMaxWidth()
      .background(Color(0xFF17253E))
      .pointerInput(maxWPx, maxHPx, floatWPx, floatHPx) {
-      detectDragGestures { change, dragAmount ->
+      detectDragGestures(
+       onDragEnd = { onPersistPos(fx, fy) },
+       onDragCancel = { onPersistPos(fx, fy) }
+      ) { change, dragAmount ->
        change.consume()
-       val nx = (floatX + dragAmount.x).coerceIn(4f, (maxWPx - floatWPx - 4f).coerceAtLeast(4f))
-       val ny = (floatY + dragAmount.y).coerceIn(8f, (maxHPx - floatHPx - 8f).coerceAtLeast(8f))
-       onMove(nx, ny)
+       val mx = (maxWPx - floatWPx - 4f).coerceAtLeast(4f)
+       val my = (maxHPx - floatHPx - 8f).coerceAtLeast(8f)
+       fx = (fx.coerceIn(4f, mx) + dragAmount.x).coerceIn(4f, mx)
+       fy = (fy.coerceIn(8f, my) + dragAmount.y).coerceIn(8f, my)
       }
      }
-     .padding(horizontal = 10.dp, vertical = 7.dp),
+     .padding(horizontal = 10.dp, vertical = 8.dp),
     SB,
     CV
    ) {
-    Text("✥ 이동 · 📝 독서메모", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CA, maxLines = 1)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
+    Text(title, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CA, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+    Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = CV) {
      if (!floatMin) {
-      Text("⬒상하", fontSize = 11.sp, color = CG, modifier = Modifier.clickable { onSwitchToSplit(false) })
-      Text("◫좌우", fontSize = 11.sp, color = CW, modifier = Modifier.clickable { onSwitchToSplit(true) })
+      Text(if (compactWidth) "↔넓게" else "↔좁게", fontSize = 11.sp, color = CA, modifier = Modifier.clickable { onToggleCompactWidth() })
+      extraHeaderActions()
      }
      Text(if (floatMin) "🔼펼침" else "🗕접기", fontSize = 11.sp, color = CW, modifier = Modifier.clickable { onToggleMin() })
      Text("✕", fontSize = 11.sp, color = Color(0xFFF87171), modifier = Modifier.clickable { onClose() })
     }
    }
    if (!floatMin) {
-    ReaderMemoWorkspaceCard(
-     ctx = ctx,
-     ui = ui,
-     bookId = bookId,
-     bookTitle = bookTitle,
-     pgLabel = pgLabel,
-     currentExcerptOrPage = currentExcerptOrPage,
-     initialBody = initialBody,
-     pendingAppendExcerpt = pendingAppendExcerpt,
-     onConsumedPendingExcerpt = onConsumedPendingExcerpt,
-     isFloating = true,
-     splitHoriz = false,
-     onSelectSplitMode = onSwitchToSplit,
-     onSelectFloatingMode = {},
-     onSaveBody = onSaveBody,
-     onClose = onClose,
-     modifier = Modifier.fillMaxSize()
-    )
+    body()
    }
   }
+ }
+}
+@Composable
+fun ReaderFloatingMemoWindow(
+ ctx: Context,
+ ui: ResponsiveUi,
+ maxWPx: Float,
+ maxHPx: Float,
+ floatW: Dp,
+ floatH: Dp,
+ floatWPx: Float,
+ floatHPx: Float,
+ floatXState: MutableState<Float>,
+ floatYState: MutableState<Float>,
+ floatMin: Boolean,
+ compactWidth: Boolean,
+ onToggleCompactWidth: () -> Unit,
+ onPersistPos: (Float, Float) -> Unit,
+ onToggleMin: () -> Unit,
+ onSwitchToSplit: (Boolean) -> Unit,
+ onClose: () -> Unit,
+ bookId: Long,
+ bookTitle: String,
+ pgLabel: String,
+ currentExcerptOrPage: String,
+ initialBody: String,
+ pendingAppendExcerpt: String?,
+ onConsumedPendingExcerpt: () -> Unit,
+ onSaveBody: (String) -> Unit
+) {
+ ReaderDraggableFloatBox(
+  title = "✥ 이동 · 📝 독서메모",
+  maxWPx = maxWPx,
+  maxHPx = maxHPx,
+  floatW = floatW,
+  floatH = floatH,
+  floatWPx = floatWPx,
+  floatHPx = floatHPx,
+  floatXState = floatXState,
+  floatYState = floatYState,
+  floatMin = floatMin,
+  compactWidth = compactWidth,
+  onToggleCompactWidth = onToggleCompactWidth,
+  onPersistPos = onPersistPos,
+  onToggleMin = onToggleMin,
+  onClose = onClose,
+  extraHeaderActions = {
+   Text("⬒상하", fontSize = 11.sp, color = CG, modifier = Modifier.clickable { onSwitchToSplit(false) })
+   Text("◫좌우", fontSize = 11.sp, color = CW, modifier = Modifier.clickable { onSwitchToSplit(true) })
+  }
+ ) {
+  ReaderMemoWorkspaceCard(
+   ctx = ctx,
+   ui = ui,
+   bookId = bookId,
+   bookTitle = bookTitle,
+   pgLabel = pgLabel,
+   currentExcerptOrPage = currentExcerptOrPage,
+   initialBody = initialBody,
+   pendingAppendExcerpt = pendingAppendExcerpt,
+   onConsumedPendingExcerpt = onConsumedPendingExcerpt,
+   isFloating = true,
+   splitHoriz = false,
+   onSelectSplitMode = onSwitchToSplit,
+   onSelectFloatingMode = {},
+   onSaveBody = onSaveBody,
+   onClose = onClose,
+   modifier = Modifier.fillMaxSize()
+  )
  }
 }
 @Composable

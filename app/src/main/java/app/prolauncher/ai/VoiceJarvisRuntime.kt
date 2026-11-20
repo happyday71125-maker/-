@@ -370,7 +370,10 @@ object JarvisRuntime {
   val prevH = hist
   scope.launch {
    val cc = loadAiCfg(ctx)
-   val rag = if (cc.ragOn) withContext(Dispatchers.IO) { buildRagContextSmart(qClean, cc, notesCb(), booksCb(), SmartMemoClassifier.loadMemoCats(ctx)) } else ""
+   val useMemRag = cc.ragOn || wantsMemoRagLookup(qClean)
+   val memR = if (useMemRag) withContext(Dispatchers.IO) { buildRagContextSmart(qClean, cc, notesCb(), booksCb(), SmartMemoClassifier.loadMemoCats(ctx)) } else ""
+      val webR = if (ddgWebOn) fetchDuckDuckGoContext(qClean) else ""
+      val rag = listOf(memR, webR).filter { it.isNotBlank() }.joinToString(10.toChar().toString() + 10.toChar().toString())
    val ans = withContext(Dispatchers.IO) {
     callLlmHttp(cc.sysPrompt, rag, prevH, qClean, cc.apiUrl, cc.apiModel, cc.apiKey, { lv ->
      if (g == activeGenId && lv.isNotBlank()) uiP(0L) { status = "🤖 $lv ▍"; if (ttsOn) feedStreamTts(ctx, lv, false) }

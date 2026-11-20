@@ -179,7 +179,7 @@ suspend fun fetchDuckDuckGoContext(query: String): String = withContext(Dispatch
  }
  val out = sb.toString().trim()
  if (out.isEmpty()) "" else "[DuckDuckGo 실시간 웹 검색 결과]" + 10.toChar() + out
-} }
+ }
 fun matchWakePhrase(raw: String, customW: String = wakeWord): Pair<Boolean, String> { val t = raw.trim(); if (t.isEmpty()) return false to ""; val cw = customW.trim().ifEmpty { "자비스" }; val cands = linkedSetOf(cw, "헤이 $cw", "${cw}야", "${cw}아", "자비스", "헤이 자비스", "자비스야", "헤이 구글", "오케이 구글", "비서야", "프로야").filter { it.isNotBlank() }.sortedByDescending { it.length }; val nsT = t.replace(" ", ""); for (w in cands) { val idx = t.indexOf(w, ignoreCase = true); if (idx >= 0 && idx <= 8) { val rem = (t.substring(0, idx) + " " + t.substring(idx + w.length)).replace(Regex("^[,.!?~ ]+"), "").trim(); return true to rem }; val nsW = w.replace(" ", ""); if (nsW.length >= 2 && nsT.startsWith(nsW, ignoreCase = true)) { var consumed = 0; var rIdx = 0; while (rIdx < t.length && consumed < nsW.length) { if (t[rIdx] != ' ') consumed++; rIdx++ }; val rem = t.substring(rIdx).replace(Regex("^[,.!?~ ]+"), "").trim(); return true to rem } }; return false to t }
 fun isGgufFile(f: java.io.File): Boolean = f.isFile && f.length() > 1048576L && (f.name.endsWith(".gguf", true) || runCatching { val b = ByteArray(4); java.io.FileInputStream(f).use { it.read(b) == 4 && String(b, Charsets.US_ASCII) == "GGUF" } }.getOrDefault(false))
 fun isEmbedModelName(nm: String): Boolean = nm.lowercase().let { it.contains("embed") || it.contains("bge") || it.contains("e5-") || it.contains("nomic") || it.contains("minilm") }

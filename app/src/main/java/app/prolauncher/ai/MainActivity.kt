@@ -470,7 +470,7 @@ Surface(
                 }
             ) {
                 Text(
-                    "⚡질문",
+                    "⚡",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (hasTxt) Color(0xFF07090E) else CA,
@@ -481,7 +481,7 @@ Surface(
     }
     if (JarvisRuntime.input.isNotBlank()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
-            ChipBtn("⚡ 즉석 AI 답변", true, CA) {
+            ChipBtn("⚡", true, CA) {
                 val t = JarvisRuntime.input.trim()
                 if (t.isNotEmpty()) {
                     JarvisRuntime.input = ""
@@ -490,7 +490,7 @@ Surface(
                     JarvisRuntime.processUtterance(homeCtx, t, false)
                 }
             }
-            ChipBtn("📝 메모로 저장", false, CG) {
+            ChipBtn("📝", false, CG) {
                 val t = JarvisRuntime.input.trim()
                 if (t.isNotEmpty()) {
                     JarvisRuntime.status = onQuickMemo(t)
@@ -498,7 +498,7 @@ Surface(
                     syncDictationBuffer(homeCtx, "")
                 }
             }
-            ChipBtn("🦙 AI 탭에서 대화", false, CW) {
+            ChipBtn("🦙", false, CW) {
                 val t = JarvisRuntime.input.trim()
                 if (t.isNotEmpty()) {
                     JarvisRuntime.input = ""
@@ -506,7 +506,7 @@ Surface(
                     onQuickAi(t)
                 }
             }
-            ChipBtn("✕ 비우기", false, CM) {
+            ChipBtn("✕", false, CM) {
                 JarvisRuntime.input = ""
                 syncDictationBuffer(homeCtx, "")
             }
@@ -517,13 +517,13 @@ Surface(
         val nextBadge = ScheduleBriefingManager.nextSummaryBadge(briefCfg, now.time)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
           if (ProJarvisAccessibilityService.inst == null) {
-             ChipBtn("♿ 접근성", false, CW) {
+             ChipBtn("♿", false, CW) {
               runCatching { homeCtx.startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
               JarvisRuntime.status = "⚙️ [Pro Launcher 자비스 음성제어]를 켜면 뒤로가기·스크롤·화면잠금·캡처 음성 제어가 동작합니다."
              }
             }
             ChipBtn(
-             text = if (isAutoActive) "⏰ 자동브리핑 ON · $nextBadge" else "🔕 자동브리핑 OFF",
+             text = if (isAutoActive) "⏰ $nextBadge" else "🔕",
                 sel = isAutoActive,
                 col = if (isAutoActive) CG else CM
             ) {
@@ -545,19 +545,19 @@ Surface(
                 }
             }
             ChipBtn(
-                text = if (briefCfg.slots.isEmpty()) "🕒 시간 설정" else "🕒 시간 설정 (${briefCfg.slots.size}개)",
+                text = if (briefCfg.slots.isEmpty()) "🕒" else "🕒${briefCfg.slots.size}",
                 sel = briefPanelOpen,
                 col = CA
             ) {
                 briefPanelOpen = !briefPanelOpen
             }
             if (briefingSpeakingNow || SupertonicTtsEngine.playing) {
-                ChipBtn("⏹️ 중지", false, Color(0xFFF87171)) {
+                ChipBtn("⏹️", false, Color(0xFFF87171)) {
                     ScheduleBriefingManager.stopBriefingPlayback(homeCtx)
                 }
             }
             if (JarvisRuntime.status != null) {
-                ChipBtn(if (aiFolded) "🔼 펼침" else "🔽 접기", false, CM) { aiFolded = !aiFolded }
+                ChipBtn(if (aiFolded) "🔼" else "🔽", false, CM) { aiFolded = !aiFolded }
                 ChipBtn("✕", false, CM) { JarvisRuntime.status = null; ScheduleBriefingManager.stopBriefingPlayback(homeCtx) }
             }
         }
@@ -744,7 +744,7 @@ homeAppFolders.forEach { hf ->
 val cnt = if (allApps.isEmpty()) hf.packages.size else allApps.count { it.packageName in hf.packages }
 ChipBtn("📁${hf.name}($cnt)", selHomeFolderId == hf.id, CG) { selHomeFolderId = hf.id }
 }
-ChipBtn("➕폴더·백업", homeFolderDlgOpen, CW) { homeFolderDlgOpen = true }
+ChipBtn("➕", homeFolderDlgOpen, CW) { homeFolderDlgOpen = true }
 }
     val vGap = when (appGapMode) { 0 -> 10.dp; 1 -> 14.dp; else -> 8.dp }
 val hGap = when (appGapMode) { 0 -> 14.dp; 1 -> 24.dp; else -> 16.dp }

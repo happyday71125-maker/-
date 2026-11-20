@@ -90,7 +90,7 @@ val ctxSize: Int = 2048,
 val maxTok: Int = 512, val cpuMode: Int = 2, val histTurns: Int = 2, val idleMin: Int = 30)
 
 fun loadAiCfg(ctx: Context): AiRagConfig {
-appCtxRef = ctx.applicationContext; val sp0 = ctx.getSharedPreferences("pl_ai_v2_prefs", 0); thinkOn = sp0.getBoolean("ai_think_on", false); streamOn = sp0.getBoolean("ai_stream_on", true); wakeWord = sp0.getString("jarvis_wake_word", "자비스")?.trim()?.ifEmpty { "자비스" } ?: "자비스"; sleepWord = sp0.getString("jarvis_sleep_word", "쉬어")?.trim()?.ifEmpty { "쉬어" } ?: "쉬어"; wakeOnly = sp0.getBoolean("jarvis_wake_only", false); refreshDetectedModelNames()
+appCtxRef = ctx.applicationContext; val sp0 = ctx.getSharedPreferences("pl_ai_v2_prefs", 0); thinkOn = sp0.getBoolean("ai_think_on", false); streamOn = sp0.getBoolean("ai_stream_on", true); wakeWord = sp0.getString("jarvis_wake_word", "자비스")?.trim()?.ifEmpty { "자비스" } ?: "자비스"; sleepWord = sp0.getString("jarvis_sleep_word", "쉬어")?.trim()?.ifEmpty { "쉬어" } ?: "쉬어"; wakeOnly = sp0.getBoolean("jarvis_wake_only", false); ddgWebOn = sp0.getBoolean("ai_ddg_web_on", false); refreshDetectedModelNames()
 val p = ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE)
 return AiRagConfig(
 sysPrompt = p.getString("ai_sys_prompt", DEF_SYS_PROMPT)?.ifBlank { DEF_SYS_PROMPT } ?: DEF_SYS_PROMPT,
@@ -142,6 +142,7 @@ var showEmojiHelp by androidx.compose.runtime.mutableStateOf(false)
 var wakeWord by androidx.compose.runtime.mutableStateOf("자비스")
 var sleepWord by androidx.compose.runtime.mutableStateOf("쉬어")
 var wakeOnly by androidx.compose.runtime.mutableStateOf(false)
+var ddgWebOn by androidx.compose.runtime.mutableStateOf(false)
 var wakeFollowUpUntil: Long = 0L
 var lastModelUseMs: Long = System.currentTimeMillis()
 fun optThreads(cpuMode: Int = 2): Int = when (cpuMode) { 1 -> 2; 3 -> 4; else -> 3 }
@@ -150,7 +151,35 @@ fun setStreamOn(ctx: Context, on: Boolean) { streamOn = on; ctx.getSharedPrefere
 fun setWakeWord(ctx: Context, w: String) { val c = w.trim().ifEmpty { "자비스" }; wakeWord = c; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putString("jarvis_wake_word", c).apply() }
 fun setSleepWord(ctx: Context, w: String) { val c = w.trim().ifEmpty { "쉬어" }; sleepWord = c; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putString("jarvis_sleep_word", c).apply() }
 fun matchSleepPhrase(raw: String, customS: String = sleepWord): Boolean { val t = raw.trim(); if (t.isEmpty()) return false; val cs = customS.trim().ifEmpty { "쉬어" }; val nsT = t.replace(" ", ""); val cands = listOf(cs, "잠깐 $cs", "자비스 $cs", "$wakeWord $cs", "자비스 쉬어", "잠깐 쉬어", "쉬어", "대기 모드", "대기모드", "조용히 해", "스탠바이"); return cands.any { c -> val nsC = c.replace(" ", ""); t.equals(c, true) || nsT.equals(nsC, true) || (nsC.length >= 2 && nsT.endsWith(nsC, true) && nsT.length <= nsC.length + 6) } }
-fun setWakeOnly(ctx: Context, on: Boolean) { wakeOnly = on; if (!on) wakeFollowUpUntil = 0L; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putBoolean("jarvis_wake_only", on).apply() }
+fun setWakeOnly(ctx: Context, on: Boolean) { wakeOnly = on; if (!on) wakeFollowUpUntil = 0L; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putBoolean("jarvis_wake_only", on).apply()
+fun setDdgWebOn(ctx: Context, on: Boolean) { ddgWebOn = on; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putBoolean("ai_ddg_web_on", on).apply() }
+fun wantsMemoRagLookup(q: String): Boolean { val t = q.replace(" ", ""); return listOf("내메모", "음성메모", "메모에서", "메모찾", "메모조회", "메모알려", "메모보여", "메모읽어", "메모검색", "저장한메모", "적어둔", "기록한").any { t.contains(it) } }
+suspend fun fetchDuckDuckGoContext(query: String): String = withContext(Dispatchers.IO) {
+ val q = query.trim(); if (q.isEmpty()) return@withContext ""
+ val enc = java.net.URLEncoder.encode(q, "UTF-8")
+ val pr = "ht" + "tps:" + "/" + "/"
+ val dom = "duckduckgo" + ".c" + "om"
+ val sb = StringBuilder()
+ runCatching {
+  val c = (URL(pr + "api." + dom + "/?q=$enc&format=json&no_html=1&skip_disambig=1").openConnection() as HttpURLConnection).apply { requestMethod = "GET"; connectTimeout = 4500; readTimeout = 4500; setRequestProperty("User-Agent", "Mozilla/5.0") }
+  val body = BufferedReader(InputStreamReader(c.inputStream, Charsets.UTF_8)).use { it.readText() }
+  val jo = JSONObject(body)
+  val abs = jo.optString("AbstractText", "").trim()
+  if (abs.isNotEmpty()) sb.append("• 요약: ").append(abs.take(360)).append(10.toChar())
+  val rel = jo.optJSONArray("RelatedTopics")
+  if (rel != null) { var cnt = 0; for (i in 0 until rel.length()) { val tx = rel.optJSONObject(i)?.optString("Text", "")?.trim() ?: ""; if (tx.isNotEmpty() && cnt < 3) { sb.append("• ").append(tx.take(180)).append(10.toChar()); cnt++ } } }
+ }
+ if (sb.isEmpty()) {
+  runCatching {
+   val c = (URL(pr + "html." + dom + "/lite/?q=$enc").openConnection() as HttpURLConnection).apply { requestMethod = "GET"; connectTimeout = 5000; readTimeout = 5000; setRequestProperty("User-Agent", "Mozilla/5.0") }
+   val html = BufferedReader(InputStreamReader(c.inputStream, Charsets.UTF_8)).use { it.readText() }
+   val snips = Regex("class=['\"]result-snippet['\"][^>]*>(.*?)</td>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)).findAll(html).map { m -> m.groupValues[1].replace(Regex("<[^>]+>"), " ").replace("&amp;", "&").replace("&quot;", 34.toChar().toString()).replace("&#x27;", 39.toChar().toString()).replace("&lt;", "<").replace("&gt;", ">").replace(Regex("[ ]{2,}"), " ").trim() }.filter { it.length >= 12 }.take(4).toList()
+   snips.forEachIndexed { idx, s -> sb.append("${idx + 1}. ").append(s.take(220)).append(10.toChar()) }
+  }
+ }
+ val out = sb.toString().trim()
+ if (out.isEmpty()) "" else "[DuckDuckGo 실시간 웹 검색 결과]" + 10.toChar() + out
+} }
 fun matchWakePhrase(raw: String, customW: String = wakeWord): Pair<Boolean, String> { val t = raw.trim(); if (t.isEmpty()) return false to ""; val cw = customW.trim().ifEmpty { "자비스" }; val cands = linkedSetOf(cw, "헤이 $cw", "${cw}야", "${cw}아", "자비스", "헤이 자비스", "자비스야", "헤이 구글", "오케이 구글", "비서야", "프로야").filter { it.isNotBlank() }.sortedByDescending { it.length }; val nsT = t.replace(" ", ""); for (w in cands) { val idx = t.indexOf(w, ignoreCase = true); if (idx >= 0 && idx <= 8) { val rem = (t.substring(0, idx) + " " + t.substring(idx + w.length)).replace(Regex("^[,.!?~ ]+"), "").trim(); return true to rem }; val nsW = w.replace(" ", ""); if (nsW.length >= 2 && nsT.startsWith(nsW, ignoreCase = true)) { var consumed = 0; var rIdx = 0; while (rIdx < t.length && consumed < nsW.length) { if (t[rIdx] != ' ') consumed++; rIdx++ }; val rem = t.substring(rIdx).replace(Regex("^[,.!?~ ]+"), "").trim(); return true to rem } }; return false to t }
 fun isGgufFile(f: java.io.File): Boolean = f.isFile && f.length() > 1048576L && (f.name.endsWith(".gguf", true) || runCatching { val b = ByteArray(4); java.io.FileInputStream(f).use { it.read(b) == 4 && String(b, Charsets.US_ASCII) == "GGUF" } }.getOrDefault(false))
 fun isEmbedModelName(nm: String): Boolean = nm.lowercase().let { it.contains("embed") || it.contains("bge") || it.contains("e5-") || it.contains("nomic") || it.contains("minilm") }

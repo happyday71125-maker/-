@@ -195,7 +195,7 @@ Text(aiMsg, fontSize = ui.subSp, color = CG)
 }
 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
 if (mode == "AI") {
-OutlinedButton(onClick = { aiPromptCfgOpen = !aiPromptCfgOpen }) { Text("⚙️ 설정", fontSize = ui.subSp, color = if (aiPromptCfgOpen) CG else CW) }
+OutlinedButton(onClick = { aiPromptCfgOpen = !aiPromptCfgOpen }) { Text("⚙️", fontSize = ui.subSp, color = if (aiPromptCfgOpen) CG else CW) }
 } else {
 OutlinedButton(onClick = { cfgOpen = !cfgOpen }) {
 Text("⚙️", fontSize = ui.subSp)
@@ -292,13 +292,13 @@ listOf("AUTO" to "자동(맞춤)", "COMPACT" to "작게", "NORMAL" to "표준", 
 if (mode == "AI") {
 Spacer(Modifier.height(4.dp))
 Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) {
-ChipBtn("📂보관함(${aiSessions.size})", aiShelfOpen, CA) { aiShelfOpen = !aiShelfOpen }
+ChipBtn("📂${aiSessions.size}", aiShelfOpen, CA) { aiShelfOpen = !aiShelfOpen }
 ChipBtn("📁$curAiFolder", false, CW) {
 val idx = aiFolders.indexOf(curAiFolder)
 curAiFolder = if (idx >= 0 && aiFolders.isNotEmpty()) aiFolders[(idx + 1) % aiFolders.size] else "기본 대화"
 aiMsg = "📁 현재 대화 저장 폴더: [$curAiFolder]"
 }
-ChipBtn("💾저장", false, CG) {
+ChipBtn("💾", false, CG) {
 val meaningful = chatMsgs.filter { it.id != 1L }
 if (meaningful.isEmpty()) {
 aiMsg = "⚠️ 먼저 AI와 나눈 대화가 있어야 저장할 수 있습니다."
@@ -313,7 +313,7 @@ FolderRegistry.saveAiSessions(ctx, nx)
 aiMsg = "💾 [📁$curAiFolder] 폴더에 '$titleGuess' 대화를 저장했습니다."
 }
 }
-ChipBtn("➕새대화", false, CM) {
+ChipBtn("➕", false, CM) {
 curAiSessionId = 0L
 chatMsgs = listOf(ChatMsg(1L, false, "새 대화를 시작합니다. 궁금한 내용을 편하게 물어보세요!", aiCfg.ragOn))
 aiMsg = "✨ 새 대화창이 열렸습니다."
@@ -321,7 +321,8 @@ aiMsg = "✨ 새 대화창이 열렸습니다."
 }
 Spacer(Modifier.height(4.dp))
 Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) {
-ChipBtn(if (aiCfg.ragOn) "🗂️RAG" else "💬일반", aiCfg.ragOn, CG) { aiCfg = aiCfg.copy(ragOn = !aiCfg.ragOn); saveAiCfg(ctx, aiCfg); aiMsg = if (aiCfg.ragOn) "🗂️ 내 메모·독서 RAG 켜짐" else "💬 일반 AI 챗봇 모드" }
+ChipBtn(if (aiCfg.ragOn) "🗂️" else "💬", aiCfg.ragOn, CG) { aiCfg = aiCfg.copy(ragOn = !aiCfg.ragOn); saveAiCfg(ctx, aiCfg); aiMsg = if (aiCfg.ragOn) "🗂️ 내 메모·독서 RAG 켜짐" else "💬 일반 AI 챗봇 모드" }
+ChipBtn("🌐", ddgWebOn, CA) { setDdgWebOn(ctx, !ddgWebOn); aiMsg = if (ddgWebOn) "🌐 DuckDuckGo 실시간 웹 검색 AI 연동 ON" else "🌐 DuckDuckGo 웹 검색 OFF (오프라인 전용)" }
 val cpuIcon = when (aiCfg.cpuMode) { 1 -> "🔋"; 3 -> "🚀"; else -> "⚖️" }
 ChipBtn(cpuIcon, true, CG) { val nxM = if (aiCfg.cpuMode == 1) 2 else if (aiCfg.cpuMode == 2) 3 else 1; val nx = aiCfg.copy(cpuMode = nxM); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = when (nxM) { 1 -> "🔋 절전(2코어·저발열)"; 3 -> "🚀 고성능(4코어·최고속)"; else -> "⚖️ 균형(3코어·권장)" } }
 val curTk = aiCfg.maxTok.coerceAtLeast(512)
@@ -331,9 +332,9 @@ val idLb = when (aiCfg.idleMin) { 0 -> "🧹∞"; 180 -> "🧹3h"; else -> "🧹
 ChipBtn(idLb, aiCfg.idleMin > 0, CW) { val nxI = when (aiCfg.idleMin) { 30 -> 60; 60 -> 180; 180 -> 0; else -> 30 }; val nx = aiCfg.copy(idleMin = nxI); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = if (nxI == 0) "🧹 모델 상주 모드 (자동 해제 OFF)" else "🧹 ${if (nxI == 180) "3시간" else "${nxI}분"} 유휴 시 모델 RAM 자동 해제" }
 ChipBtn(if (thinkOn) "🧠" else "⚡", thinkOn, CA) { setThinkOn(ctx, !thinkOn); aiMsg = if (thinkOn) "🧠 심층 추론 ON" else "⚡ 초고속 직답 모드" }
 ChipBtn(if (streamOn) "🌊" else "📄", streamOn, CG) { setStreamOn(ctx, !streamOn); aiMsg = if (streamOn) "🌊 실시간 토큰 스트리밍" else "📄 일괄 출력" }
-ChipBtn(if (vOn) "🔴음성중" else "🎙️음성대화", vOn, CA) { if (vOn) vStop(ctx) else vStart() }
-ChipBtn(if (wakeOnly) "👂호출어" else "🗣️상시", wakeOnly, CA) { setWakeOnly(ctx, !wakeOnly); aiMsg = if (wakeOnly) "👂 호출어 대기 ON: [${wakeWord}] 부를 때만 반응" else "🗣️ 상시 반응 모드" }
-ChipBtn("⏱️${vWaitSec}초", waitDlgOpen || vOn, CW) { waitSecDraft = vWaitSec.toString(); waitDlgOpen = true }
+ChipBtn(if (vOn) "🔴" else "🎙️", vOn, CA) { if (vOn) vStop(ctx) else vStart() }
+ChipBtn(if (wakeOnly) "👂" else "🗣️", wakeOnly, CA) { setWakeOnly(ctx, !wakeOnly); aiMsg = if (wakeOnly) "👂 호출어 대기 ON: [${wakeWord}] 부를 때만 반응" else "🗣️ 상시 반응 모드" }
+ChipBtn("⏱️${vWaitSec}", waitDlgOpen || vOn, CW) { waitSecDraft = vWaitSec.toString(); waitDlgOpen = true }
 ChipBtn(if (ttsOn) "🔊" else "🔇", ttsOn, CG) { ttsOn = !ttsOn; if (!ttsOn) stopOneShotTts() }
 ChipBtn("🌙", blkOn, CW) { keepAw(ctx, true); blkOn = true }
 }
@@ -457,7 +458,7 @@ else -> "📁$c(${notes.count { SMC.categoryOf(it, cats) == c }})"
 }
 ChipBtn(label, selTab == c) { selTab = c }
 }
-ChipBtn("➕폴더·백업", memoFolderDlgOpen, CA) { memoFolderDlgOpen = true }
+ChipBtn("➕", memoFolderDlgOpen, CA) { memoFolderDlgOpen = true }
 }
 Spacer(Modifier.height(6.dp))
 LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth(), verticalArrangement = VS8) {

@@ -945,9 +945,9 @@ fun MarkdownWriterView(
                         onClick = { fontBarOpen = !fontBarOpen },
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        Text("🔤${writerFontSp}pt", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (fontBarOpen) CG else CW)
+                        Text("🔤${writerFontSp}", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (fontBarOpen) CG else CW)
                     }
-                    TextButton(onClick = { mdHelpOpen = true }) { Text("❓문법", fontSize = ui.subSp, color = CA) }
+                    TextButton(onClick = { mdHelpOpen = true }) { Text("❓", fontSize = ui.subSp, color = CA) }
                     TextButton(onClick = onGoReader) { Text("📖", fontSize = ui.bodySp, color = CW) }
                     TextButton(onClick = onGoHome) { Text("🏠", fontSize = ui.bodySp, color = CM) }
                 }
@@ -1005,7 +1005,7 @@ fun MarkdownWriterView(
                     sp.edit().putString("writer_active_folder_v1", nxF).apply()
                     statusMsg = "📁 현재 문서 폴더: [$nxF] (길게 관리하려면 [📁폴더·백업] 버튼 터치)"
                 }
-                ChipBtn("📄새문서", false, CM) {
+                ChipBtn("📄", false, CM) {
                     saveToInternalShelf()
                     curDocId = 0L
                     titleTfv = TextFieldValue("새 마크다운 문서", TextRange(9))
@@ -1014,26 +1014,26 @@ fun MarkdownWriterView(
                 }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
-                ChipBtn("💾저장", false, CG) { saveToInternalShelf() }
-                ChipBtn("📂문서함(${docs.size})", docShelfOpen, CA) { docShelfOpen = !docShelfOpen }
-                ChipBtn("📁폴더·백업", writerFolderDlgOpen, CG) { writerFolderDlgOpen = true }
-                ChipBtn("📂파일열기", false, CW) { mdLoadLauncher.launch(arrayOf("text/*", "application/octet-stream", "*/*")) }
-                ChipBtn("💾.md저장", false, CG) {
+                ChipBtn("💾", false, CG) { saveToInternalShelf() }
+                ChipBtn("📂${docs.size}", docShelfOpen, CA) { docShelfOpen = !docShelfOpen }
+                ChipBtn("🗂️", writerFolderDlgOpen, CG) { writerFolderDlgOpen = true }
+                ChipBtn("📥", false, CW) { mdLoadLauncher.launch(arrayOf("text/*", "application/octet-stream", "*/*")) }
+                ChipBtn("⬇️", false, CG) {
                     val fn = (titleTfv.text.trim().ifEmpty { "markdown_note" }) + ".md"
                     mdSaveLauncher.launch(fn)
                 }
-                ChipBtn("📕PDF내보내기", false, CA) {
+                ChipBtn("📕", false, CA) {
                     val fn = (titleTfv.text.trim().ifEmpty { "markdown_doc" }) + ".pdf"
                     pdfExportLauncher.launch(fn)
                 }
-                ChipBtn("📝메모보내기", false, CW) {
+                ChipBtn("📤", false, CW) {
                     if (bodyTfv.text.isNotBlank()) {
                         onSaveToMemo("# ${titleTfv.text.trim().ifEmpty { "작성 문서" }}\n${bodyTfv.text.trim()}")
                         statusMsg = "✅ 작성한 문서를 메모장에도 저장했습니다!"
                     }
                 }
-                ChipBtn("◫분할AI", aiMode == 1, CG) { aiMode = if (aiMode == 1) 0 else 1 }
-                ChipBtn("🪟플로팅AI", aiMode == 2, CA) { aiMode = if (aiMode == 2) 0 else 2; floatMin = false }
+                ChipBtn("◫", aiMode == 1, CG) { aiMode = if (aiMode == 1) 0 else 1 }
+                ChipBtn("🪟", aiMode == 2, CA) { aiMode = if (aiMode == 2) 0 else 2; floatMin = false }
             }
             if (docShelfOpen) {
                 val visibleDocs = remember(docs, shelfFolderFilter) {

@@ -47,7 +47,7 @@ val customLabel: String = "📌 템플릿",
 val customText: String = "[제목]\n☐ 항목: "
 )
 object SmartMemoClassifier {
-val DEF_MEMO_CATS = listOf("일상", "업무", "할일", "아이디어", "독서")
+val DEF_MEMO_CATS = listOf("일상", "음성메모", "업무", "할일", "아이디어", "독서")
 val DEF_BOOK_CATS = listOf("에세이", "인문/교양", "시/문학", "업무/문서")
 private fun prefs(ctx: Context) = ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE)
 fun loadMemoCats(ctx: Context): List<String> =
@@ -232,7 +232,7 @@ drawerOpen -> drawerOpen = false
 else -> scope.launch { pager.animateScrollToPage(2) }
 }
 }
-SideEffect { JarvisRuntime.bindCallbacks(rootCtx, { pg -> scope.launch { pager.scrollToPage(pg.coerceIn(0, 4)) } }, { raw -> val mc = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = SmartMemoClassifier.guessCategory(raw, mc); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "✅ [$c0] 저장 + ⏰알림 ${sc}건 예약됨" else "✅ [$c0] 메모 즉시 저장됨" }, { books }, { notes }) }
+SideEffect { JarvisRuntime.bindCallbacks(rootCtx, { pg -> scope.launch { pager.scrollToPage(pg.coerceIn(0, 4)) } }, { raw0 -> val isVm = raw0.startsWith("__VOICEMEMO__"); val raw = if (isVm) raw0.removePrefix("__VOICEMEMO__").trim() else raw0.trim(); val mc0 = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = if (isVm) { if (!mc0.contains("음성메모")) SmartMemoClassifier.saveMemoCats(rootCtx, listOf("음성메모") + mc0); "음성메모" } else SmartMemoClassifier.guessCategory(raw, mc0); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "🎙️ [$c0] 탭 저장 + ⏰알림 ${sc}건 예약됨" else if (isVm) "🎙️ [음성메모] 탭에 즉시 저장되었습니다!" else "✅ [$c0] 메모 즉시 저장됨" }, { books }, { notes }) }
 val bgCol = when (cfg.themeName) { "SLATE" -> Color(0xFF0B1120); "FOREST" -> Color(0xFF07120E); else -> Color(0xFF07090E) }
 Box(Modifier.fillMaxSize().background(bgCol).systemBarsPadding().imePadding()) {
 HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
@@ -258,7 +258,7 @@ onLeftReader = { scope.launch { pager.animateScrollToPage(1) } },
 onRightNotes = { scope.launch { pager.animateScrollToPage(3) } },
 onSettings = { settingsOpen = true },
 onRightAi = { scope.launch { pager.animateScrollToPage(4) } },
-onQuickMemo = { raw -> val mc = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = SmartMemoClassifier.guessCategory(raw, mc); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "✅ [" + c0 + "] 메모 저장 + ⏰일정알림 " + sc + "건 예약됨" else "✅ [" + c0 + "] 메모 즉시 저장됨" },
+onQuickMemo = { raw0 -> val isVm = raw0.startsWith("__VOICEMEMO__"); val raw = if (isVm) raw0.removePrefix("__VOICEMEMO__").trim() else raw0.trim(); val mc0 = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = if (isVm) { if (!mc0.contains("음성메모")) SmartMemoClassifier.saveMemoCats(rootCtx, listOf("음성메모") + mc0); "음성메모" } else SmartMemoClassifier.guessCategory(raw, mc0); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "🎙️ [$c0] 탭 저장 + ⏰일정 알림 ${sc}건 자동 예약!" else if (isVm) "🎙️ [음성메모] 탭에 저장되었습니다!" else "✅ [$c0] 메모 저장됨" },
 allNotes = notes,
 onNavTab = { pg -> scope.launch { pager.animateScrollToPage(pg.coerceIn(0, 4)) } },
 onToggleCheck = { nid, lIdx -> val nx = notes.map { if (it.id == nid) SmartMemoClassifier.toggleCheckLine(it, lIdx) else it }; notes = nx; repo.saveNotes(nx) },

@@ -956,7 +956,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                     }
                                     Spacer(Modifier.height(4.dp))
                                     Box(Modifier.width(renderColW).heightIn(min = fixedTextH)) {
-                                     f (hasRightPage && rightSlice != null) {
+                                     if (hasRightPage && rightSlice != null) {
                                  var rLay by remember(rightPageTx, curPt, twoPageMode) { mutableStateOf<TextLayoutResult?>(null) }
                                  Text(rightPageDisplay, style = pageTextStyle, onTextLayout = { rLay = it }, modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, rightSlice.s, rightPageTx, hlColorIdx, bookHls) { if (highlightMode) { detectTapGestures { pos -> val off = rLay?.getOffsetForPosition(pos) ?: return@detectTapGestures; toggleHighlightTap(rightPageTx, rightSlice.s, off) } } })
                                 } else {

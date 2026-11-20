@@ -90,7 +90,7 @@ val ctxSize: Int = 2048,
 val maxTok: Int = 512, val cpuMode: Int = 2, val histTurns: Int = 2, val idleMin: Int = 30)
 
 fun loadAiCfg(ctx: Context): AiRagConfig {
-appCtxRef = ctx.applicationContext; val sp0 = ctx.getSharedPreferences("pl_ai_v2_prefs", 0); thinkOn = sp0.getBoolean("ai_think_on", false); streamOn = sp0.getBoolean("ai_stream_on", true); wakeWord = sp0.getString("jarvis_wake_word", "자비스")?.trim()?.ifEmpty { "자비스" } ?: "자비스"; wakeOnly = sp0.getBoolean("jarvis_wake_only", false); refreshDetectedModelNames()
+appCtxRef = ctx.applicationContext; val sp0 = ctx.getSharedPreferences("pl_ai_v2_prefs", 0); thinkOn = sp0.getBoolean("ai_think_on", false); streamOn = sp0.getBoolean("ai_stream_on", true); wakeWord = sp0.getString("jarvis_wake_word", "자비스")?.trim()?.ifEmpty { "자비스" } ?: "자비스"; sleepWord = sp0.getString("jarvis_sleep_word", "쉬어")?.trim()?.ifEmpty { "쉬어" } ?: "쉬어"; wakeOnly = sp0.getBoolean("jarvis_wake_only", false); refreshDetectedModelNames()
 val p = ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE)
 return AiRagConfig(
 sysPrompt = p.getString("ai_sys_prompt", DEF_SYS_PROMPT)?.ifBlank { DEF_SYS_PROMPT } ?: DEF_SYS_PROMPT,
@@ -140,6 +140,7 @@ var thinkOn by androidx.compose.runtime.mutableStateOf(false)
 var streamOn by androidx.compose.runtime.mutableStateOf(true)
 var showEmojiHelp by androidx.compose.runtime.mutableStateOf(false)
 var wakeWord by androidx.compose.runtime.mutableStateOf("자비스")
+var sleepWord by androidx.compose.runtime.mutableStateOf("쉬어")
 var wakeOnly by androidx.compose.runtime.mutableStateOf(false)
 var wakeFollowUpUntil: Long = 0L
 var lastModelUseMs: Long = System.currentTimeMillis()
@@ -147,6 +148,8 @@ fun optThreads(cpuMode: Int = 2): Int = when (cpuMode) { 1 -> 2; 3 -> 4; else ->
 fun setThinkOn(ctx: Context, on: Boolean) { thinkOn = on; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putBoolean("ai_think_on", on).apply() }
 fun setStreamOn(ctx: Context, on: Boolean) { streamOn = on; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putBoolean("ai_stream_on", on).apply() }
 fun setWakeWord(ctx: Context, w: String) { val c = w.trim().ifEmpty { "자비스" }; wakeWord = c; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putString("jarvis_wake_word", c).apply() }
+fun setSleepWord(ctx: Context, w: String) { val c = w.trim().ifEmpty { "쉬어" }; sleepWord = c; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putString("jarvis_sleep_word", c).apply() }
+fun matchSleepPhrase(raw: String, customS: String = sleepWord): Boolean { val t = raw.trim(); if (t.isEmpty()) return false; val cs = customS.trim().ifEmpty { "쉬어" }; val nsT = t.replace(" ", ""); val cands = listOf(cs, "잠깐 $cs", "자비스 $cs", "$wakeWord $cs", "자비스 쉬어", "잠깐 쉬어", "쉬어", "대기 모드", "대기모드", "조용히 해", "스탠바이"); return cands.any { c -> val nsC = c.replace(" ", ""); t.equals(c, true) || nsT.equals(nsC, true) || (nsC.length >= 2 && nsT.endsWith(nsC, true) && nsT.length <= nsC.length + 6) } }
 fun setWakeOnly(ctx: Context, on: Boolean) { wakeOnly = on; if (!on) wakeFollowUpUntil = 0L; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putBoolean("jarvis_wake_only", on).apply() }
 fun matchWakePhrase(raw: String, customW: String = wakeWord): Pair<Boolean, String> { val t = raw.trim(); if (t.isEmpty()) return false to ""; val cw = customW.trim().ifEmpty { "자비스" }; val cands = linkedSetOf(cw, "헤이 $cw", "${cw}야", "${cw}아", "자비스", "헤이 자비스", "자비스야", "헤이 구글", "오케이 구글", "비서야", "프로야").filter { it.isNotBlank() }.sortedByDescending { it.length }; val nsT = t.replace(" ", ""); for (w in cands) { val idx = t.indexOf(w, ignoreCase = true); if (idx >= 0 && idx <= 8) { val rem = (t.substring(0, idx) + " " + t.substring(idx + w.length)).replace(Regex("^[,.!?~ ]+"), "").trim(); return true to rem }; val nsW = w.replace(" ", ""); if (nsW.length >= 2 && nsT.startsWith(nsW, ignoreCase = true)) { var consumed = 0; var rIdx = 0; while (rIdx < t.length && consumed < nsW.length) { if (t[rIdx] != ' ') consumed++; rIdx++ }; val rem = t.substring(rIdx).replace(Regex("^[,.!?~ ]+"), "").trim(); return true to rem } }; return false to t }
 fun isGgufFile(f: java.io.File): Boolean = f.isFile && f.length() > 1048576L && (f.name.endsWith(".gguf", true) || runCatching { val b = ByteArray(4); java.io.FileInputStream(f).use { it.read(b) == 4 && String(b, Charsets.US_ASCII) == "GGUF" } }.getOrDefault(false))

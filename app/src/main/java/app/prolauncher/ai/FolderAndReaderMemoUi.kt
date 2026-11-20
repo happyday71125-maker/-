@@ -22,7 +22,10 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -709,22 +712,79 @@ fun UnifiedBackupSettingsPanel(ctx: Context, repo: LauncherRepository, ui: Respo
   }
  }
 }
-fun buildHighlightedBookPage(text: String, query: String, isNight: Boolean): AnnotatedString {
+data class BookHighlight(
+val id: Long,
+val bookId: Long,
+val startOff: Int,
+val endOff: Int,
+val colorIdx: Int = 0
+)
+fun loadBookHighlights(ctx: Context): List<BookHighlight> = runCatching {
+ val raw = ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE).getString("reader_highlights_v1", null) ?: return emptyList()
+ val arr = JSONArray(raw)
+ buildList {
+  for (i in 0 until arr.length()) {
+   val o = arr.getJSONObject(i)
+   add(BookHighlight(o.optLong("id", i.toLong() + 1L), o.getLong("bid"), o.getInt("s"), o.getInt("e"), o.optInt("c", 0)))
+  }
+ }
+}.getOrElse { emptyList() }
+fun saveBookHighlights(ctx: Context, list: List<BookHighlight>) = runCatching {
+ val arr = JSONArray()
+ list.forEach { h -> arr.put(JSONObject().put("id", h.id).put("bid", h.bookId).put("s", h.startOff).put("e", h.endOff).put("c", h.colorIdx)) }
+ ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE).edit().putString("reader_highlights_v1", arr.toString()).apply()
+}
+fun findSentenceRangeAt(text: String, pos: Int): IntRange? {
+ if (text.isBlank()) return null
+ val p = pos.coerceIn(0, (text.length - 1).coerceAtLeast(0))
+ val nl = 10.toChar()
+ fun isTerm(ch: Char) = ch == '.' || ch == '!' || ch == '?' || ch == '。' || ch == '…' || ch == nl
+ var s = p
+ while (s > 0 && !isTerm(text[s - 1])) s--
+ while (s < text.length && text[s].isWhitespace()) s++
+ var e = p
+ while (e < text.length && !isTerm(text[e])) e++
+ if (e < text.length && text[e] != nl) e++
+ while (e > s && text[e - 1].isWhitespace()) e--
+ return if (s < e) s until e else null
+}
+fun buildHighlightedBookPage(
+ text: String,
+ query: String,
+ isNight: Boolean,
+ pageStartOff: Int = 0,
+ bookHighlights: List<BookHighlight> = emptyList()
+): AnnotatedString {
+ if (text.isEmpty()) return AnnotatedString("")
  val q = query.trim()
- if (q.isEmpty() || text.isEmpty()) return AnnotatedString(text)
- val ranges = BookPassageSearcher.findMatchRangesInText(text, q, maxHits = 60)
- if (ranges.isEmpty()) return AnnotatedString(text)
+ val qRanges = if (q.isEmpty()) emptyList() else BookPassageSearcher.findMatchRangesInText(text, q, maxHits = 60)
+ val pageEndOff = pageStartOff + text.length
+ val pageHls = if (bookHighlights.isEmpty()) emptyList() else bookHighlights.filter { it.endOff > pageStartOff && it.startOff < pageEndOff }
+ if (qRanges.isEmpty() && pageHls.isEmpty()) return AnnotatedString(text)
  val hlBg = if (isNight) Color(0x99D97706) else Color(0x88FACC15)
  val hlFg = if (isNight) Color(0xFFFFFBEB) else Color(0xFF1C1917)
  return buildAnnotatedString {
   append(text)
-  ranges.forEach { r ->
+  pageHls.forEach { h ->
+   val ls = (h.startOff - pageStartOff).coerceIn(0, text.length)
+   val le = (h.endOff - pageStartOff).coerceIn(ls, text.length)
+   if (ls < le) {
+    val bgC = when (h.colorIdx) {
+     1 -> if (isNight) Color(0x6610B981) else Color(0x666EE7B7)
+     2 -> if (isNight) Color(0x66EC4899) else Color(0x66F9A8D4)
+     else -> if (isNight) Color(0x66F59E0B) else Color(0x77FDE047)
+    }
+    addStyle(SpanStyle(background = bgC, textDecoration = TextDecoration.Underline), ls, le)
+   }
+  }
+  qRanges.forEach { r ->
    val s = r.first.coerceIn(0, text.length)
    val e = (r.last + 1).coerceIn(s, text.length)
    if (s < e) addStyle(SpanStyle(background = hlBg, color = hlFg), s, e)
   }
  }
 }
+
 @Composable
 fun ReaderUnifiedSearchBar(
  books: List<BookItem>,

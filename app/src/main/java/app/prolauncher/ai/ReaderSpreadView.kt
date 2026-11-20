@@ -276,7 +276,7 @@ Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp),
          Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = CV) {
           TextButton(onClick = { shelf = !shelf; bmOpen = false }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) { Text(if (shelf) "📖" else "📚${books.size}", fontSize = ui.bodySp, color = fg, fontWeight = FontWeight.Bold) }
           OutlinedButton(onClick = { bmOpen = !bmOpen; if (bmOpen) shelf = false }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("🔖${bms.size}", fontSize = ui.subSp, color = if (bmOpen) CA else fg) }
-          OutlinedButton(onClick = { twoPageMode = !twoPageMode; readerPrefs.edit().putBoolean("reader_two_page", twoPageMode).apply() }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text(if (twoPageMode) "📖2쪽" else "📄1쪽", fontSize = ui.subSp, color = if (twoPageMode) CG else fg) }
+          OutlinedButton(onClick = { twoPageMode = !twoPageMode; readerPrefs.edit().putBoolean("reader_two_page", twoPageMode).apply() }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text(if (twoPageMode) "📖" else "📄", fontSize = ui.subSp, color = if (twoPageMode) CG else fg) }
          }
          if (!shelf && act != null) {
           Row(Modifier.weight(1f).padding(horizontal = 2.dp), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -289,9 +289,9 @@ Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp),
           Spacer(Modifier.weight(1f))
          }
          Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = CV) {
-          OutlinedButton(onClick = { if (!searchOpen) searchAllBooks = shelf || act == null; searchOpen = !searchOpen }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Text("🔎검색", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (searchOpen || searchQuery.isNotBlank()) CA else fg) }
+          OutlinedButton(onClick = { if (!searchOpen) searchAllBooks = shelf || act == null; searchOpen = !searchOpen }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Text("🔎", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (searchOpen || searchQuery.isNotBlank()) CA else fg) }
           OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("📂", fontSize = ui.subSp, color = fg) }
-          OutlinedButton(onClick = { cfgOpen = !cfgOpen }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("⚙️${curPt}pt", fontSize = ui.subSp, color = if (cfgOpen) CG else fg) }
+          OutlinedButton(onClick = { cfgOpen = !cfgOpen }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("⚙️${curPt}", fontSize = ui.subSp, color = if (cfgOpen) CG else fg) }
           TextButton(onClick = onHome, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp)) { Text("🏠", fontSize = (ui.subSp.value + 1).sp, color = mut) }
          }
 }
@@ -678,24 +678,24 @@ commitExcerptHook = ::commitDraftIfEditing
             }
             Box(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
              Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally), verticalAlignment = CV) {
-              ChipBtn(if (hasSel) "🦙선택해설(${activeExcerpt.length}자)" else if (readerAiMode == 2) "🪟페이지해설" else "🦙페이지해설", readerAiOpen, CG) { commitDraftIfEditing(); aiFloatMin = false; readerAiOpen = !readerAiOpen }
-              ChipBtn(if (highlightMode) "🖍️형광펜ON" else "🖍️형광펜", highlightMode, CA) { highlightMode = !highlightMode; if (highlightMode) selectMode = false }
-              ChipBtn(if (selectMode) "✂️본문보기" else if (hasSel) "✂️구절편집" else "✂️구절선택", selectMode || hasSel, CA) { if (!selectMode) highlightMode = false; toggleScissorsButton() }
-              ChipBtn(if (ttsHere) "⏹️낭독중지" else "🔊낭독", ttsHere, CG) {
+              ChipBtn(if (readerAiMode == 2) "🪟" else "🦙", readerAiOpen, CG) { commitDraftIfEditing(); aiFloatMin = false; readerAiOpen = !readerAiOpen }
+              ChipBtn("🖍️", highlightMode, CA) { highlightMode = !highlightMode; if (highlightMode) selectMode = false }
+              ChipBtn("✂️", selectMode || hasSel, CA) { if (!selectMode) highlightMode = false; toggleScissorsButton() }
+              ChipBtn(if (ttsHere) "⏹️" else "🔊", ttsHere, CG) {
                if (ttsHere) ReaderTtsRuntime.stop(ctx) else {
                 val chosen = commitDraftIfEditing()
                 val startEx = if (chosen.isNotBlank()) chosen else reflowSrc.fullText.substring(leftSlice.s.coerceIn(0, reflowSrc.fullText.length), reflowSrc.rawEndOf(curRawIdx).coerceIn(0, reflowSrc.fullText.length)).trim()
                 ReaderTtsRuntime.start(ctx, act, curRawIdx, startEx)
                }
               }
-              if (ReaderTtsRuntime.on && ttsBarMin) { ChipBtn("🔼낭독바", false, CG) { ttsBarMin = false } }
-              ChipBtn(if (readerMemoOpen) "📝메모닫기" else if (readerMemoMode == 2) "🪟독서메모" else "◫독서메모", readerMemoOpen, CW) { if (readerMemoOpen) readerMemoOpen = false else openReaderMemoInLastMode() }
-              ChipBtn(if (isBm) "🔖★" else "🔖북마크", isBm, CA) {
+              if (ReaderTtsRuntime.on && ttsBarMin) { ChipBtn("🔼", false, CG) { ttsBarMin = false } }
+              ChipBtn(if (readerMemoOpen) "📝" else if (readerMemoMode == 2) "🪟" else "◫", readerMemoOpen, CW) { if (readerMemoOpen) readerMemoOpen = false else openReaderMemoInLastMode() }
+              ChipBtn(if (isBm) "🔖★" else "🔖", isBm, CA) {
                val nx = if (isBm) bms.filterNot { it.bookId == act.id && (if (it.charOffset >= 0) it.charOffset in leftSlice.s..curSpreadEndChar else it.pageIndex == curRawIdx) }
                else listOf(BookmarkEntry(act.id, act.title, curRawIdx, aiTargetText.replace(10.toChar(), ' ').take(45), leftSlice.s)) + bms
                bms = nx; saveBookmarks(ctx, nx)
               }
-              if (searchQuery.isNotBlank() && !searchOpen) { ChipBtn("🔎지움", false, CM) { searchQuery = "" } }
+              if (searchQuery.isNotBlank() && !searchOpen) { ChipBtn("✕", false, CM) { searchQuery = "" } }
              }
             }
             if (highlightMode) {
@@ -1070,14 +1070,14 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                     modifier = Modifier.weight(1f).heightIn(min = 46.dp)
                 ) {
                     Text(
-                        "◀ 이전 페이지",
+                        "◀",
                         fontSize = (ui.bodySp.value + 0.5f).sp,
                         fontWeight = FontWeight.Bold,
                         color = if (canPrev) fg else mut.copy(alpha = 0.35f)
                     )
                 }
                 ChipBtn(
-                    if (sliderOpen) "🎚️닫기" else "🎚️ ${vIdx + 1}/${vPages.size}",
+                    if (sliderOpen) "✕" else "🎚️${vIdx + 1}/${vPages.size}",
                     sliderOpen,
                     CG
                 ) {
@@ -1092,7 +1092,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                     modifier = Modifier.weight(1f).heightIn(min = 46.dp)
                 ) {
                     Text(
-                        "다음 페이지 ▶",
+                        "▶",
                         fontSize = (ui.bodySp.value + 0.5f).sp,
                         fontWeight = FontWeight.Bold,
                         color = if (canNext) fg else mut.copy(alpha = 0.35f)

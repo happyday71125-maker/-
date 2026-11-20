@@ -34,7 +34,8 @@ val scope = rememberCoroutineScope()
 var aiCfg by remember { mutableStateOf(loadAiCfg(ctx)) }
 val ui = rememberUi(aiCfg.uiScale)
 var cats by remember { mutableStateOf(SMC.loadMemoCats(ctx)) }
-var bCfg by remember { mutableStateOf(SMC.loadBtnCfg(ctx)) }
+LaunchedEffect(notes.size) { cats = SMC.loadMemoCats(ctx) }
+  var bCfg by remember { mutableStateOf(SMC.loadBtnCfg(ctx)) }
 var cfgOpen by remember { mutableStateOf(false) }
 var aiPromptCfgOpen by remember { mutableStateOf(false) }
 var newCat by remember { mutableStateOf("") }

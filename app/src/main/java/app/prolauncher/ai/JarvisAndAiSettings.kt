@@ -97,11 +97,11 @@ val useRag = aiCfg.ragOn || wantsMemoRagLookup(q)
 val memCtx = if (useRag) buildRagContextSmart(q, aiCfg, notes, books, cats) else ""
 val webCtx = if (ddgWebOn) fetchDuckDuckGoContext(q) else ""
 val ragContext = listOf(memCtx, webCtx).filter { it.isNotBlank() }.joinToString(10.toChar().toString() + 10.toChar().toString())
-val liveResp = callLlmHttp(aiCfg.sysPrompt, ragContext, history, q, aiCfg.apiUrl, aiCfg.apiModel, aiCfg.apiKey, onStream, genId)
+val liveResp = callLlmHttp(aiCfg.sysPrompt, ragContext, history, q, aiCfg.apiUrl, aiCfg.apiModel, aiCfg.apiKey, onStream, genId, aiCfg.temp, aiCfg.ctxSize, aiCfg.maxTok.coerceAtLeast(512), aiCfg.cpuMode, aiCfg.histTurns)
 if (!liveResp.isNullOrBlank()) return@withContext liveResp
 if (!useRag) {
 if (low.contains("요약") || q.lines().size >= 3 || q.length >= 80) return@withContext "✨ [핵심 요약]\n${SMC.summarizeByLength(q, true)}"
-return@withContext "🤖 [오프라인 AI 답변]\n질문하신 '$q'에 대한 답변입니다:\n• 현재 오프라인 상태여서 내장 엔진이 응답했습니다. 네트워크가 연결되면 설정하신 프롬프트('${aiCfg.sysPrompt.take(30)}…')를 바탕으로 LLM이 모든 일반 질문에 답변합니다."
+return@withContext "🤖 [오프라인 AI 답변]\n질문하신 '$q'에 대한 답변입니다:\n• 현재 오프라인 상태여서 내장 엔진이 응답했습니다. 로컬 GGUF 모델을 등록하거나 네트워크에 연결하면 상세한 AI 답변을 받을 수 있습니다."
 }
 if (notes.isEmpty()) return@withContext "현재 저장된 메모가 없습니다. [📝 메모] 탭에서 메모를 먼저 작성해 주세요."
 if (low.contains("요약") || low.contains("정리") || low.contains("브리핑") || low.contains("전체")) {

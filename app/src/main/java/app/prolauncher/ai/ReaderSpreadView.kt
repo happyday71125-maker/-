@@ -276,24 +276,34 @@ val aiFloatH = if (aiFloatMin) 44.dp else (rootBoxH * 0.45f).coerceIn(220.dp, 33
 val aiFloatWPx = with(density) { aiFloatW.toPx() }
 val aiFloatHPx = with(density) { aiFloatH.toPx() }
 Column(Modifier.fillMaxSize().padding(horizontal = ui.hPad, vertical = ui.vPad)) {
-        val renderReaderTopBar: @Composable (@Composable RowScope.() -> Unit) -> Unit = { centerSlot ->
-         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
-          Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = CV) {
-           TextButton(onClick = { shelf = !shelf; bmOpen = false }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) { Text(if (shelf) "📖" else "📚${books.size}", fontSize = ui.bodySp, color = fg, fontWeight = FontWeight.Bold) }
-           OutlinedButton(onClick = { bmOpen = !bmOpen; if (bmOpen) shelf = false }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("🔖${bms.size}", fontSize = ui.subSp, color = if (bmOpen) CA else fg) }
-           OutlinedButton(onClick = { twoPageMode = !twoPageMode; readerPrefs.edit().putBoolean("reader_two_page", twoPageMode).apply() }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text(if (twoPageMode) "📖" else "📄", fontSize = ui.subSp, color = if (twoPageMode) CG else fg) }
-          }
-          Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()).padding(horizontal = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally), verticalAlignment = CV) {
-           centerSlot()
-          }
-          Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = CV) {
-           OutlinedButton(onClick = { if (!searchOpen) searchAllBooks = shelf || act == null; searchOpen = !searchOpen }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Text("🔎", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (searchOpen || searchQuery.isNotBlank()) CA else fg) }
-           OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("📂", fontSize = ui.subSp, color = fg) }
-           OutlinedButton(onClick = { cfgOpen = !cfgOpen }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("⚙️${curPt}", fontSize = ui.subSp, color = if (cfgOpen) CG else fg) }
-           TextButton(onClick = onHome, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp)) { Text("🏠", fontSize = (ui.subSp.value + 1).sp, color = mut) }
-          }
-         }
-        }
+            val renderReaderTopBar: @Composable (@Composable RowScope.() -> Unit) -> Unit = { centerSlot ->
+Row(
+Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+horizontalArrangement = Arrangement.spacedBy(4.dp),
+verticalAlignment = CV
+) {
+                    TextButton(onClick = { shelf = !shelf; bmOpen = false }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) { Text(if (shelf) "📖" else "📚${books.size}", fontSize = ui.bodySp, color = fg, fontWeight = FontWeight.Bold, softWrap = false) }
+                    OutlinedButton(onClick = { bmOpen = !bmOpen; if (bmOpen) shelf = false }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("🔖${bms.size}", fontSize = ui.subSp, color = if (bmOpen) CA else fg, softWrap = false) }
+                    OutlinedButton(onClick = { twoPageMode = !twoPageMode; readerPrefs.edit().putBoolean("reader_two_page", twoPageMode).apply() }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text(if (twoPageMode) "📖" else "📄", fontSize = ui.subSp, color = if (twoPageMode) CG else fg, softWrap = false) }
+                    centerSlot()
+                    OutlinedButton(
+                        onClick = {
+                            if (!searchOpen) searchAllBooks = shelf || act == null
+                            searchOpen = !searchOpen
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) { Text("🔎", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (searchOpen || searchQuery.isNotBlank()) CA else fg, softWrap = false) }
+                    OutlinedButton(
+                        onClick = { picker.launch(arrayOf("*/*")) },
+                        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)
+                    ) { Text("📂", fontSize = ui.subSp, color = fg, softWrap = false) }
+                    OutlinedButton(
+                        onClick = { cfgOpen = !cfgOpen },
+                        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)
+                    ) { Text("⚙️${curPt}", fontSize = ui.subSp, color = if (cfgOpen) CG else fg, softWrap = false) }
+                    TextButton(onClick = onHome, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp)) { Text("🏠", fontSize = (ui.subSp.value + 1).sp, color = mut, softWrap = false) }
+                }
+            }
         if (shelf || act == null) { renderReaderTopBar {} }
 if (searchOpen && (shelf || act == null)) {
 val actPreviewFull = remember(act?.id, act?.pages, smartReflowOn) { act?.let { buildBookReflowSource(it.pages, smartReflow = smartReflowOn, preservePoetry = it.category.contains("시")).fullText } ?: "" }

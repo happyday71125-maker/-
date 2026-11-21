@@ -391,16 +391,61 @@ object JarvisRuntime {
   }
  }
 }
-fun normalizeTextForNaturalTts(raw: String): String {
-    val clean0 = raw
-        .substringBefore("\n\n⏱️")
-        .substringBefore("\n⏱️")
-        .substringBefore("⏱️ ")
+fun stripMarkdownAndEmojiForTts(raw: String): String {
+    if (raw.isBlank()) return ""
+    var s = raw
+        .replace(Regex("```[a-zA-Z0-9_-]*"), " ")
+        .replace("```", " ")
+        .replace(Regex("!\\[[^\\]]*\\]\\([^)]*\\)"), " ")
+        .replace(Regex("\\[([^\\]]+)\\]\\([^)]*\\)"), "$1")
+        .replace(Regex("(?:ht" + "tps?://|www\\.)\\S+", RegexOption.IGNORE_CASE), " ")
+        .replace(Regex("(?m)^\\s*#{1,6}\\s*"), "")
+        .replace(Regex("(?m)^\\s*>+\\s*"), "")
+        .replace(Regex("(?m)^\\s*[-*_]{3,}\\s*$"), " ")
+        .replace(Regex("(?m)^\\s*\\|?\\s*:?-{2,}:?\\s*(?:\\|\\s*:?-{2,}:?\\s*)*\\|?\\s*$"), " ")
+        .replace("**", "")
+        .replace("__", "")
+        .replace("~~", "")
         .replace("*", "")
         .replace("`", "")
+        .replace("|", " ")
         .replace("▍", "")
-        .replace("\r\n", "\n")
-        .replace('\r', '\n')
+    val sb = StringBuilder(s.length)
+    var i = 0
+    while (i < s.length) {
+        val cp = s.codePointAt(i)
+        val cc = Character.charCount(cp)
+        val isEmojiOrSym =
+            cp in 0x1F000..0x1FAFF ||
+            cp in 0x1F300..0x1F9FF ||
+            cp in 0x2600..0x27BF ||
+            cp in 0x2300..0x23FF ||
+            cp in 0x2B00..0x2BFF ||
+            cp in 0x2190..0x21FF ||
+            cp in 0x2500..0x25FF ||
+            cp in 0x200C..0x200F ||
+            cp == 0xFE0F || cp == 0xFE0E || cp == 0x20E3 ||
+            cp == 0x203C || cp == 0x2049 || cp == 0x00A9 || cp == 0x00AE ||
+            cp == 0x2122 || cp == 0x2139 || cp == 0x2022 || cp == 0x25AA || cp == 0x25AB ||
+            cp == 0x25B8 || cp == 0x25B6 || cp == 0x25C0 || cp == 0x2610 || cp == 0x2611
+        if (isEmojiOrSym) {
+            if (sb.isNotEmpty() && sb[sb.length - 1] != ' ' && sb[sb.length - 1] != 10.toChar()) sb.append(' ')
+        } else {
+            sb.appendCodePoint(cp)
+        }
+        i += cc
+    }
+    return sb.toString().replace(Regex("[ ]{2,}"), " ").trim()
+}
+fun normalizeTextForNaturalTts(raw: String): String {
+    val clean0 = stripMarkdownAndEmojiForTts(
+        raw
+            .substringBefore("\n\n⏱️")
+            .substringBefore("\n⏱️")
+            .substringBefore("⏱️ ")
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+    )
     if (clean0.isBlank()) return ""
     val rawLines = clean0.lines()
     val sb = StringBuilder(clean0.length)
@@ -702,7 +747,7 @@ fun stopOneShotTts() { SupertonicTtsEngine.stop(); uiP(0L) { ttsPending.clear();
 fun flushV(ctx: Context) { val msg = vBuf.trim(); if (msg.isEmpty()) return; if (isAiBusy || streamActive || isTtsBusyNow()) { schedV(ctx, 900L); return }; vBuf = ""; vSpkNow = false; vSeq++; lastSttBeatMs = System.currentTimeMillis(); uiP(0L) { sttEpoch += 1; val old = sttEngine; sttEngine = null; runCatching { old?.cancel(); old?.destroy() } }; isAiBusy = true; vSt = "🧠 " + msg.take(12); vCb(msg) }
 fun schedV(ctx: Context, ex: Long = 0L) { val tk = ++vSeq; val d = (vWaitSec * 1000L + ex).coerceAtLeast(1100L); uiP(d) { if (tk == vSeq && vOn) { if (isAiBusy || streamActive || isTtsBusyNow()) schedV(ctx, 900L) else if (vSpkNow) schedV(ctx, 1100L) else if (vBuf.isNotBlank()) flushV(ctx) } } }
 fun sttGo(ctx: Context, recreate: Boolean = false): Unit = uiP(0L) { if (!vOn || isAiBusy || streamActive || isTtsBusyNow()) return@uiP; if (JarvisRuntime.on) JarvisRuntime.stop(ctx); stopOneShotDictation(); if (System.currentTimeMillis() < pauseUntil) { uiP(500L) { sttGo(ctx, false) }; return@uiP }; runCatching { lastSttBeatMs = System.currentTimeMillis(); val ep = ++sttEpoch; if (recreate && sttEngine != null) { val old = sttEngine; sttEngine = null; runCatching { old?.cancel(); old?.destroy() } }; val appC = appCtxRef ?: ctx.applicationContext; val tCtx: Context = if (appInFg && mainActRef != null) mainActRef!! else appC; if (sttEngine == null) sttEngine = runCatching { SpeechRecognizer.createSpeechRecognizer(tCtx) }.getOrElse { SpeechRecognizer.createSpeechRecognizer(appC) }; sttEngine?.setRecognitionListener(object : RecognitionListener { override fun onReadyForSpeech(p: Bundle?) { if (ep != sttEpoch) return; lastSttBeatMs = System.currentTimeMillis(); if (!isAiBusy && !streamActive) vSt = if (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil) "👂" else if (vBuf.isBlank()) "듣는중" else "이어듣기" }; override fun onBeginningOfSpeech() { if (ep != sttEpoch) return; lastSttBeatMs = System.currentTimeMillis(); vSpkNow = true; vSeq++ }; override fun onRmsChanged(v: Float) {}; override fun onBufferReceived(b: ByteArray?) {}; override fun onEndOfSpeech() { if (ep != sttEpoch) return; lastSttBeatMs = System.currentTimeMillis(); vSpkNow = false }; override fun onPartialResults(b: Bundle?) { if (ep != sttEpoch) return; val pt = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""; if (pt.isNotEmpty() && !isAiBusy && !streamActive) { lastSttBeatMs = System.currentTimeMillis(); vSpkNow = true; vSeq++; sharedAiChatIn = if (vBuf.isBlank()) pt else vBuf + " " + pt; vSt = pt.take(8) } }; override fun onEvent(t: Int, p: Bundle?) {}; override fun onError(e: Int) { if (ep != sttEpoch) return; val had = vSpkNow; vSpkNow = false; lastSttBeatMs = System.currentTimeMillis(); val isSoft = (e == SpeechRecognizer.ERROR_NO_MATCH || e == SpeechRecognizer.ERROR_SPEECH_TIMEOUT); if (!isSoft) { val old = sttEngine; sttEngine = null; runCatching { old?.cancel(); old?.destroy() } }; if (vOn && !isAiBusy && !streamActive && !isTtsBusyNow()) { if (vBuf.isNotBlank()) schedV(ctx, if (had) -600L else 0L); val w = if (isSoft) (if (!appInFg) 150L else 40L) else (if (!appInFg) 800L else if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 750L else 380L); uiP(w) { sttGo(ctx, !isSoft) } } }; override fun onResults(b: Bundle?) { if (ep != sttEpoch) return; vSpkNow = false; lastSttBeatMs = System.currentTimeMillis(); if (!vOn || isAiBusy || streamActive || isTtsBusyNow()) return; val raw = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim() ?: ""; if (raw.isEmpty()) { if (vOn) uiP(300L) { sttGo(ctx, true) }; return }; var q = raw.replace(Regex("^[.,!? ]+"), "").trim(); if (lastEcho.isNotEmpty() && (q == lastEcho || (q.length >= 4 && lastEcho.contains(q)))) { uiP(400L) { sttGo(ctx, true) }; return }; if (wakeOnly && vBuf.isBlank() && System.currentTimeMillis() >= wakeFollowUpUntil) { val (wk, rem) = matchWakePhrase(q, wakeWord); if (!wk) { uiP(260L) { if (vOn) sttGo(ctx, true) }; return }; wakeFollowUpUntil = System.currentTimeMillis() + 18000L; q = rem; if (q.isEmpty()) { vSt = "🗣️말씀하세요"; speakOneShot(ctx, "네, 듣고 있습니다."); uiP(1200L) { if (vOn) sttGo(ctx, true) }; return } }; if (vBuf.isBlank() && q in listOf("잠깐", "잠시만", "기다려", "대기", "스톱")) { pauseUntil = System.currentTimeMillis() + 5000L; vSt = "대기"; uiP(1500L) { if (vOn) sttGo(ctx, true) }; return }; val cleanQ = q.replace(Regex("[음어아그쉿 ]+"), ""); if (cleanQ.length <= 1 && vBuf.isBlank()) { uiP(380L) { if (vOn) sttGo(ctx, true) }; return }; if (cleanQ.isNotEmpty()) { vBuf = if (vBuf.isBlank()) q else vBuf + " " + q; sharedAiChatIn = vBuf }; val inc = listOf("는데", "거든", "니까", "해서", "하고", "그리고", "그래서", "근데").any { q.endsWith(it) }; vSt = "이어듣기"; schedV(ctx, if (inc) 1400L else 0L); uiP(40L) { if (vOn && !isAiBusy && !streamActive) sttGo(ctx, false) } } }); sttEngine?.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR").putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, tCtx.packageName).putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3).putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true).putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, (vWaitSec.coerceIn(1, 30) * 1000L).coerceAtLeast(1500L)).putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, (vWaitSec.coerceIn(1, 30) * 800L).coerceAtLeast(1200L))) } }
-fun pushTtsChunk(ctx: Context, piece: String) { val cl = piece.replace("*", "").replace("`", "").replace("▍", "").trim(); if (cl.isEmpty()) return; lastEcho = cl.take(28).trim(); ttsLastEnqueueMs = System.currentTimeMillis(); ttsLastActiveMs = System.currentTimeMillis(); uiP(0L) { runCatching { sttEngine?.cancel() }; isAiBusy = true; vSt = "답변중"; val fl = ttsFirstChunk; ttsFirstChunk = false; ensureTtsAndSpeak(ctx, cl, fl) } }
+fun pushTtsChunk(ctx: Context, piece: String) { val cl = stripMarkdownAndEmojiForTts(piece).trim() ;if (cl.isEmpty()) return; lastEcho = cl.take(28).trim(); ttsLastEnqueueMs = System.currentTimeMillis(); ttsLastActiveMs = System.currentTimeMillis(); uiP(0L) { runCatching { sttEngine?.cancel() }; isAiBusy = true; vSt = "답변중"; val fl = ttsFirstChunk; ttsFirstChunk = false; ensureTtsAndSpeak(ctx, cl, fl) } }
 fun feedStreamTts(ctx: Context, cur: String, done: Boolean) {
     if ((!vOn && !JarvisRuntime.on && !ttsOn) || !ttsOn) {
         if (done) streamActive = false

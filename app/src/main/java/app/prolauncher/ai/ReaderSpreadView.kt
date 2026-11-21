@@ -272,29 +272,25 @@ val aiFloatH = if (aiFloatMin) 44.dp else (rootBoxH * 0.45f).coerceIn(220.dp, 33
 val aiFloatWPx = with(density) { aiFloatW.toPx() }
 val aiFloatHPx = with(density) { aiFloatH.toPx() }
 Column(Modifier.fillMaxSize().padding(horizontal = ui.hPad, vertical = ui.vPad)) {
-Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
-         Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = CV) {
-          TextButton(onClick = { shelf = !shelf; bmOpen = false }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) { Text(if (shelf) "📖" else "📚${books.size}", fontSize = ui.bodySp, color = fg, fontWeight = FontWeight.Bold) }
-          OutlinedButton(onClick = { bmOpen = !bmOpen; if (bmOpen) shelf = false }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("🔖${bms.size}", fontSize = ui.subSp, color = if (bmOpen) CA else fg) }
-          OutlinedButton(onClick = { twoPageMode = !twoPageMode; readerPrefs.edit().putBoolean("reader_two_page", twoPageMode).apply() }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text(if (twoPageMode) "📖" else "📄", fontSize = ui.subSp, color = if (twoPageMode) CG else fg) }
-         }
-         if (!shelf && act != null) {
-          Row(Modifier.weight(1f).padding(horizontal = 2.dp), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-           Surface(color = CG.copy(alpha = 0.18f), shape = RoundedCornerShape(6.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.65f)), modifier = Modifier.clickable { catBarOpen = !catBarOpen }) {
-            Text("${act.category.ifBlank { "전자책" }}▾", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CG, maxLines = 1, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
-           }
-           Text(act.title, fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        val renderReaderTopBar: @Composable (@Composable RowScope.() -> Unit) -> Unit = { centerSlot ->
+         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
+          Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = CV) {
+           TextButton(onClick = { shelf = !shelf; bmOpen = false }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) { Text(if (shelf) "📖" else "📚${books.size}", fontSize = ui.bodySp, color = fg, fontWeight = FontWeight.Bold) }
+           OutlinedButton(onClick = { bmOpen = !bmOpen; if (bmOpen) shelf = false }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("🔖${bms.size}", fontSize = ui.subSp, color = if (bmOpen) CA else fg) }
+           OutlinedButton(onClick = { twoPageMode = !twoPageMode; readerPrefs.edit().putBoolean("reader_two_page", twoPageMode).apply() }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text(if (twoPageMode) "📖" else "📄", fontSize = ui.subSp, color = if (twoPageMode) CG else fg) }
           }
-         } else {
-          Spacer(Modifier.weight(1f))
+          Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()).padding(horizontal = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally), verticalAlignment = CV) {
+           centerSlot()
+          }
+          Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = CV) {
+           OutlinedButton(onClick = { if (!searchOpen) searchAllBooks = shelf || act == null; searchOpen = !searchOpen }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Text("🔎", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (searchOpen || searchQuery.isNotBlank()) CA else fg) }
+           OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("📂", fontSize = ui.subSp, color = fg) }
+           OutlinedButton(onClick = { cfgOpen = !cfgOpen }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("⚙️${curPt}", fontSize = ui.subSp, color = if (cfgOpen) CG else fg) }
+           TextButton(onClick = onHome, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp)) { Text("🏠", fontSize = (ui.subSp.value + 1).sp, color = mut) }
+          }
          }
-         Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = CV) {
-          OutlinedButton(onClick = { if (!searchOpen) searchAllBooks = shelf || act == null; searchOpen = !searchOpen }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Text("🔎", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (searchOpen || searchQuery.isNotBlank()) CA else fg) }
-          OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("📂", fontSize = ui.subSp, color = fg) }
-          OutlinedButton(onClick = { cfgOpen = !cfgOpen }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("⚙️${curPt}", fontSize = ui.subSp, color = if (cfgOpen) CG else fg) }
-          TextButton(onClick = onHome, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp)) { Text("🏠", fontSize = (ui.subSp.value + 1).sp, color = mut) }
-         }
-}
+        }
+        if (shelf || act == null) { renderReaderTopBar {} }
 if (searchOpen && (shelf || act == null)) {
 val actPreviewFull = remember(act?.id, act?.pages, smartReflowOn) { act?.let { buildBookReflowSource(it.pages, smartReflow = smartReflowOn, preservePoetry = it.category.contains("시")).fullText } ?: "" }
 ReaderUnifiedSearchBar(
@@ -665,6 +661,30 @@ commitExcerptHook = ::commitDraftIfEditing
             }
             val leftPageDisplay = remember(leftPageTx, searchQuery, isNightTheme, leftSlice.s, bookHls) { buildHighlightedBookPage(leftPageTx, searchQuery, isNightTheme, leftSlice.s, bookHls) }
             val rightPageDisplay = remember(rightPageTx, searchQuery, isNightTheme, rightSlice?.s, bookHls) { buildHighlightedBookPage(rightPageTx, searchQuery, isNightTheme, rightSlice?.s ?: 0, bookHls) }
+            renderReaderTopBar {
+             Surface(color = CG.copy(alpha = 0.18f), shape = RoundedCornerShape(6.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.65f)), modifier = Modifier.clickable { catBarOpen = !catBarOpen }) {
+              Text("${act.category.ifBlank { "전자책" }}▾", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CG, maxLines = 1, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+             }
+             Text(act.title.take(12), fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, softWrap = false)
+             ChipBtn(if (readerAiMode == 2) "🪟" else "🦙", readerAiOpen, CG) { commitDraftIfEditing(); aiFloatMin = false; readerAiOpen = !readerAiOpen }
+             ChipBtn("🖍️", highlightMode, CA) { highlightMode = !highlightMode; if (highlightMode) selectMode = false }
+             ChipBtn("✂️", selectMode || hasSel, CA) { if (!selectMode) highlightMode = false; toggleScissorsButton() }
+             ChipBtn(if (ttsHere) "⏹️" else "🔊", ttsHere, CG) {
+              if (ttsHere) ReaderTtsRuntime.stop(ctx) else {
+               val chosen = commitDraftIfEditing()
+               val startEx = if (chosen.isNotBlank()) chosen else reflowSrc.fullText.substring(leftSlice.s.coerceIn(0, reflowSrc.fullText.length), reflowSrc.rawEndOf(curRawIdx).coerceIn(0, reflowSrc.fullText.length)).trim()
+               ReaderTtsRuntime.start(ctx, act, curRawIdx, startEx)
+              }
+             }
+             if (ReaderTtsRuntime.on && ttsBarMin) { ChipBtn("🔼", false, CG) { ttsBarMin = false } }
+             ChipBtn(if (readerMemoOpen) "📝" else if (readerMemoMode == 2) "🪟" else "◫", readerMemoOpen, CW) { if (readerMemoOpen) readerMemoOpen = false else openReaderMemoInLastMode() }
+             ChipBtn(if (isBm) "🔖★" else "🔖", isBm, CA) {
+              val nx = if (isBm) bms.filterNot { it.bookId == act.id && (if (it.charOffset >= 0) it.charOffset in leftSlice.s..curSpreadEndChar else it.pageIndex == curRawIdx) }
+              else listOf(BookmarkEntry(act.id, act.title, curRawIdx, aiTargetText.replace(10.toChar(), ' ').take(45), leftSlice.s)) + bms
+              bms = nx; saveBookmarks(ctx, nx)
+             }
+             if (searchQuery.isNotBlank() && !searchOpen) { ChipBtn("✕", false, CM) { searchQuery = "" } }
+            }
             if (searchOpen) {
              ReaderUnifiedSearchBar(
               books = books, activeBook = act, activeBookFullText = reflowSrc.fullText, activeBookPages = vPages, activeCurVIdx = vIdx, smartReflow = smartReflowOn,
@@ -675,28 +695,6 @@ commitExcerptHook = ::commitDraftIfEditing
               },
               onClose = { searchOpen = false }
              )
-            }
-            Box(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
-             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally), verticalAlignment = CV) {
-              ChipBtn(if (readerAiMode == 2) "🪟" else "🦙", readerAiOpen, CG) { commitDraftIfEditing(); aiFloatMin = false; readerAiOpen = !readerAiOpen }
-              ChipBtn("🖍️", highlightMode, CA) { highlightMode = !highlightMode; if (highlightMode) selectMode = false }
-              ChipBtn("✂️", selectMode || hasSel, CA) { if (!selectMode) highlightMode = false; toggleScissorsButton() }
-              ChipBtn(if (ttsHere) "⏹️" else "🔊", ttsHere, CG) {
-               if (ttsHere) ReaderTtsRuntime.stop(ctx) else {
-                val chosen = commitDraftIfEditing()
-                val startEx = if (chosen.isNotBlank()) chosen else reflowSrc.fullText.substring(leftSlice.s.coerceIn(0, reflowSrc.fullText.length), reflowSrc.rawEndOf(curRawIdx).coerceIn(0, reflowSrc.fullText.length)).trim()
-                ReaderTtsRuntime.start(ctx, act, curRawIdx, startEx)
-               }
-              }
-              if (ReaderTtsRuntime.on && ttsBarMin) { ChipBtn("🔼", false, CG) { ttsBarMin = false } }
-              ChipBtn(if (readerMemoOpen) "📝" else if (readerMemoMode == 2) "🪟" else "◫", readerMemoOpen, CW) { if (readerMemoOpen) readerMemoOpen = false else openReaderMemoInLastMode() }
-              ChipBtn(if (isBm) "🔖★" else "🔖", isBm, CA) {
-               val nx = if (isBm) bms.filterNot { it.bookId == act.id && (if (it.charOffset >= 0) it.charOffset in leftSlice.s..curSpreadEndChar else it.pageIndex == curRawIdx) }
-               else listOf(BookmarkEntry(act.id, act.title, curRawIdx, aiTargetText.replace(10.toChar(), ' ').take(45), leftSlice.s)) + bms
-               bms = nx; saveBookmarks(ctx, nx)
-              }
-              if (searchQuery.isNotBlank() && !searchOpen) { ChipBtn("✕", false, CM) { searchQuery = "" } }
-             }
             }
             if (highlightMode) {
              Surface(color = Color(0xFF101929), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.9.dp, CA.copy(alpha = 0.75f)), modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp)) {

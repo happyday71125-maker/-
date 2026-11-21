@@ -25,6 +25,8 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.*
 import androidx.compose.ui.unit.*
 import kotlinx.coroutines.*
+import androidx.compose.ui.layout.onSizeChanged
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 object ReaderLayoutCache {
@@ -105,6 +107,8 @@ fun ReaderView(
 var allHighlights by remember { mutableStateOf(loadBookHighlights(ctx)) }
 var highlightMode by remember { mutableStateOf(false) }
     var hlColorIdx by remember { mutableStateOf(0) }
+    var hlListOpen by remember { mutableStateOf(false) }
+    var lineHeightIdx by remember { mutableStateOf(readerPrefs.getInt("reader_line_height_idx", 1).coerceIn(0, 2)) }
     // Built-in Reader Memo & AI Floating states — exact MarkdownWriterStudio free-drag MutableState architecture!
     var readerMemoOpen by remember { mutableStateOf(false) }
 var readerMemoMode by remember { mutableStateOf(readerPrefs.getInt("reader_memo_last_mode", 1).coerceIn(1, 2)) }
@@ -411,7 +415,14 @@ onClose = { searchOpen = false }
                                             ReaderPointBtn("${pt}pt", curPt == pt, CG, Modifier.weight(1f)) { onCfg(cfg.copy(readerFontSizeSp = pt)) }
                                         }
                                     }
-                                }
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                                        listOf(0 to "줄간격 좁게", 1 to "줄간격 보통", 2 to "줄간격 넓게").forEach { (idx, lbl) ->
+                                            ReaderPointBtn(lbl, lineHeightIdx == idx, CA, Modifier.weight(1f)) {
+                                                lineHeightIdx = idx
+                                                readerPrefs.edit().putInt("reader_line_height_idx", idx).apply()
+                                            }
+                                        }
+                                    }
                             }
                         }
                         1 -> {
@@ -504,25 +515,13 @@ onClose = { searchOpen = false }
                 }
             }
             val textMeasurer = rememberTextMeasurer()
-            val pageTextStyle = remember(curPt, cfg.readerUseSerif, fg) {
-                TextStyle(
-                    lineBreak = LineBreak.Paragraph,
-                    hyphens = Hyphens.Auto,
-                    fontSize = curPt.sp,
-                    lineHeight = (curPt * 1.58f).sp,
-                    fontFamily = if (cfg.readerUseSerif) FontFamily.Serif else FontFamily.SansSerif,
-                    color = fg
-                )
-            }
-            val outerPad = if (twoPageMode) 12.dp else 14.dp
-            val spineW = if (twoPageMode) 20.dp else 0.dp
-            val fixedBookW = (conf.screenWidthDp.dp - ui.hPad * 2).coerceAtLeast(220.dp)
-            val fixedColW = if (twoPageMode) ((fixedBookW - outerPad * 2 - spineW) / 2f).coerceAtLeast(80.dp) else (fixedBookW - outerPad * 2).coerceAtLeast(100.dp)
-            val fixedTextH = (conf.screenHeightDp.dp - ui.vPad * 2 - 142.dp).coerceAtLeast(180.dp)
-            val fixedColWPx = with(density) { fixedColW.roundToPx() }.coerceAtLeast(80)
-            val fixedTextHPx = (with(density) { fixedTextH.toPx() } - 4f).coerceAtLeast(120f)
-
-            val pageCacheKey = "${act.id}_${reflowSrc.fullText.length}_${reflowSrc.fullText.hashCode()}_${fixedColWPx}_${fixedTextHPx.roundToInt()}_${curPt}_${cfg.readerUseSerif}"
+                 val lineHeightMult = when (lineHeightIdx) { 0 -> 1.38f; 2 -> 1.78f; else -> 1.58f }
+            val pageTextStyle = remember(curPt, cfg.readerUseSerif, fg, lineHeightMult) { TextStyle(fontSize = curPt.sp, lineHeight = (curPt * lineHeightMult).sp, fontFamily = if (cfg.readerUseSerif) FontFamily.Serif else FontFamily.SansSerif, lineBreak = LineBreak.Paragraph, hyphens = Hyphens.Auto, color = fg) }
+            val outerPad = if (twoPageMode) 12.dp else 14.dp; val spineW = if (twoPageMode) 20.dp else 0.dp; val fixedBookW = (conf.screenWidthDp.dp - ui.hPad * 2).coerceAtLeast(220.dp)
+            val fixedColW = if (twoPageMode) ((fixedBookW - outerPad * 2 - spineW) / 2f).coerceAtLeast(80.dp) else (fixedBookW - outerPad * 2).coerceAtLeast(100.dp); val fallbackTextH = (conf.screenHeightDp.dp - ui.vPad * 2 - 142.dp).coerceAtLeast(180.dp)
+            val measuredTextHPxState = remember(conf.screenWidthDp, conf.screenHeightDp, twoPageMode) { mutableStateOf(0f) }; val cardInnerChromePx = with(density) { 58.dp.toPx() }; val imeBottomPx = WindowInsets.ime.getBottom(density)
+            val fixedColWPx = with(density) { fixedColW.roundToPx() }.coerceAtLeast(80); val fallbackTextHPx = (with(density) { fallbackTextH.toPx() } - 4f).coerceAtLeast(120f); val fixedTextHPx = if (measuredTextHPxState.value >= 120f) measuredTextHPxState.value else fallbackTextHPx; val fixedTextH = with(density) { fixedTextHPx.toDp() }.coerceAtLeast(180.dp)
+            val pageCacheKey = "${act.id}_${reflowSrc.fullText.length}_${reflowSrc.fullText.hashCode()}_${fixedColWPx}_${fixedTextHPx.roundToInt()}_${curPt}_${cfg.readerUseSerif}_${lineHeightIdx}"
             var lastStablePages by remember(act.id) {
                 val prior = ReaderLayoutCache.pagesCache.entries.lastOrNull { it.key.startsWith("${act.id}_") }?.value
                     ?: listOf(PageSlice(0, reflowSrc.fullText.length.coerceAtMost(1500)))
@@ -668,7 +667,8 @@ commitExcerptHook = ::commitDraftIfEditing
              Text(act.title.take(12), fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, softWrap = false)
              ChipBtn(if (readerAiMode == 2) "🪟" else "🦙", readerAiOpen, CG) { commitDraftIfEditing(); aiFloatMin = false; readerAiOpen = !readerAiOpen }
              ChipBtn("🖍️", highlightMode, CA) { highlightMode = !highlightMode; if (highlightMode) selectMode = false }
-             ChipBtn("✂️", selectMode || hasSel, CA) { if (!selectMode) highlightMode = false; toggleScissorsButton() }
+            if (bookHls.isNotEmpty()) { ChipBtn("📑${bookHls.size}", hlListOpen, CG) { hlListOpen = true } }
+                ChipBtn("✂️", selectMode || hasSel, CA) { if (!selectMode) highlightMode = false; toggleScissorsButton() }
              ChipBtn(if (ttsHere) "⏹️" else "🔊", ttsHere, CG) {
               if (ttsHere) ReaderTtsRuntime.stop(ctx) else {
                val chosen = commitDraftIfEditing()
@@ -704,7 +704,8 @@ commitExcerptHook = ::commitDraftIfEditing
                ChipBtn("🟢민트", hlColorIdx == 1, CG) { hlColorIdx = 1 }
                ChipBtn("🩷핑크", hlColorIdx == 2, Color(0xFFF472B6)) { hlColorIdx = 2 }
                if (bookHls.isNotEmpty()) {
-                ChipBtn("↩️취소", false, CW) { val lastId = bookHls.last().id; val nx = allHighlights.filterNot { it.id == lastId }; allHighlights = nx; saveBookHighlights(ctx, nx) }
+              ChipBtn("📑모아보기(${bookHls.size})", false, CG) { hlListOpen = true }
+                   ChipBtn("↩️취소", false, CW) { val lastId = bookHls.last().id; val nx = allHighlights.filterNot { it.id == lastId }; allHighlights = nx; saveBookHighlights(ctx, nx) }
                 ChipBtn("🗑️이쪽지움", false, Color(0xFFF87171)) { val nx = allHighlights.filterNot { it.bookId == act.id && it.endOff > leftSlice.s && it.startOff < curSpreadEndChar }; allHighlights = nx; saveBookHighlights(ctx, nx) }
                }
                ChipBtn("✓완료", true, CG) { highlightMode = false }
@@ -996,7 +997,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                 }
             }
             }
-            Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp)) {
+            val transientChromeOpen = imeBottomPx > 0 || searchOpen || highlightMode || (readerAiOpen && readerAiMode == 1) || selBannerVisible || sliderBarVisible || catBarOpen || (ReaderTtsRuntime.on && !ttsBarMin); Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp).onSizeChanged { sz -> if (!transientChromeOpen && sz.height > 200) { val cand = (sz.height.toFloat() - cardInnerChromePx).coerceAtLeast(120f); if (abs(cand - measuredTextHPxState.value) >= 8f) { measuredTextHPxState.value = cand } } }) {
                    if (readerMemoOpen && readerMemoMode == 1) {
                     if (memoSplitHoriz) {
                         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1031,7 +1032,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                     renderBookViewport(Modifier.fillMaxSize())
                 }
            }
-            if (sliderBarVisible) {
+            if (hlListOpen) { val sortedHls = remember(bookHls) { bookHls.sortedBy { it.startOff } }; AlertDialog(onDismissRequest = { hlListOpen = false }, containerColor = Color(0xFF0E1525), title = { Row(Modifier.fillMaxWidth(), SB, CV) { Text("🖍️ 형광펜 모아보기 (${sortedHls.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = CA); if (sortedHls.isNotEmpty()) { ChipBtn("🗑️전체삭제", false, Color(0xFFF87171)) { val nx = allHighlights.filterNot { it.bookId == act.id }; allHighlights = nx; saveBookHighlights(ctx, nx); hlListOpen = false } } } }, text = { if (sortedHls.isEmpty()) { Text("이 책에 저장된 형광펜이 없습니다. 상단 🖍️ 버튼으로 문장을 탭해 밑줄을 칠 수 있어요.", fontSize = ui.subSp, color = CM) } else { LazyColumn(Modifier.fillMaxWidth().heightIn(max = 340.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { items(sortedHls, key = { it.id }) { hl -> val dot = when (hl.colorIdx) { 1 -> "🟢"; 2 -> "🩷"; else -> "🟡" }; val hlPg = vPages.indexOfLast { it.s <= hl.startOff }.coerceAtLeast(0) + 1; val sIdx = hl.startOff.coerceIn(0, reflowSrc.fullText.length); val eIdx = hl.endOff.coerceIn(sIdx, reflowSrc.fullText.length); val snippet = reflowSrc.fullText.substring(sIdx, eIdx).replace(10.toChar(), ' ').trim().ifEmpty { "(빈 구절)" }; Surface(color = Color(0xFF141D2E), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, Color(0xFF283753)), modifier = Modifier.fillMaxWidth().clickable { hlListOpen = false; jumpToCharOffset(hl.startOff) }) { Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) { Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) { Text("$dot ${hlPg}쪽", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG); Text(snippet, fontSize = ui.subSp, color = CW, maxLines = 3, overflow = TextOverflow.Ellipsis) }; Text("🗑️", fontSize = 15.sp, modifier = Modifier.clickable { val nx = allHighlights.filterNot { it.id == hl.id }; allHighlights = nx; saveBookHighlights(ctx, nx) }.padding(4.dp)) } } } } } }, confirmButton = { TextButton(onClick = { hlListOpen = false }) { Text("닫기", color = CG, fontWeight = FontWeight.Bold) } }) }; if (sliderBarVisible) {
                 Surface(
                     color = Color(0xFF0E1626),
                     shape = RoundedCornerShape(10.dp),

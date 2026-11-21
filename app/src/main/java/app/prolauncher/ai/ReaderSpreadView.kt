@@ -518,7 +518,7 @@ onClose = { searchOpen = false }
             val spineW = if (twoPageMode) 20.dp else 0.dp
             val fixedBookW = (conf.screenWidthDp.dp - ui.hPad * 2).coerceAtLeast(220.dp)
             val fixedColW = if (twoPageMode) ((fixedBookW - outerPad * 2 - spineW) / 2f).coerceAtLeast(80.dp) else (fixedBookW - outerPad * 2).coerceAtLeast(100.dp)
-            val fixedTextH = (conf.screenHeightDp.dp - ui.vPad * 2 - 216.dp).coerceAtLeast(180.dp)
+            val fixedTextH = (conf.screenHeightDp.dp - ui.vPad * 2 - 142.dp).coerceAtLeast(180.dp)
             val fixedColWPx = with(density) { fixedColW.roundToPx() }.coerceAtLeast(80)
             val fixedTextHPx = (with(density) { fixedTextH.toPx() } - 4f).coerceAtLeast(120f)
 

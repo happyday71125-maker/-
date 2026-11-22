@@ -1,7 +1,10 @@
 package app.prolauncher.ai
 import android.content.Context
 import android.net.Uri
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.text.Html
+import android.text.TextPaint
 import androidx.compose.runtime.*
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -112,44 +115,64 @@ object EbookTextReflower {
   if (unfinishedSuffixes.any { trimmed.endsWith(" $it") || (trimmed.length > 3 && trimmed.endsWith(it)) }) return false
   return false
  }
+ private val standaloneSingleHangul = setOf(
+  '나', '너', '저', '그', '이', '더', '덜', '잘', '못', '안', '또', '꼭', '참', '좀', '막', '다', '늘', '곧', '왜', '뭐',
+  '집', '책', '길', '밤', '낮', '눈', '손', '발', '속', '위', '앞', '뒤', '옆', '밖', '일', '말', '글', '물', '불', '술',
+  '밥', '옷', '꽃', '산', '강', '달', '별', '해', '비', '숨', '꿈', '첫', '새', '헌', '온', '한', '두', '세', '네'
+ )
+ private val boundExactHangul = setOf("다", "요", "죠", "네", "군", "지", "까", "니", "고", "며", "서", "면", "던", "은", "는", "을", "를", "의", "에", "로", "과", "와", "도", "만")
+ private val boundPrefixHangul = listOf(
+  "니다", "습니다", "어요", "아요", "여요", "네요", "군요", "지요", "니까", "면서", "지만", "는데",
+  "아서", "어서", "해서", "으로", "에서", "에게", "한테", "부터", "까지", "처럼", "만큼", "보다", "라도"
+ )
+ fun joinMidWordWithoutSpace(prev: String, prevEndedSpace: Boolean, nextTrimmed: String): Boolean {
+  if (prevEndedSpace || prev.isEmpty() || nextTrimmed.isEmpty()) return false
+  if (prev.last().code !in 0xAC00..0xD7A3 || nextTrimmed.first().code !in 0xAC00..0xD7A3) return false
+  val prevTok = prev.substringAfterLast(' ')
+  val nextRawTok = nextTrimmed.substringBefore(' ')
+  val nextTok = nextRawTok.trimEnd('.', ',', '?', '!', '~', '…', ':', ';', CH_DQ, CH_SQ, '”', '’', ')', ']', '」', '』')
+  if (nextTok.isEmpty()) return false
+  if (prevTok.length == 1 && nextTok.length == 1) return true
+  if (prevTok == "어떻" && nextTok.startsWith("게")) return true
+  if (nextTok in boundExactHangul || boundPrefixHangul.any { nextTok.startsWith(it) }) return true
+  if (prevTok.length == 1 && prevTok[0] !in standaloneSingleHangul) return true
+  return false
+ }
  fun unwrapNaturalParagraphs(raw: String, preserveStanzas: Boolean = false): String {
   val cleaned = cleanControlChars(raw)
   if (cleaned.isBlank()) return ""
   if (preserveStanzas) {
    return cleaned.split(CH_NL).joinToString(STR_NL) { it.trimEnd() }.trim()
   }
-val rawLines = cleaned.split(CH_NL)
-  val hasBlankLines = cleaned.contains(STR_PARA)
-  val nonEmptyLens = rawLines.map { it.trim().length }.filter { it > 0 }.sorted()
-  val wrapRefLen = if (nonEmptyLens.isEmpty()) 80 else nonEmptyLens[(nonEmptyLens.size * 85 / 100).coerceIn(0, nonEmptyLens.lastIndex)]
-  val standaloneSingle = setOf(
-   '나', '너', '저', '그', '이', '더', '덜', '잘', '못', '안', '또', '꼭', '참', '좀', '막', '다', '늘', '곧', '왜', '뭐',
-   '집', '책', '길', '밤', '낮', '눈', '손', '발', '속', '위', '앞', '뒤', '옆', '밖', '일', '말', '글', '물', '불', '술',
-   '밥', '옷', '꽃', '산', '강', '달', '별', '해', '비', '숨', '꿈', '첫', '새', '헌', '온', '한', '두', '세', '네'
-  )
-  val boundExact = setOf("다", "요", "죠", "네", "군", "지", "까", "니", "고", "며", "서", "면", "던", "은", "는", "을", "를", "의", "에", "로", "과", "와", "도", "만")
-  val boundPrefixes = listOf(
-   "니다", "습니다", "어요", "아요", "여요", "네요", "군요", "지요", "니까", "면서", "지만", "는데",
-   "아서", "어서", "해서", "으로", "에서", "에게", "한테", "부터", "까지", "처럼", "만큼", "보다", "라도"
-  )
-  fun isHangulSyl(c: Char): Boolean = c.code in 0xAC00..0xD7A3
-  fun joinMidWordWithoutSpace(prev: String, prevEndedSpace: Boolean, nextTrimmed: String): Boolean {
-   if (prevEndedSpace || prev.isEmpty() || nextTrimmed.isEmpty()) return false
-   if (!isHangulSyl(prev.last()) || !isHangulSyl(nextTrimmed.first())) return false
-   val prevTok = prev.substringAfterLast(' ')
-   val nextRawTok = nextTrimmed.substringBefore(' ')
-   val nextTok = nextRawTok.trimEnd('.', ',', '?', '!', '~', '…', ':', ';', CH_DQ, CH_SQ, '”', '’', ')', ']', '」', '』')
-   if (nextTok.isEmpty()) return false
-   if (prevTok.length == 1 && nextTok.length == 1) return true
-   if (prevTok == "어떻" && nextTok.startsWith("게")) return true
-   if (nextTok in boundExact || boundPrefixes.any { nextTok.startsWith(it) }) return true
-   if (prevTok.length == 1 && prevTok[0] !in standaloneSingle) return true
-   return false
+  val rawLines = cleaned.split(CH_NL)
+  val nonEmptyTrimmed = ArrayList<String>(rawLines.size)
+  var blankTransitions = 0
+  var sawAnyContent = false
+  var prevWasBlank = false
+  for (ln in rawLines) {
+   val t = ln.trim()
+   if (t.isEmpty()) {
+    if (sawAnyContent) prevWasBlank = true
+   } else if (!isNoisePageMarker(t)) {
+    if (sawAnyContent && prevWasBlank) blankTransitions++
+    sawAnyContent = true
+    prevWasBlank = false
+    nonEmptyTrimmed.add(t)
+   }
   }
+  if (nonEmptyTrimmed.isEmpty()) return ""
+  val sortedLens = nonEmptyTrimmed.map { it.length }.sorted()
+  val wrapRefLen = sortedLens[(sortedLens.size * 85 / 100).coerceIn(0, sortedLens.lastIndex)]
+  val incompleteCnt = nonEmptyTrimmed.count { !endsCompleteSentence(it) && !looksLikeStandaloneHeading(it) }
+  val brokenParaArtifact = nonEmptyTrimmed.size >= 4 &&
+   blankTransitions >= (nonEmptyTrimmed.size * 45 / 100) &&
+   incompleteCnt >= (nonEmptyTrimmed.size * 22 / 100)
   val out = StringBuilder(cleaned.length)
-  var curPara = StringBuilder()
+  val curPara = StringBuilder()
   var lastRawTrimLen = 0
   var lastRawEndedSpace = false
+  var sawBlankLine = false
+  var blankLineCount = 0
   fun flushPara() {
    if (curPara.isNotEmpty()) {
     if (out.isNotEmpty()) out.append(STR_PARA)
@@ -162,33 +185,45 @@ val rawLines = cleaned.split(CH_NL)
    val nextIndent = rawLn.startsWith(" ") || rawLn.startsWith("　") || rawLn.startsWith(CH_TAB.toString())
    val trimmed = rawLn.trim().replace(Regex(" {2,}"), " ")
    if (trimmed.isEmpty()) {
-    flushPara()
-    lastRawTrimLen = 0
-    lastRawEndedSpace = false
+    if (curPara.isNotEmpty()) {
+     sawBlankLine = true
+     blankLineCount++
+    }
     continue
    }
-   if (isNoisePageMarker(trimmed)) {
-    continue
-   }
+   if (isNoisePageMarker(trimmed)) continue
    if (curPara.isEmpty()) {
     curPara.append(trimmed)
     lastRawTrimLen = trimmed.length
     lastRawEndedSpace = endedSpace
+    sawBlankLine = false
+    blankLineCount = 0
     continue
    }
    val prevStr = curPara.toString()
    val prevComplete = endsCompleteSentence(prevStr)
    val nextStruct = isStructuralLineStart(trimmed)
    val prevHeading = looksLikeStandaloneHeading(prevStr)
-   val paraBreakAtPeriod = prevComplete && !hasBlankLines && (wrapRefLen > 75 || lastRawTrimLen < (wrapRefLen * 0.78f).toInt() || nextIndent)
-   if (nextStruct || prevHeading || (prevComplete && isDialogueStart(trimmed)) || paraBreakAtPeriod) {
+   val shouldFlush = when {
+    nextStruct || prevHeading -> true
+    !prevComplete -> blankLineCount >= 2 && lastRawTrimLen <= 14
+    isDialogueStart(trimmed) -> true
+    sawBlankLine -> {
+     if (brokenParaArtifact && blankLineCount == 1 && lastRawTrimLen >= (wrapRefLen * 0.82f).toInt()) false
+     else true
+    }
+    else -> wrapRefLen > 75 || lastRawTrimLen < (wrapRefLen * 0.78f).toInt() || nextIndent
+   }
+   if (shouldFlush) {
     flushPara()
     curPara.append(trimmed)
    } else {
     if (prevStr.endsWith("-") && prevStr.length >= 2 && prevStr[prevStr.length - 2].isLetter() && trimmed.first().isLetter()) {
      curPara.setLength(curPara.length - 1)
      curPara.append(trimmed)
-    } else if (joinMidWordWithoutSpace(prevStr, lastRawEndedSpace, trimmed)) {
+    } else if (!sawBlankLine && joinMidWordWithoutSpace(prevStr, lastRawEndedSpace, trimmed)) {
+     curPara.append(trimmed)
+    } else if (sawBlankLine && brokenParaArtifact && joinMidWordWithoutSpace(prevStr, false, trimmed)) {
      curPara.append(trimmed)
     } else {
      curPara.append(' ').append(trimmed)
@@ -196,10 +231,163 @@ val rawLines = cleaned.split(CH_NL)
    }
    lastRawTrimLen = trimmed.length
    lastRawEndedSpace = endedSpace
+   sawBlankLine = false
+   blankLineCount = 0
   }
   flushPara()
   return out.toString().trim()
  }
+ private fun createBookPaint(fontSizePx: Float, useSerif: Boolean): TextPaint {
+  return TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+   textSize = fontSizePx.coerceAtLeast(18f)
+   typeface = if (useSerif) Typeface.SERIF else Typeface.SANS_SERIF
+  }
+ }
+ fun wrapPageKeepAll(pageTx: String, colWPx: Int, fontSizePx: Float, useSerif: Boolean): String {
+  if (pageTx.isEmpty() || colWPx <= 60) return pageTx
+  val paint = createBookPaint(fontSizePx, useSerif)
+  val maxW = (colWPx.toFloat() - fontSizePx * 0.36f).coerceAtLeast(60f)
+  val chars = pageTx.toCharArray()
+  val n = chars.size
+  var segStart = 0
+  var i = 0
+  while (i <= n) {
+   if (i == n || chars[i] == CH_NL) {
+    var cur = segStart
+    while (cur < i) {
+     var scanStart = cur
+     while (scanStart < i && chars[scanStart] == ' ') scanStart++
+     if (scanStart >= i) break
+     var bestEnd = cur
+     var j = scanStart + 1
+     while (j <= i) {
+      if (j == i || chars[j] == ' ') {
+       val w = paint.measureText(chars, cur, j - cur)
+       if (w <= maxW) {
+        bestEnd = j
+        if (j == i) break
+       } else {
+        break
+       }
+      }
+      j++
+     }
+     if (bestEnd == i) {
+      break
+     } else if (bestEnd > cur) {
+      chars[bestEnd] = CH_NL
+      cur = bestEnd + 1
+     } else {
+      var sp = -1
+      for (k in scanStart + 1 until i) {
+       if (chars[k] == ' ') {
+        sp = k
+        break
+       }
+      }
+      if (sp != -1) {
+       chars[sp] = CH_NL
+       cur = sp + 1
+      } else {
+       break
+      }
+     }
+    }
+    segStart = i + 1
+   }
+   i++
+  }
+  return String(chars)
+ }
+ fun paginateBookKeepAll(
+  full: String,
+  colWPx: Int,
+  textHPx: Float,
+  fontSizePx: Float,
+  lineHeightPx: Float,
+  useSerif: Boolean
+ ): List<PageSlice> {
+  if (full.isBlank()) return listOf(PageSlice(0, full.length))
+  val n = full.length
+  if (colWPx <= 60 || textHPx <= 60f) {
+   val fb = ArrayList<PageSlice>()
+   var p = 0
+   while (p < n) {
+    val nx = minOf(n, p + 550)
+    fb.add(PageSlice(p, nx))
+    p = nx
+   }
+   return if (fb.isEmpty()) listOf(PageSlice(0, n)) else fb
+  }
+  val paint = createBookPaint(fontSizePx, useSerif)
+  val maxW = (colWPx.toFloat() - fontSizePx * 0.36f).coerceAtLeast(60f)
+  val safeLineH = lineHeightPx.coerceAtLeast(fontSizePx * 1.2f)
+  val maxLines = ((textHPx - fontSizePx * 0.25f) / safeLineH).toInt().coerceAtLeast(3)
+  val out = ArrayList<PageSlice>((n / 420).coerceAtLeast(8))
+  var pos = 0
+  while (pos < n && (full[pos] == CH_NL || full[pos] == CH_CR)) pos++
+  while (pos < n) {
+   var cur = pos
+   var usedLines = 0
+   while (cur < n && usedLines < maxLines) {
+    val ch0 = full[cur]
+    if (ch0 == CH_CR) {
+     cur++
+     continue
+    }
+    if (ch0 == CH_NL) {
+     usedLines++
+     cur++
+     continue
+    }
+    val searchLim = minOf(n, cur + 2400)
+    var segEnd = cur
+    while (segEnd < searchLim && full[segEnd] != CH_NL) segEnd++
+    var scanStart = cur
+    while (scanStart < segEnd && full[scanStart] == ' ') scanStart++
+    var bestEnd = cur
+    if (scanStart < segEnd) {
+     var j = scanStart + 1
+     while (j <= segEnd) {
+      if (j == segEnd || full[j] == ' ') {
+       val w = paint.measureText(full, cur, j)
+       if (w <= maxW) {
+        bestEnd = j
+        if (j == segEnd) break
+       } else {
+        break
+       }
+      }
+      j++
+     }
+    } else {
+     bestEnd = segEnd
+    }
+    if (bestEnd > cur) {
+     cur = bestEnd
+     if (cur < n && full[cur] == ' ') {
+      cur++
+     } else if (cur < n && full[cur] == CH_NL) {
+      cur++
+     }
+     usedLines++
+    } else {
+     val broken = paint.breakText(full, cur, segEnd, true, maxW, null).coerceAtLeast(1)
+     var nextCur = (cur + broken).coerceAtMost(segEnd)
+     if (nextCur < segEnd && Character.isLowSurrogate(full[nextCur]) && nextCur > cur + 1) nextCur--
+     cur = nextCur
+     if (cur < n && full[cur] == CH_NL) cur++
+     usedLines++
+    }
+   }
+   if (cur <= pos) cur = (pos + 1).coerceAtMost(n)
+   out.add(PageSlice(pos, cur))
+   pos = cur
+   while (pos < n && (full[pos] == CH_NL || full[pos] == CH_CR)) pos++
+  }
+  return if (out.isEmpty()) listOf(PageSlice(0, n)) else out
+ }
+
  fun extractCleanPdf(context: Context, uri: Uri): String {
   PDFBoxResourceLoader.init(context)
   context.contentResolver.openInputStream(uri)?.use { input ->

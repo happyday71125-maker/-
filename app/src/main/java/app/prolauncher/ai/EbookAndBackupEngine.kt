@@ -118,9 +118,38 @@ object EbookTextReflower {
   if (preserveStanzas) {
    return cleaned.split(CH_NL).joinToString(STR_NL) { it.trimEnd() }.trim()
   }
-  val rawLines = cleaned.split(CH_NL)
+val rawLines = cleaned.split(CH_NL)
+  val hasBlankLines = cleaned.contains(STR_PARA)
+  val nonEmptyLens = rawLines.map { it.trim().length }.filter { it > 0 }.sorted()
+  val wrapRefLen = if (nonEmptyLens.isEmpty()) 80 else nonEmptyLens[(nonEmptyLens.size * 85 / 100).coerceIn(0, nonEmptyLens.lastIndex)]
+  val standaloneSingle = setOf(
+   '나', '너', '저', '그', '이', '더', '덜', '잘', '못', '안', '또', '꼭', '참', '좀', '막', '다', '늘', '곧', '왜', '뭐',
+   '집', '책', '길', '밤', '낮', '눈', '손', '발', '속', '위', '앞', '뒤', '옆', '밖', '일', '말', '글', '물', '불', '술',
+   '밥', '옷', '꽃', '산', '강', '달', '별', '해', '비', '숨', '꿈', '첫', '새', '헌', '온', '한', '두', '세', '네'
+  )
+  val boundExact = setOf("다", "요", "죠", "네", "군", "지", "까", "니", "고", "며", "서", "면", "던", "은", "는", "을", "를", "의", "에", "로", "과", "와", "도", "만")
+  val boundPrefixes = listOf(
+   "니다", "습니다", "어요", "아요", "여요", "네요", "군요", "지요", "니까", "면서", "지만", "는데",
+   "아서", "어서", "해서", "으로", "에서", "에게", "한테", "부터", "까지", "처럼", "만큼", "보다", "라도"
+  )
+  fun isHangulSyl(c: Char): Boolean = c.code in 0xAC00..0xD7A3
+  fun joinMidWordWithoutSpace(prev: String, prevEndedSpace: Boolean, nextTrimmed: String): Boolean {
+   if (prevEndedSpace || prev.isEmpty() || nextTrimmed.isEmpty()) return false
+   if (!isHangulSyl(prev.last()) || !isHangulSyl(nextTrimmed.first())) return false
+   val prevTok = prev.substringAfterLast(' ')
+   val nextRawTok = nextTrimmed.substringBefore(' ')
+   val nextTok = nextRawTok.trimEnd('.', ',', '?', '!', '~', '…', ':', ';', CH_DQ, CH_SQ, '”', '’', ')', ']', '」', '』')
+   if (nextTok.isEmpty()) return false
+   if (prevTok.length == 1 && nextTok.length == 1) return true
+   if (prevTok == "어떻" && nextTok.startsWith("게")) return true
+   if (nextTok in boundExact || boundPrefixes.any { nextTok.startsWith(it) }) return true
+   if (prevTok.length == 1 && prevTok[0] !in standaloneSingle) return true
+   return false
+  }
   val out = StringBuilder(cleaned.length)
   var curPara = StringBuilder()
+  var lastRawTrimLen = 0
+  var lastRawEndedSpace = false
   fun flushPara() {
    if (curPara.isNotEmpty()) {
     if (out.isNotEmpty()) out.append(STR_PARA)
@@ -129,9 +158,13 @@ object EbookTextReflower {
    }
   }
   for (rawLn in rawLines) {
+   val endedSpace = rawLn.isNotEmpty() && rawLn.last().isWhitespace()
+   val nextIndent = rawLn.startsWith(" ") || rawLn.startsWith("　") || rawLn.startsWith(CH_TAB.toString())
    val trimmed = rawLn.trim().replace(Regex(" {2,}"), " ")
    if (trimmed.isEmpty()) {
     flushPara()
+    lastRawTrimLen = 0
+    lastRawEndedSpace = false
     continue
    }
    if (isNoisePageMarker(trimmed)) {
@@ -139,23 +172,30 @@ object EbookTextReflower {
    }
    if (curPara.isEmpty()) {
     curPara.append(trimmed)
+    lastRawTrimLen = trimmed.length
+    lastRawEndedSpace = endedSpace
     continue
    }
    val prevStr = curPara.toString()
    val prevComplete = endsCompleteSentence(prevStr)
    val nextStruct = isStructuralLineStart(trimmed)
    val prevHeading = looksLikeStandaloneHeading(prevStr)
-   if (nextStruct || prevHeading || (prevComplete && isDialogueStart(trimmed)) || prevComplete) {
+   val paraBreakAtPeriod = prevComplete && !hasBlankLines && (wrapRefLen > 75 || lastRawTrimLen < (wrapRefLen * 0.78f).toInt() || nextIndent)
+   if (nextStruct || prevHeading || (prevComplete && isDialogueStart(trimmed)) || paraBreakAtPeriod) {
     flushPara()
     curPara.append(trimmed)
    } else {
     if (prevStr.endsWith("-") && prevStr.length >= 2 && prevStr[prevStr.length - 2].isLetter() && trimmed.first().isLetter()) {
      curPara.setLength(curPara.length - 1)
      curPara.append(trimmed)
+    } else if (joinMidWordWithoutSpace(prevStr, lastRawEndedSpace, trimmed)) {
+     curPara.append(trimmed)
     } else {
      curPara.append(' ').append(trimmed)
     }
    }
+   lastRawTrimLen = trimmed.length
+   lastRawEndedSpace = endedSpace
   }
   flushPara()
   return out.toString().trim()

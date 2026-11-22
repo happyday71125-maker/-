@@ -997,13 +997,12 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                     .padding(horizontal = outerPad),
                                 verticalAlignment = Alignment.Top
                             ) {
-                                val twoPgBodyMod = if (readerMemoOpen && readerMemoMode == 1) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)
                                 Column(Modifier.width(renderColW).fillMaxHeight().padding(top = 8.dp, bottom = 6.dp)) {
                                     Box(Modifier.fillMaxWidth().height(16.dp), contentAlignment = Alignment.CenterStart) {
                                         Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                     Spacer(Modifier.height(4.dp))
-                                    Box(twoPgBodyMod) {
+                                    Box(if (readerMemoOpen && readerMemoMode == 1) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
                                     var pLay by remember(leftPageTx, curPt, twoPageMode) { mutableStateOf<TextLayoutResult?>(null) }
                                 Text(leftPageDisplay, style = pageTextStyle, onTextLayout = { pLay = it }, modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls) { if (highlightMode) { detectTapGestures { pos -> val off = pLay?.getOffsetForPosition(pos) ?: return@detectTapGestures; toggleHighlightTap(leftPageTx, leftSlice.s, off) } } })
                                     }
@@ -1036,7 +1035,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                         Text("${act.category.ifBlank { "독서" }} · ${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1)
                                     }
                                     Spacer(Modifier.height(4.dp))
-                                    Box(twoPgBodyMod) {
+                                    Box(if (readerMemoOpen && readerMemoMode == 1) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
                                      if (hasRightPage && rightSlice != null) {
                                  var rLay by remember(rightPageTx, curPt, twoPageMode) { mutableStateOf<TextLayoutResult?>(null) }
                                  Text(rightPageDisplay, style = pageTextStyle, onTextLayout = { rLay = it }, modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, rightSlice.s, rightPageTx, hlColorIdx, bookHls) { if (highlightMode) { detectTapGestures { pos -> val off = rLay?.getOffsetForPosition(pos) ?: return@detectTapGestures; toggleHighlightTap(rightPageTx, rightSlice.s, off) } } })
@@ -1053,7 +1052,6 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                 }
                             }
                         } else {
-                            val onePgBodyMod = if (readerMemoOpen && readerMemoMode == 1) Modifier.fillMaxWidth().heightIn(min = fixedTextH) else Modifier.fillMaxWidth().weight(1f)
                             Column(
                                 Modifier
                                     .fillMaxSize()
@@ -1065,7 +1063,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                     Text("${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.8f))
                                 }
                                 Spacer(Modifier.height(4.dp))
-                                Box(onePgBodyMod) {
+                                Box(if (readerMemoOpen && readerMemoMode == 1) Modifier.fillMaxWidth().heightIn(min = fixedTextH) else Modifier.fillMaxWidth().weight(1f)) {
                                  var pLay by remember(leftPageTx, curPt, twoPageMode) { mutableStateOf<TextLayoutResult?>(null) }
  Text(leftPageDisplay, style = pageTextStyle, onTextLayout = { pLay = it }, modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls) { if (highlightMode) { detectTapGestures { pos -> val off = pLay?.getOffsetForPosition(pos) ?: return@detectTapGestures; toggleHighlightTap(leftPageTx, leftSlice.s, off) } } })
                                 }

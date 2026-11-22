@@ -22,6 +22,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.*
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.intl.Locale
+import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.ui.text.style.*
 import androidx.compose.ui.unit.*
 import kotlinx.coroutines.*
@@ -275,7 +277,8 @@ val aiFloatW = if (aiFloatMin) 190.dp else if (aiFloatCompact) (rootBoxW * 0.66f
 val aiFloatH = if (aiFloatMin) 44.dp else (rootBoxH * 0.45f).coerceIn(220.dp, 335.dp)
 val aiFloatWPx = with(density) { aiFloatW.toPx() }
 val aiFloatHPx = with(density) { aiFloatH.toPx() }
-Column(Modifier.fillMaxSize().padding(horizontal = ui.hPad, vertical = ui.vPad)) {
+val readerOuterHPad = (ui.hPad * 0.55f).coerceAtLeast(6.dp)
+        Column(Modifier.fillMaxSize().padding(horizontal = readerOuterHPad, vertical = ui.vPad)) {
             val renderReaderTopBar: @Composable (@Composable RowScope.() -> Unit) -> Unit = { centerSlot ->
 Row(
 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -527,12 +530,26 @@ onClose = { searchOpen = false }
             }
             val textMeasurer = rememberTextMeasurer()
                  val lineHeightMult = when (lineHeightIdx) { 0 -> 1.38f; 2 -> 1.78f; else -> 1.58f }
-            val pageTextStyle = remember(curPt, cfg.readerUseSerif, fg, lineHeightMult) { TextStyle(fontSize = curPt.sp, lineHeight = (curPt * lineHeightMult).sp, fontFamily = if (cfg.readerUseSerif) FontFamily.Serif else FontFamily.SansSerif, lineBreak = LineBreak.Paragraph, hyphens = Hyphens.Auto, color = fg) }
-            val outerPad = if (twoPageMode) 12.dp else 14.dp; val spineW = if (twoPageMode) 20.dp else 0.dp; val fixedBookW = (conf.screenWidthDp.dp - ui.hPad * 2).coerceAtLeast(220.dp)
-            val fixedColW = if (twoPageMode) ((fixedBookW - outerPad * 2 - spineW) / 2f).coerceAtLeast(80.dp) else (fixedBookW - outerPad * 2).coerceAtLeast(100.dp); val fallbackTextH = (conf.screenHeightDp.dp - ui.vPad * 2 - 142.dp).coerceAtLeast(180.dp)
-            val measuredTextHPxState = remember(conf.screenWidthDp, conf.screenHeightDp, twoPageMode) { mutableStateOf(0f) }; val cardInnerChromePx = with(density) { 58.dp.toPx() }; val imeBottomPx = WindowInsets.ime.getBottom(density)
-            val fixedColWPx = with(density) { fixedColW.roundToPx() }.coerceAtLeast(80); val fallbackTextHPx = (with(density) { fallbackTextH.toPx() } - 4f).coerceAtLeast(120f); val fixedTextHPx = if (measuredTextHPxState.value >= 120f) measuredTextHPxState.value else fallbackTextHPx; val fixedTextH = with(density) { fixedTextHPx.toDp() }.coerceAtLeast(180.dp)
-            val pageCacheKey = "${act.id}_${reflowSrc.fullText.length}_${reflowSrc.fullText.hashCode()}_${fixedColWPx}_${fixedTextHPx.roundToInt()}_${curPt}_${cfg.readerUseSerif}_${lineHeightIdx}"
+val pageTextStyle = remember(curPt, cfg.readerUseSerif, fg, lineHeightMult) {
+   TextStyle(fontSize = curPt.sp, lineHeight = (curPt * lineHeightMult).sp, fontFamily = if (cfg.readerUseSerif) FontFamily.Serif else FontFamily.SansSerif, lineBreak = LineBreak.Simple.copy(strategy = LineBreak.Strategy.Simple, strictness = LineBreak.Strictness.Normal, wordBreak = LineBreak.WordBreak.Phrase), hyphens = Hyphens.None, localeList = LocaleList(Locale("ko-KR")), color = fg)
+}
+val outerPad = if (twoPageMode) 10.dp else 12.dp
+val spineW = if (twoPageMode) 20.dp else 0.dp
+val fixedBookW = (conf.screenWidthDp.dp - readerOuterHPad * 2).coerceAtLeast(220.dp)
+val measuredBookWPxState = remember(conf.screenWidthDp, conf.screenHeightDp, twoPageMode) { mutableStateOf(0f) }
+val fallbackTextH = (conf.screenHeightDp.dp - ui.vPad * 2 - 142.dp).coerceAtLeast(180.dp)
+val measuredTextHPxState = remember(conf.screenWidthDp, conf.screenHeightDp, twoPageMode) { mutableStateOf(0f) }
+val cardInnerChromePx = with(density) { 58.dp.toPx() }
+val imeBottomPx = WindowInsets.ime.getBottom(density)
+val outerPadPx = with(density) { outerPad.toPx() }
+val spineWPx = with(density) { spineW.toPx() }
+val activeBookWPx = if (measuredBookWPxState.value >= 200f) measuredBookWPxState.value else with(density) { fixedBookW.toPx() }
+val fixedColWPx = (if (twoPageMode) ((activeBookWPx - outerPadPx * 2f - spineWPx) / 2f) else (activeBookWPx - outerPadPx * 2f)).roundToInt().coerceAtLeast(80)
+val fallbackTextHPx = (with(density) { fallbackTextH.toPx() } - 4f).coerceAtLeast(120f)
+val fixedTextHPx = if (measuredTextHPxState.value >= 120f) measuredTextHPxState.value else fallbackTextHPx
+val fixedTextH = with(density) { fixedTextHPx.toDp() }.coerceAtLeast(180.dp)
+
+val pageCacheKey = "v2kr_${act.id}_${reflowSrc.fullText.length}_${reflowSrc.fullText.hashCode()}_${fixedColWPx}_${fixedTextHPx.roundToInt()}_${curPt}_${cfg.readerUseSerif}_${lineHeightIdx}"
             var lastStablePages by remember(act.id) {
                 val prior = ReaderLayoutCache.pagesCache.entries.lastOrNull { it.key.startsWith("${act.id}_") }?.value
                     ?: listOf(PageSlice(0, reflowSrc.fullText.length.coerceAtMost(1500)))
@@ -993,7 +1010,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                     Text("${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.8f))
                                 }
                                 Spacer(Modifier.height(4.dp))
-                                Box(Modifier.width(renderColW).heightIn(min = fixedTextH)) {
+                                Box(Modifier.fillMaxWidth().heightIn(min = fixedTextH)) {
                                  var pLay by remember(leftPageTx, curPt, twoPageMode) { mutableStateOf<TextLayoutResult?>(null) }
  Text(leftPageDisplay, style = pageTextStyle, onTextLayout = { pLay = it }, modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls) { if (highlightMode) { detectTapGestures { pos -> val off = pLay?.getOffsetForPosition(pos) ?: return@detectTapGestures; toggleHighlightTap(leftPageTx, leftSlice.s, off) } } })
                                 }
@@ -1008,8 +1025,23 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                 }
             }
             }
-            val transientChromeOpen = imeBottomPx > 0 || searchOpen || highlightMode || (readerAiOpen && readerAiMode == 1) || selBannerVisible || sliderBarVisible || catBarOpen || (ReaderTtsRuntime.on && !ttsBarMin); Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp).onSizeChanged { sz -> if (!transientChromeOpen && sz.height > 200) { val cand = (sz.height.toFloat() - cardInnerChromePx).coerceAtLeast(120f); if (abs(cand - measuredTextHPxState.value) >= 8f) { measuredTextHPxState.value = cand } } }) {
-                   if (readerMemoOpen && readerMemoMode == 1) {
+val transientChromeOpen = imeBottomPx > 0 || searchOpen || highlightMode || (readerAiOpen && readerAiMode == 1) || selBannerVisible || sliderBarVisible || catBarOpen || (ReaderTtsRuntime.on && !ttsBarMin)
+val isHorizMemoSplit = readerMemoOpen && readerMemoMode == 1 && memoSplitHoriz
+Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp).onSizeChanged { sz ->
+if (!isHorizMemoSplit && sz.width > 200) {
+val wCand = sz.width.toFloat()
+if (abs(wCand - measuredBookWPxState.value) >= 4f) {
+measuredBookWPxState.value = wCand
+}
+}
+if (!transientChromeOpen && sz.height > 200) {
+val cand = (sz.height.toFloat() - cardInnerChromePx).coerceAtLeast(120f)
+if (abs(cand - measuredTextHPxState.value) >= 8f) {
+measuredTextHPxState.value = cand
+}
+}
+}) {
+    if (readerMemoOpen && readerMemoMode == 1) {
                     if (memoSplitHoriz) {
                         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             renderBookViewport(Modifier.weight(0.54f).fillMaxHeight())

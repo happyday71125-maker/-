@@ -42,6 +42,25 @@ private tailrec fun Context.findReaderHostActivity(): android.app.Activity? = wh
     else -> null
 }
 
+class RenderedBookPage(
+    val annotated: AnnotatedString,
+    val dispToRaw: IntArray,
+    val footnotes: List<FootnoteSpan>
+) {
+    fun rawOffsetOf(dispOff: Int): Int {
+        if (dispToRaw.isEmpty()) return 0
+        return dispToRaw[dispOff.coerceIn(0, dispToRaw.lastIndex)]
+    }
+}
+
+data class ActiveFootnotePopup(
+    val numLabel: String,
+    val rawToken: String,
+    val noteBody: String?,
+    val defCharOffset: Int,
+    val contextSentence: String
+)
+
 fun buildWrappedHighlightedBookPage(
     rawText: String,
     colWPx: Int,
@@ -49,24 +68,47 @@ fun buildWrappedHighlightedBookPage(
     curPt: Int,
     useSerif: Boolean,
     justifyOn: Boolean,
+    paraIndentOn: Boolean,
+    pageStartsAtPara: Boolean,
     continuesMidPara: Boolean,
     query: String,
     isNight: Boolean,
     pageStartOff: Int,
     bookHighlights: List<BookHighlight>
-): AnnotatedString {
-    if (rawText.isEmpty()) return AnnotatedString("")
-    val wrapped = EbookTextReflower.wrapPageKeepAll(rawText, colWPx, fontSizePx, useSerif)
+): RenderedBookPage {
+    if (rawText.isEmpty()) return RenderedBookPage(AnnotatedString(""), intArrayOf(0), emptyList())
+    val wpMap = EbookTextReflower.wrapPageWithIndentAndMap(
+        rawText,
+        colWPx,
+        fontSizePx,
+        useSerif,
+        paraIndentOn,
+        pageStartsAtPara,
+        continuesMidPara
+    )
+    val wrapped = wpMap.display
+    val rawToDisp = wpMap.rawToDisp
     val fnSpans = EbookTextReflower.findFootnoteSpans(rawText)
     val q = query.trim()
     val qRanges = if (q.isEmpty()) emptyList() else BookPassageSearcher.findMatchRangesInText(rawText, q, maxHits = 60)
-    val pageEndOff = pageStartOff + wrapped.length
+    val pageEndOff = pageStartOff + rawText.length
     val pageHls = if (bookHighlights.isEmpty()) emptyList() else bookHighlights.filter { it.endOff > pageStartOff && it.startOff < pageEndOff }
-    if (!justifyOn && fnSpans.isEmpty() && qRanges.isEmpty() && pageHls.isEmpty()) return AnnotatedString(wrapped)
+    if (!justifyOn && fnSpans.isEmpty() && qRanges.isEmpty() && pageHls.isEmpty()) {
+        return RenderedBookPage(AnnotatedString(wrapped), wpMap.dispToRaw, fnSpans)
+    }
+    fun mapRangeStart(rs0: Int): Int = rawToDisp[rs0.coerceIn(0, rawText.length)].coerceIn(0, wrapped.length)
+    fun mapRangeEnd(re0: Int): Int {
+        val safeE = re0.coerceIn(0, rawText.length)
+        if (safeE <= 0) return 0
+        return (rawToDisp[safeE - 1] + 1).coerceIn(0, wrapped.length)
+    }
     val hlBg = if (isNight) Color(0x99D97706) else Color(0x88FACC15)
     val hlFg = if (isNight) Color(0xFFFFFBEB) else Color(0xFF1C1917)
     val fnColor = if (isNight) Color(0xFF38BDF8) else Color(0xFF0284C7)
-    return buildAnnotatedString {
+    val dispFnRanges = if (fnSpans.isEmpty()) emptyList() else fnSpans.map { fn ->
+        Triple(mapRangeStart(fn.start), mapRangeEnd(fn.end), fn)
+    }
+    val built = buildAnnotatedString {
         append(wrapped)
         if (justifyOn && colWPx > 80 && fontSizePx >= 12f) {
             val paint = EbookTextReflower.createBookPaint(fontSizePx, useSerif)
@@ -78,14 +120,13 @@ fun buildWrappedHighlightedBookPage(
                 while (le < n && wrapped[le] != CH_NL) le++
                 var effEnd = le
                 while (effEnd > ls && wrapped[effEnd - 1] == ' ') effEnd--
-                val isSoftWrapped = (le < rawText.length && rawText[le] == ' ' && wrapped[le] == CH_NL) ||
-                    (le == n && continuesMidPara)
+                val isSoftWrapped = wpMap.softWrappedLineStarts.contains(ls)
                 if (isSoftWrapped && (effEnd - ls) >= 6) {
                     var lineW = paint.measureText(wrapped, ls, effEnd)
-                    for (fn in fnSpans) {
-                        if (!fn.isUnicodeSup && !fn.isLineStartRef && fn.end > ls && fn.start < effEnd) {
-                            val fs = maxOf(ls, fn.start)
-                            val fe = minOf(effEnd, fn.end)
+                    for ((dfs, dfe, fn) in dispFnRanges) {
+                        if (!fn.isUnicodeSup && !fn.isLineStartRef && dfe > ls && dfs < effEnd) {
+                            val fs = maxOf(ls, dfs)
+                            val fe = minOf(effEnd, dfe)
                             if (fe > fs) lineW -= paint.measureText(wrapped, fs, fe) * 0.36f
                         }
                     }
@@ -119,9 +160,7 @@ fun buildWrappedHighlightedBookPage(
                 ls = le + 1
             }
         }
-        for (fn in fnSpans) {
-            val s = fn.start.coerceIn(0, wrapped.length)
-            val e = fn.end.coerceIn(s, wrapped.length)
+        for ((s, e, fn) in dispFnRanges) {
             if (s < e) {
                 if (fn.isLineStartRef || fn.isUnicodeSup) {
                     addStyle(SpanStyle(fontSize = (curPt * 0.85f).sp, fontWeight = FontWeight.Bold, color = fnColor), s, e)
@@ -140,23 +179,32 @@ fun buildWrappedHighlightedBookPage(
             }
         }
         pageHls.forEach { h ->
-            val ls = (h.startOff - pageStartOff).coerceIn(0, wrapped.length)
-            val le = (h.endOff - pageStartOff).coerceIn(ls, wrapped.length)
-            if (ls < le) {
-                val bgC = when (h.colorIdx) {
-                    1 -> if (isNight) Color(0x6610B981) else Color(0x666EE7B7)
-                    2 -> if (isNight) Color(0x66EC4899) else Color(0x66F9A8D4)
-                    else -> if (isNight) Color(0x66F59E0B) else Color(0x77FDE047)
+            val rStart = (h.startOff - pageStartOff).coerceIn(0, rawText.length)
+            val rEnd = (h.endOff - pageStartOff).coerceIn(rStart, rawText.length)
+            if (rStart < rEnd) {
+                val ls = mapRangeStart(rStart)
+                val le = mapRangeEnd(rEnd).coerceAtLeast(ls)
+                if (ls < le) {
+                    val bgC = when (h.colorIdx) {
+                        1 -> if (isNight) Color(0x6610B981) else Color(0x666EE7B7)
+                        2 -> if (isNight) Color(0x66EC4899) else Color(0x66F9A8D4)
+                        else -> if (isNight) Color(0x66F59E0B) else Color(0x77FDE047)
+                    }
+                    addStyle(SpanStyle(background = bgC, textDecoration = TextDecoration.Underline), ls, le)
                 }
-                addStyle(SpanStyle(background = bgC, textDecoration = TextDecoration.Underline), ls, le)
             }
         }
         qRanges.forEach { r ->
-            val s = r.first.coerceIn(0, wrapped.length)
-            val e = (r.last + 1).coerceIn(s, wrapped.length)
-            if (s < e) addStyle(SpanStyle(background = hlBg, color = hlFg), s, e)
+            val rStart = r.first.coerceIn(0, rawText.length)
+            val rEnd = (r.last + 1).coerceIn(rStart, rawText.length)
+            if (rStart < rEnd) {
+                val s = mapRangeStart(rStart)
+                val e = mapRangeEnd(rEnd).coerceAtLeast(s)
+                if (s < e) addStyle(SpanStyle(background = hlBg, color = hlFg), s, e)
+            }
         }
     }
+    return RenderedBookPage(built, wpMap.dispToRaw, fnSpans)
 }
 
 @Composable
@@ -223,6 +271,14 @@ fun ReaderView(
     var twoPageMode by remember { mutableStateOf(readerPrefs.getBoolean("reader_two_page", false)) }
     var smartReflowOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_smart_reflow", true)) }
     var readerJustifyOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_justify_on", true)) }
+    var readerParaIndentOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_para_indent_on", true)) }
+    var readerVolumeTurnOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_volume_turn_on", true)) }
+    DisposableEffect(Unit) {
+        onDispose {
+            ReaderVolumeKeyBridge.readerBookActive = false
+            ReaderVolumeKeyBridge.onTurnPage = null
+        }
+    }
     var bCats by remember { mutableStateOf(SmartMemoClassifier.loadBookCats(ctx)) }
     var selCat by remember { mutableStateOf("전체") }
     var catBarOpen by remember { mutableStateOf(false) }
@@ -562,6 +618,26 @@ onClose = { searchOpen = false }
                                         }
                                     }
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                                        ReaderPointBtn(
+                                            if (readerParaIndentOn) "⇥ 첫줄들여쓰기 ON" else "⇤ 첫줄들여쓰기 OFF",
+                                            readerParaIndentOn,
+                                            CG,
+                                            Modifier.weight(1f)
+                                        ) {
+                                            readerParaIndentOn = !readerParaIndentOn
+                                            readerPrefs.edit().putBoolean("reader_para_indent_on", readerParaIndentOn).apply()
+                                        }
+                                        ReaderPointBtn(
+                                            if (readerVolumeTurnOn) "🔉 볼륨키 넘김 ON" else "🔇 볼륨키 넘김 OFF",
+                                            readerVolumeTurnOn,
+                                            CA,
+                                            Modifier.weight(1f)
+                                        ) {
+                                            readerVolumeTurnOn = !readerVolumeTurnOn
+                                            readerPrefs.edit().putBoolean("reader_volume_turn_on", readerVolumeTurnOn).apply()
+                                        }
+                                    }
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                                         listOf(0 to "줄간격 좁게", 1 to "줄간격 보통", 2 to "줄간격 넓게").forEach { (idx, lbl) ->
                                             ReaderPointBtn(lbl, lineHeightIdx == idx, CA, Modifier.weight(1f)) {
                                                 lineHeightIdx = idx
@@ -617,6 +693,10 @@ onClose = { searchOpen = false }
             }
         }
         if (shelf || act == null) {
+            SideEffect {
+                ReaderVolumeKeyBridge.readerBookActive = false
+                ReaderVolumeKeyBridge.onTurnPage = null
+            }
             ReaderShelfSection(
                 ctx = ctx, ui = ui, books = books, bCats = bCats, allCats = allCats,
                 selCat = selCat, onSelCat = { selCat = it }, onOpenCatCfg = { folderDialogOpen = true },
@@ -713,15 +793,16 @@ onClose = { searchOpen = false }
             val fixedTextHPx = if (measuredTextHPxState.value >= 120f) measuredTextHPxState.value else fallbackFullTextHPx
             val fixedTextH = with(density) { fixedTextHPx.toDp() }.coerceAtLeast(180.dp)
 
-            val pageCacheKey = "v4ka_${act.id}_${reflowSrc.fullText.length}_${reflowSrc.fullText.hashCode()}_${fixedColWPx}_${fixedTextHPx.roundToInt()}_${curPt}_${cfg.readerUseSerif}_${lineHeightIdx}_${smartReflowOn}"
+            val effectiveIndentOn = readerParaIndentOn && !isPoetryBook
+            val pageCacheKey = "v6ka_${act.id}_${reflowSrc.fullText.length}_${reflowSrc.fullText.hashCode()}_${fixedColWPx}_${fixedTextHPx.roundToInt()}_${curPt}_${cfg.readerUseSerif}_${lineHeightIdx}_${smartReflowOn}_${effectiveIndentOn}"
             var lastStablePages by remember(act.id) {
-                val prior = ReaderLayoutCache.pagesCache.entries.lastOrNull { it.key.startsWith("v4ka_${act.id}_") }?.value
-                    ?: EbookTextReflower.paginateBookKeepAll(reflowSrc.fullText.take(6000), fixedColWPx, fixedTextHPx, fontSizePx, lineHeightPx, cfg.readerUseSerif)
+                val prior = ReaderLayoutCache.pagesCache.entries.lastOrNull { it.key.startsWith("v6ka_${act.id}_") }?.value
+                    ?: EbookTextReflower.paginateBookKeepAll(reflowSrc.fullText.take(6000), fixedColWPx, fixedTextHPx, fontSizePx, lineHeightPx, cfg.readerUseSerif, effectiveIndentOn)
                 mutableStateOf(prior)
             }
             val syncPages = remember(pageCacheKey) {
                 ReaderLayoutCache.pagesCache[pageCacheKey] ?: if (reflowSrc.fullText.length <= 120000) {
-                    EbookTextReflower.paginateBookKeepAll(reflowSrc.fullText, fixedColWPx, fixedTextHPx, fontSizePx, lineHeightPx, cfg.readerUseSerif)
+                    EbookTextReflower.paginateBookKeepAll(reflowSrc.fullText, fixedColWPx, fixedTextHPx, fontSizePx, lineHeightPx, cfg.readerUseSerif, effectiveIndentOn)
                         .also { ReaderLayoutCache.pagesCache[pageCacheKey] = it }
                 } else null
             }
@@ -730,7 +811,7 @@ onClose = { searchOpen = false }
                     lastStablePages = syncPages
                 } else {
                     val computed = withContext(Dispatchers.Default) {
-                        EbookTextReflower.paginateBookKeepAll(reflowSrc.fullText, fixedColWPx, fixedTextHPx, fontSizePx, lineHeightPx, cfg.readerUseSerif)
+                        EbookTextReflower.paginateBookKeepAll(reflowSrc.fullText, fixedColWPx, fixedTextHPx, fontSizePx, lineHeightPx, cfg.readerUseSerif, effectiveIndentOn)
                     }
                     if (computed.isNotEmpty()) {
                         ReaderLayoutCache.pagesCache[pageCacheKey] = computed
@@ -850,6 +931,54 @@ commitExcerptHook = ::commitDraftIfEditing
              val nx = if (hit != null) allHighlights.filterNot { it.id == hit.id } else allHighlights + BookHighlight(System.currentTimeMillis(), act.id, gs, ge, hlColorIdx)
              allHighlights = nx; saveBookHighlights(ctx, nx)
             }
+            var activeFootnotePopup by remember(act.id) { mutableStateOf<ActiveFootnotePopup?>(null) }
+            var footnoteReturnOff by remember(act.id) { mutableStateOf<Int?>(null) }
+            LaunchedEffect(vIdx, act.id) {
+                activeFootnotePopup = null
+            }
+            val volumeKeyReady = !shelf && !cfgOpen && !bmOpen && !hlListOpen && !folderDialogOpen && !selectMode && imeBottomPx <= 0
+            SideEffect {
+                ReaderVolumeKeyBridge.volumeTurnEnabled = readerVolumeTurnOn
+                ReaderVolumeKeyBridge.readerBookActive = volumeKeyReady
+                ReaderVolumeKeyBridge.onTurnPage = { dir ->
+                    goToVPage(vIdx + dir * stepPg)
+                }
+            }
+            fun handleReaderBodyTap(pageRender: RenderedBookPage, pageText: String, pageStartOff: Int, dispOff: Int) {
+                val rawOff = pageRender.rawOffsetOf(dispOff)
+                val tappedFn = pageRender.footnotes
+                    .filter { fn ->
+                        !fn.isLineStartRef && rawOff in (fn.start - 2)..(fn.end + 2) &&
+                            !pageText.substring(minOf(rawOff, fn.start).coerceAtLeast(0), maxOf(rawOff, fn.end).coerceAtMost(pageText.length)).contains(CH_NL)
+                    }
+                    .minByOrNull { fn ->
+                        if (rawOff in fn.start until fn.end) 0 else minOf(abs(rawOff - fn.start), abs(rawOff - fn.end))
+                    }
+                if (tappedFn != null) {
+                    val s = tappedFn.start.coerceIn(0, pageText.length)
+                    val e = tappedFn.end.coerceIn(s, pageText.length)
+                    val tok = pageText.substring(s, e)
+                    val numLbl = EbookTextReflower.extractFootnoteNumber(tok) ?: tok
+                    val sentR = findSentenceRangeAt(pageText, s)
+                    val ctxSent = if (sentR != null) {
+                        pageText.substring(sentR.first.coerceIn(0, pageText.length), (sentR.last + 1).coerceIn(0, pageText.length)).replace(CH_NL, ' ').trim()
+                    } else {
+                        pageText.substring((s - 45).coerceAtLeast(0), (e + 45).coerceAtMost(pageText.length)).replace(CH_NL, ' ').trim()
+                    }
+                    val found = EbookTextReflower.lookupFootnoteDefinition(reflowSrc.fullText, pageStartOff + s, tok)
+                    activeFootnotePopup = ActiveFootnotePopup(
+                        numLabel = numLbl,
+                        rawToken = tok,
+                        noteBody = found?.noteText,
+                        defCharOffset = found?.charOffset ?: -1,
+                        contextSentence = ctxSent
+                    )
+                } else if (highlightMode) {
+                    toggleHighlightTap(pageText, pageStartOff, rawOff)
+                }
+            }
+            val leftStartsAtPara = leftSlice.s <= 0 || (leftSlice.s <= reflowSrc.fullText.length && reflowSrc.fullText[leftSlice.s - 1] == CH_NL)
+            val rightStartsAtPara = rightSlice != null && (rightSlice.s <= 0 || (rightSlice.s <= reflowSrc.fullText.length && reflowSrc.fullText[rightSlice.s - 1] == CH_NL))
             val leftContinuesMidPara = leftSlice.e < reflowSrc.fullText.length && leftSlice.e > leftSlice.s && reflowSrc.fullText[leftSlice.e - 1] != CH_NL
             val rightContinuesMidPara = rightSlice != null && rightSlice.e < reflowSrc.fullText.length && rightSlice.e > rightSlice.s && reflowSrc.fullText[rightSlice.e - 1] != CH_NL
             renderReaderTopBar {
@@ -981,11 +1110,11 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                 val renderColW = if (twoPageMode) ((availW - outerPad * 2 - spineW) / 2f).coerceAtLeast(80.dp) else (availW - outerPad * 2).coerceAtLeast(100.dp)
                 val rawRenderColWPx = with(density) { renderColW.toPx() }.roundToInt().coerceAtLeast(80)
                 val effColWPx = if (abs(rawRenderColWPx - fixedColWPx) <= 6) fixedColWPx else rawRenderColWPx
-                val leftPageDisplay = remember(leftPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, leftContinuesMidPara, searchQuery, isNightTheme, leftSlice.s, bookHls) {
-                    buildWrappedHighlightedBookPage(leftPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, leftContinuesMidPara, searchQuery, isNightTheme, leftSlice.s, bookHls)
+                val leftPageRender = remember(leftPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, effectiveIndentOn, leftStartsAtPara, leftContinuesMidPara, searchQuery, isNightTheme, leftSlice.s, bookHls) {
+                    buildWrappedHighlightedBookPage(leftPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, effectiveIndentOn, leftStartsAtPara, leftContinuesMidPara, searchQuery, isNightTheme, leftSlice.s, bookHls)
                 }
-                val rightPageDisplay = remember(rightPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, rightContinuesMidPara, searchQuery, isNightTheme, rightSlice?.s, bookHls) {
-                    buildWrappedHighlightedBookPage(rightPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, rightContinuesMidPara, searchQuery, isNightTheme, rightSlice?.s ?: 0, bookHls)
+                val rightPageRender = remember(rightPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, effectiveIndentOn, rightStartsAtPara, rightContinuesMidPara, searchQuery, isNightTheme, rightSlice?.s, bookHls) {
+                    buildWrappedHighlightedBookPage(rightPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, effectiveIndentOn, rightStartsAtPara, rightContinuesMidPara, searchQuery, isNightTheme, rightSlice?.s ?: 0, bookHls)
                 }
 
                 if (selectMode) {
@@ -1136,16 +1265,16 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                     }
                                     Spacer(Modifier.height(4.dp))
                                     Box(if (shouldScrollPage) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
-                                        var lLay by remember(leftPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn) { mutableStateOf<TextLayoutResult?>(null) }
+                                        var lLay by remember(leftPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn, effectiveIndentOn) { mutableStateOf<TextLayoutResult?>(null) }
                                         Text(
-                                            leftPageDisplay,
+                                            leftPageRender.annotated,
                                             style = pageTextStyle,
                                             onTextLayout = { lLay = it },
-                                            modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls) {
-                                                if (highlightMode) {
+                                            modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls, leftPageRender) {
+                                                if (highlightMode || leftPageRender.footnotes.isNotEmpty()) {
                                                     detectTapGestures { pos ->
                                                         val off = lLay?.getOffsetForPosition(pos) ?: return@detectTapGestures
-                                                        toggleHighlightTap(leftPageTx, leftSlice.s, off)
+                                                        handleReaderBodyTap(leftPageRender, leftPageTx, leftSlice.s, off)
                                                     }
                                                 }
                                             }
@@ -1182,16 +1311,16 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                     Spacer(Modifier.height(4.dp))
                                     Box(if (shouldScrollPage) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
                                         if (hasRightPage && rightSlice != null) {
-                                            var rLay by remember(rightPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn) { mutableStateOf<TextLayoutResult?>(null) }
+                                            var rLay by remember(rightPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn, effectiveIndentOn) { mutableStateOf<TextLayoutResult?>(null) }
                                             Text(
-                                                rightPageDisplay,
+                                                rightPageRender.annotated,
                                                 style = pageTextStyle,
                                                 onTextLayout = { rLay = it },
-                                                modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, rightSlice.s, rightPageTx, hlColorIdx, bookHls) {
-                                                    if (highlightMode) {
+                                                modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, rightSlice.s, rightPageTx, hlColorIdx, bookHls, rightPageRender) {
+                                                    if (highlightMode || rightPageRender.footnotes.isNotEmpty()) {
                                                         detectTapGestures { pos ->
                                                             val off = rLay?.getOffsetForPosition(pos) ?: return@detectTapGestures
-                                                            toggleHighlightTap(rightPageTx, rightSlice.s, off)
+                                                            handleReaderBodyTap(rightPageRender, rightPageTx, rightSlice.s, off)
                                                         }
                                                     }
                                                 }
@@ -1229,16 +1358,16 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                         }
                                     }
                                 }) {
-                                    var sLay by remember(leftPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn) { mutableStateOf<TextLayoutResult?>(null) }
+                                    var sLay by remember(leftPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn, effectiveIndentOn) { mutableStateOf<TextLayoutResult?>(null) }
                                     Text(
-                                        leftPageDisplay,
+                                        leftPageRender.annotated,
                                         style = pageTextStyle,
                                         onTextLayout = { sLay = it },
-                                        modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls) {
-                                            if (highlightMode) {
+                                        modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls, leftPageRender) {
+                                            if (highlightMode || leftPageRender.footnotes.isNotEmpty()) {
                                                 detectTapGestures { pos ->
                                                     val off = sLay?.getOffsetForPosition(pos) ?: return@detectTapGestures
-                                                    toggleHighlightTap(leftPageTx, leftSlice.s, off)
+                                                    handleReaderBodyTap(leftPageRender, leftPageTx, leftSlice.s, off)
                                                 }
                                             }
                                         }
@@ -1304,6 +1433,99 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                     }
                 } else {
                     renderBookViewport(Modifier.fillMaxSize())
+                }
+                val retOff = footnoteReturnOff
+                if (retOff != null && activeFootnotePopup == null && kotlin.math.abs(retOff - leftSlice.s) > 20) {
+                    val retPg = vPages.indexOfLast { it.s <= retOff }.coerceAtLeast(0) + 1
+                    Surface(
+                        color = Color(0xF0101A2D),
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.dp, CG),
+                        shadowElevation = 6.dp,
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)
+                    ) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = CV) {
+                            Text(
+                                "↩️ 읽던 본문(${retPg}쪽)으로 복귀",
+                                fontSize = ui.subSp,
+                                fontWeight = FontWeight.Bold,
+                                color = CG,
+                                modifier = Modifier.clickable {
+                                    footnoteReturnOff = null
+                                    jumpToCharOffset(retOff)
+                                }
+                            )
+                            Text("✕", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { footnoteReturnOff = null })
+                        }
+                    }
+                }
+                activeFootnotePopup?.let { fnPop ->
+                    val defPg = if (fnPop.defCharOffset >= 0) (vPages.indexOfLast { it.s <= fnPop.defCharOffset }.coerceAtLeast(0) + 1) else -1
+                    Surface(
+                        color = Color(0xF70D1526),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.1.dp, Color(0xFF38BDF8)),
+                        shadowElevation = 10.dp,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                            .heightIn(max = 228.dp)
+                    ) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            Row(Modifier.fillMaxWidth(), SB, CV) {
+                                Text(
+                                    if (defPg > 0) "📌 각주 [${fnPop.numLabel}] · ${defPg}쪽" else "📌 각주 [${fnPop.numLabel}] 미리보기",
+                                    fontSize = (ui.subSp.value + 1f).sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF38BDF8),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                                    ChipBtn("🦙AI해설", false, CG) {
+                                        val ctxTx = if (fnPop.noteBody != null) {
+                                            "[본문 문장]" + CH_NL + fnPop.contextSentence + STR_PARA + "[각주 ${fnPop.numLabel}]" + CH_NL + fnPop.noteBody
+                                        } else {
+                                            fnPop.contextSentence
+                                        }
+                                        activeFootnotePopup = null
+                                        readerAiOpen = true
+                                        askPageAi("이 문장과 각주 [${fnPop.numLabel}]의 의미·배경을 알기 쉽게 해설해줘.", act.title, pgLabel, ctxTx, true)
+                                    }
+                                    if (fnPop.noteBody != null) {
+                                        ChipBtn("📝메모", false, CA) {
+                                            val memoPiece = "[각주 ${fnPop.numLabel}] ${fnPop.noteBody.take(380)}" + CH_NL + "• 메모: "
+                                            activeFootnotePopup = null
+                                            openReaderMemoInLastMode(memoPiece)
+                                        }
+                                    }
+                                    if (fnPop.defCharOffset >= 0) {
+                                        ChipBtn("📖이동", false, CW) {
+                                            footnoteReturnOff = leftSlice.s
+                                            val dst = fnPop.defCharOffset
+                                            activeFootnotePopup = null
+                                            jumpToCharOffset(dst)
+                                        }
+                                    }
+                                    Text(
+                                        "✕",
+                                        fontSize = (ui.subSp.value + 1.5f).sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = CM,
+                                        modifier = Modifier.clickable { activeFootnotePopup = null }.padding(horizontal = 4.dp)
+                                    )
+                                }
+                            }
+                            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                                Text(
+                                    fnPop.noteBody ?: ("도서 내부에서 [${fnPop.numLabel}]번 각주 설명문을 찾지 못했습니다." + STR_PARA + "• 문맥: " + CH_DQ + fnPop.contextSentence + CH_DQ + CH_NL + "(상단 [🦙AI해설]을 누르면 해당 구절과 용어를 바로 풀이해 드립니다.)"),
+                                    fontSize = (curPt - 3).coerceIn(13, 19).sp,
+                                    lineHeight = ((curPt - 3).coerceIn(13, 19) * 1.48f).sp,
+                                    color = CW
+                                )
+                            }
+                        }
+                    }
                 }
            }
             if (hlListOpen) { val sortedHls = remember(bookHls) { bookHls.sortedBy { it.startOff } }; AlertDialog(onDismissRequest = { hlListOpen = false }, containerColor = Color(0xFF0E1525), title = { Row(Modifier.fillMaxWidth(), SB, CV) { Text("🖍️ 형광펜 모아보기 (${sortedHls.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = CA); if (sortedHls.isNotEmpty()) { ChipBtn("🗑️전체삭제", false, Color(0xFFF87171)) { val nx = allHighlights.filterNot { it.bookId == act.id }; allHighlights = nx; saveBookHighlights(ctx, nx); hlListOpen = false } } } }, text = { if (sortedHls.isEmpty()) { Text("이 책에 저장된 형광펜이 없습니다. 상단 🖍️ 버튼으로 문장을 탭해 밑줄을 칠 수 있어요.", fontSize = ui.subSp, color = CM) } else { LazyColumn(Modifier.fillMaxWidth().heightIn(max = 340.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { items(sortedHls, key = { it.id }) { hl -> val dot = when (hl.colorIdx) { 1 -> "🟢"; 2 -> "🩷"; else -> "🟡" }; val hlPg = vPages.indexOfLast { it.s <= hl.startOff }.coerceAtLeast(0) + 1; val sIdx = hl.startOff.coerceIn(0, reflowSrc.fullText.length); val eIdx = hl.endOff.coerceIn(sIdx, reflowSrc.fullText.length); val snippet = reflowSrc.fullText.substring(sIdx, eIdx).replace(10.toChar(), ' ').trim().ifEmpty { "(빈 구절)" }; Surface(color = Color(0xFF141D2E), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, Color(0xFF283753)), modifier = Modifier.fillMaxWidth().clickable { hlListOpen = false; jumpToCharOffset(hl.startOff) }) { Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) { Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) { Text("$dot ${hlPg}쪽", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG); Text(snippet, fontSize = ui.subSp, color = CW, maxLines = 3, overflow = TextOverflow.Ellipsis) }; Text("🗑️", fontSize = 15.sp, modifier = Modifier.clickable { val nx = allHighlights.filterNot { it.id == hl.id }; allHighlights = nx; saveBookHighlights(ctx, nx) }.padding(4.dp)) } } } } } }, confirmButton = { TextButton(onClick = { hlListOpen = false }) { Text("닫기", color = CG, fontWeight = FontWeight.Bold) } }) }; if (sliderBarVisible) {

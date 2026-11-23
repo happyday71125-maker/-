@@ -165,10 +165,36 @@ if (target == 1) cut else "• $cut"
 }
 }
 }
+object ReaderVolumeKeyBridge {
+  var isReaderTabCurrent: Boolean = false
+var readerBookActive: Boolean = false
+  var volumeTurnEnabled: Boolean = true
+var onTurnPage: ((Int) -> Unit)? = null
+private var lastTurnMs: Long = 0L
+fun handleKeyEvent(event: android.view.KeyEvent): Boolean {
+val code = event.keyCode
+if (code != android.view.KeyEvent.KEYCODE_VOLUME_UP && code != android.view.KeyEvent.KEYCODE_VOLUME_DOWN) return false
+if (!isReaderTabCurrent || !readerBookActive || !volumeTurnEnabled) return false
+if (ReaderTtsRuntime.on || SupertonicTtsEngine.playing || isTtsBusyNow() || briefingSpeakingNow) return false
+val cb = onTurnPage ?: return false
+if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+val now = android.os.SystemClock.uptimeMillis()
+if (event.repeatCount == 0 || now - lastTurnMs >= 260L) {
+lastTurnMs = now
+cb(if (code == android.view.KeyEvent.KEYCODE_VOLUME_UP) -1 else 1)
+}
+}
+return true
+}
+}
 var homeResumeTick by mutableStateOf(0)
 var homeNewIntentTick by mutableStateOf(0)
 class MainActivity : ComponentActivity() {
-override fun onResume() { super.onResume(); mainActRef = this; appInFg = true; homeResumeTick++; JarvisRuntime.onActivityResume() }
+override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+if (ReaderVolumeKeyBridge.handleKeyEvent(event)) return true
+return super.dispatchKeyEvent(event)
+}
+    override fun onResume() { super.onResume(); mainActRef = this; appInFg = true; homeResumeTick++; JarvisRuntime.onActivityResume() }
 override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if (intent.hasCategory(Intent.CATEGORY_HOME)) homeNewIntentTick++ }
 override fun onPause() { appInFg = false; super.onPause() }
 override fun onCreate(savedInstanceState: Bundle?) {
@@ -240,7 +266,10 @@ books = SmartMemoClassifier.sanitizeBooks(repo.loadBooks(), repo)
 }
 }
 fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
-BackHandler(enabled = true) {
+SideEffect {
+ReaderVolumeKeyBridge.isReaderTabCurrent = (pager.currentPage == 1 && !drawerOpen && !settingsOpen && interruptApp == null)
+}
+    BackHandler(enabled = true) {
 when {
 interruptApp != null -> interruptApp = null
 settingsOpen -> settingsOpen = false

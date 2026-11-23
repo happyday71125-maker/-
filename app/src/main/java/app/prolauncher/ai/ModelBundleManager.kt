@@ -341,6 +341,13 @@ Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)
 Text("🏠 기본 홈 런처 지정", fontWeight = FontWeight.Bold, fontSize = ui.bodySp, color = CG)
 Text("스마트폰 홈 버튼을 눌렀을 때 Pro Launcher AI가 바로 열리도록 설정합니다.", fontSize = ui.subSp, color = CM)
 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = onAskHome) { Text("🏠 기본 홈 권한 요청", fontSize = (ui.subSp.value + 1).sp) }; OutlinedButton(onClick = onSysHome) { Text("시스템 기본 앱 설정", fontSize = (ui.subSp.value + 1).sp) } }
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+  val sRepo = remember(ctx) { LauncherRepository(ctx) }
+  ChipBtn("🔋 배터리 제한해제", sRepo.isIgnoringBatteryOptimizations(), CA) { sRepo.requestIgnoreBatteryOptimizations() }
+  if (sRepo.isXiaomiOrPocoDevice()) {
+    ChipBtn("⚡ 포코·샤오미 자동실행 켜기", false, CG) { sRepo.openXiaomiAutoStartSettings() }
+  }
+}
 }
 }
 Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, Color(0xFF23324B)), modifier = Modifier.fillMaxWidth()) {

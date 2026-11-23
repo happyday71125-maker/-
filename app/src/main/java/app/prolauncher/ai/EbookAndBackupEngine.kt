@@ -36,6 +36,12 @@ data class AiChatSession(
  val messages: List<ChatMsg>,
  val updatedAt: String
 )
+data class FootnoteSpan(
+ val start: Int,
+ val end: Int,
+ val isUnicodeSup: Boolean,
+ val isLineStartRef: Boolean = false
+)
 object EbookTextReflower {
  private val sentenceEndChars = setOf('.', '?', '!', '。', '！', '？', '…', ':', ';', '】', '》', '〉', '』', '」')
  private val closingWrapperChars = setOf(CH_DQ, CH_SQ, '”', '’', ')', ']', '}', '』', '」', '〉', '》')
@@ -237,11 +243,146 @@ object EbookTextReflower {
   flushPara()
   return out.toString().trim()
  }
- private fun createBookPaint(fontSizePx: Float, useSerif: Boolean): TextPaint {
+ fun createBookPaint(fontSizePx: Float, useSerif: Boolean): TextPaint {
   return TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
    textSize = fontSizePx.coerceAtLeast(18f)
    typeface = if (useSerif) Typeface.SERIF else Typeface.SANS_SERIF
   }
+ }
+ private val unicodeSupChars = "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁽⁾"
+ private val numPrefixWords = setOf(
+  "제", "약", "만", "총", "각", "전", "후", "상", "하", "초", "중", "고", "대",
+  "시즌", "파트", "챕터", "레벨", "버전", "채널", "트랙", "페이지", "그림", "표", "식",
+  "부록", "예제", "문제", "단계", "유형", "코로나", "오미크론", "비타민", "아이폰", "갤럭시",
+  "윈도우", "안드로이드", "플레이스테이션", "오피스", "모델", "타입", "코드", "번호", "항목",
+  "규칙", "원칙", "법칙", "조항", "영문", "국도", "호선", "티어", "그룹", "클래스", "카테고리",
+  "시리즈", "에피소드", "라운드", "세트", "게임", "매치", "코어", "스레드", "섹션", "포인트", "슬롯"
+ )
+ private val josaSuffixes = listOf(
+  "에서는", "에서도", "에게는", "에게서", "으로부터", "로부터", "에서", "에게", "으로",
+  "까지", "부터", "조차", "마저", "처럼", "보다", "이나", "이란",
+  "은", "는", "이", "가", "을", "를", "의", "에", "로", "과", "와", "도", "만"
+ )
+ private val counterHeadChars = "살세년월일시분초장절편부권쪽화회차번개명원배위층호기대점"
+ private fun isHangulSyl(c: Char): Boolean = c in '\uAC00'..'\uD7A3'
+ private fun isClosingPunct(c: Char): Boolean =
+  c == '.' || c == '?' || c == '!' || c == '。' || c == '！' || c == '？' ||
+   c == '”' || c == '’' || c == CH_DQ || c == CH_SQ || c == '」' || c == '』' || c == ')'
+ private fun isPostFootnoteTerm(c: Char): Boolean =
+  c.isWhitespace() || c == ',' || c == '.' || c == ';' || c == ':' || c == '?' ||
+   c == '!' || c == ')' || c == ']' || c == '”' || c == '’' || c == '」' || c == '』'
+ private fun isBoundaryAfterFootnote(text: String, afterIdx: Int): Boolean {
+  val n = text.length
+  if (afterIdx >= n) return true
+  val c = text[afterIdx]
+  if (isPostFootnoteTerm(c)) return true
+  if (c.isDigit() || c == '-' || c == '~' || c == '/' || c == '%') return false
+  if (counterHeadChars.indexOf(c) >= 0) return false
+  for (josa in josaSuffixes) {
+   if (text.regionMatches(afterIdx, josa, 0, josa.length)) {
+    val endJ = afterIdx + josa.length
+    if (endJ >= n || isPostFootnoteTerm(text[endJ])) return true
+   }
+  }
+  return false
+ }
+ private fun hasUnclosedParenOnLine(text: String, pos: Int): Boolean {
+  val stop = (pos - 40).coerceAtLeast(0)
+  var depth = 0
+  var k = pos - 1
+  while (k >= stop) {
+   val ch = text[k]
+   if (ch == CH_NL) break
+   if (ch == ')') depth++
+   else if (ch == '(') {
+    if (depth == 0) return true
+    depth--
+   }
+   k--
+  }
+  return false
+ }
+ fun findFootnoteSpans(text: String): List<FootnoteSpan> {
+  val n = text.length
+  if (n == 0) return emptyList()
+  var out: ArrayList<FootnoteSpan>? = null
+  fun emit(s: Int, e: Int, uni: Boolean, lineRef: Boolean = false) {
+   if (out == null) out = ArrayList(4)
+   out!!.add(FootnoteSpan(s, e, uni, lineRef))
+  }
+  var i = 0
+  while (i < n) {
+   val c = text[i]
+   if (unicodeSupChars.indexOf(c) >= 0) {
+    var j = i + 1
+    while (j < n && unicodeSupChars.indexOf(text[j]) >= 0) j++
+    val atStart = (i == 0 || text[i - 1] == CH_NL)
+    emit(i, j, uni = true, lineRef = atStart)
+    i = j
+    continue
+   }
+   if (c == '[' || c == '〔') {
+    val closeCh = if (c == '[') ']' else '〕'
+    var p = i + 1
+    if (text.startsWith("각주", p)) p += 2
+    else if (text.startsWith("주", p)) p += 1
+    while (p < n && text[p] == ' ') p++
+    val dStart = p
+    while (p < n && text[p].isDigit() && p - dStart < 4) p++
+    if (p > dStart && (p - dStart) in 1..3 && p < n && text[p] == closeCh) {
+     val endIdx = p + 1
+     val atStart = (i == 0 || text[i - 1] == CH_NL)
+     emit(i, endIdx, uni = false, lineRef = atStart)
+     i = endIdx
+     continue
+    }
+   }
+   if (c.isDigit()) {
+    val dStart = i
+    var dEnd = i + 1
+    while (dEnd < n && text[dEnd].isDigit()) dEnd++
+    val dLen = dEnd - dStart
+    if (dLen in 1..3 && (dStart == 0 || !text[dStart - 1].isDigit())) {
+     val hasCloseParen = dEnd < n && text[dEnd] == ')'
+     if (hasCloseParen && dStart > 0 && (isHangulSyl(text[dStart - 1]) || isClosingPunct(text[dStart - 1]) || text[dStart - 1].isLetter()) && !hasUnclosedParenOnLine(text, dStart)) {
+      val spanEnd = dEnd + 1
+      if (isBoundaryAfterFootnote(text, spanEnd)) {
+       emit(dStart, spanEnd, uni = false)
+       i = spanEnd
+       continue
+      }
+     } else if (!hasCloseParen && dStart > 0) {
+      val prev = text[dStart - 1]
+      val validPunct = when (prev) {
+       '.' -> dStart >= 2 && (isHangulSyl(text[dStart - 2]) || "”’」』)".indexOf(text[dStart - 2]) >= 0)
+       '?', '!', '。', '！', '？', '”', '’', '」', '』', ')' -> true
+       else -> false
+      }
+      if (validPunct && !hasUnclosedParenOnLine(text, dStart) && isBoundaryAfterFootnote(text, dEnd)) {
+       emit(dStart, dEnd, uni = false)
+       i = dEnd
+       continue
+      }
+      if (dLen in 1..2 && dStart >= 2 && isHangulSyl(prev) && !hasUnclosedParenOnLine(text, dStart)) {
+       var wStart = dStart - 1
+       while (wStart > 0 && isHangulSyl(text[wStart - 1])) wStart--
+       val word = text.substring(wStart, dStart)
+       val numVal = text.substring(dStart, dEnd).toIntOrNull() ?: 999
+       val blockedPrefix = word in numPrefixWords || numPrefixWords.any { it.length >= 2 && word.endsWith(it) }
+       if (word.length >= 2 && !blockedPrefix && numVal in 1..99 && isBoundaryAfterFootnote(text, dEnd)) {
+        emit(dStart, dEnd, uni = false)
+        i = dEnd
+        continue
+       }
+      }
+     }
+    }
+    i = dEnd
+    continue
+   }
+   i++
+  }
+  return out ?: emptyList()
  }
  fun wrapPageKeepAll(pageTx: String, colWPx: Int, fontSizePx: Float, useSerif: Boolean): String {
   if (pageTx.isEmpty() || colWPx <= 60) return pageTx
@@ -423,7 +564,9 @@ object EbookTextReflower {
   s = s.replace(Regex("(?is)<(head|style|script|svg|nav|noscript)[^>]*>.*?</(head|style|script|svg|nav|noscript)>"), "")
   s = s.replace(Regex("(?is)<!--.*?-->"), "")
   s = s.replace(Regex("(?i)<br[^>]*>"), STR_NL)
-  s = s.replace(Regex("(?i)</?(p|div|h1|h2|h3|h4|h5|h6|li|blockquote|section|article|tr|hr|dt|dd)[^>]*>"), STR_PARA)
+  s = s.replace(Regex("(?i)</?(p|div|h1|h2|h3|h4|h5|h6|li|blockquote|section|article|tr|hr|dt|dd|aside)[^>]*>"), STR_PARA)
+  s = s.replace(Regex("(?is)<sup[^>]*>\\s*(?:<[^>]+>\\s*)*\\[?(\\d{1,3})\\]?\\)?\\s*(?:</[^>]+>\\s*)*</sup>"), "[$1]")
+  s = s.replace(Regex("(?is)<a[^>]+(?:noteref|footnote|fnref|doc-noteref)[^>]*>\\s*(?:<[^>]+>\\s*)*\\[?(\\d{1,3})\\]?\\)?\\s*(?:</[^>]+>\\s*)*</a>"), "[$1]")
   s = s.replace(Regex("<[^>]+>"), "")
   val markerP = "[[PL_PARA_BRK]]"
   val markerL = "[[PL_LINE_BRK]]"

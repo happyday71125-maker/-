@@ -1,7 +1,9 @@
 package app.prolauncher.ai
 import android.app.role.RoleManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.PowerManager
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -48,19 +50,65 @@ val ragIncludeBooks: Boolean = true
 class LauncherRepository(private val context: Context) {
 private val prefs = context.getSharedPreferences("pl_ai_v2_prefs", Context.MODE_PRIVATE)
 
+fun isXiaomiOrPocoDevice(): Boolean {
+val tag = "${Build.MANUFACTURER} ${Build.BRAND} ${Build.PRODUCT}".lowercase()
+return tag.contains("xiaomi") || tag.contains("poco") || tag.contains("redmi") || tag.contains("blackshark")
+}
+
+fun isIgnoringBatteryOptimizations(): Boolean {
+val pm = context.getSystemService(PowerManager::class.java) ?: return true
+return pm.isIgnoringBatteryOptimizations(context.packageName)
+}
+
+fun requestIgnoreBatteryOptimizations() {
+runCatching {
+val i = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+data = Uri.parse("package:${context.packageName}")
+addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+}
+context.startActivity(i)
+}.onFailure {
+runCatching {
+context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+}
+}
+
+fun openXiaomiAutoStartSettings() {
+val intents = listOf(
+Intent().setComponent(ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")),
+Intent("miui.intent.action.OP_AUTO_START").addCategory(Intent.CATEGORY_DEFAULT),
+Intent("miui.intent.action.APP_PERM_EDITOR").setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity").putExtra("extra_pkgname", context.packageName),
+Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).setData(Uri.parse("package:${context.packageName}"))
+)
+for (it in intents) {
+val ok = runCatching {
+context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+true
+}.getOrDefault(false)
+if (ok) break
+}
+}
+
 fun isDefaultHomeApp(): Boolean {
+val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+val resPkg = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+if (resPkg != null && resPkg != "android") {
+return resPkg == context.packageName
+}
 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
 val rm = context.getSystemService(RoleManager::class.java)
 if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_HOME)) {
 return rm.isRoleHeld(RoleManager.ROLE_HOME)
 }
 }
-val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-val res = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-return res?.activityInfo?.packageName == context.packageName
+return false
 }
 
 fun buildRequestDefaultHomeIntent(): Intent {
+if (isXiaomiOrPocoDevice()) {
+return Intent(Settings.ACTION_HOME_SETTINGS)
+}
 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
 val rm = context.getSystemService(RoleManager::class.java)
 if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_HOME) && !rm.isRoleHeld(RoleManager.ROLE_HOME)) {

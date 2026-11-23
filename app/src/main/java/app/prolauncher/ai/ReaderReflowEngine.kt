@@ -247,26 +247,26 @@ Column(Modifier.padding(ui.cardPad).fillMaxWidth().clickable {
 if (bodyHit != null && bookQuery.isNotBlank()) onOpenBookAtOffset(b, bodyHit.charOffset, bookQuery.trim())
 else onOpenBook(b, false)
 }, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-Row(Modifier.fillMaxWidth(), SB, CV) {
-Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-Row(verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-Text("#${idxInList + 1}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CA)
-if (isPin) Text("📌", fontSize = 11.sp)
-Surface(color = CG.copy(alpha = 0.18f), shape = RoundedCornerShape(6.dp), border = BorderStroke(0.7.dp, CG.copy(alpha = 0.6f)), modifier = Modifier.clickable { editId = b.id; editT = b.title; editC = b.category }) { Text(b.category.ifBlank { "기타" }, fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG, modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)) }
-Text(b.title, fontSize = ui.bodySp, fontWeight = FontWeight.Bold, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-}
-val bmStr = if (bmCnt > 0) " · 🔖 ${bmCnt}개" else ""
-Text("${b.author} · 진도 ${pct}%$bmStr", fontSize = ui.subSp, color = mut)
-if (bodyHit != null && bookQuery.isNotBlank()) {
-Text("🎯 본문 위치(약 ${bodyHit.approxPct}%): ${bodyHit.snippet}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CG, maxLines = 2, overflow = TextOverflow.Ellipsis)
-}
-}
-Row(verticalAlignment = CV) {
-TextButton(onClick = { onTogglePin(b.id) }) { Text(if (isPin) "📌" else "📍", fontSize = ui.subSp, color = if (isPin) CA else mut) }
-TextButton(onClick = { onOpenBook(b, true) }) { Text("🔊", fontSize = ui.subSp, color = CA) }
-TextButton(onClick = { editId = b.id; editT = b.title; editC = b.category }) { Text("✏️", fontSize = ui.subSp, color = CG) }
-TextButton(onClick = { onDeleteBook(b.id) }) { Text("🗑️", fontSize = ui.subSp, color = Color(0xFFEF4444)) }
-}
+Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) { 
+  Row(Modifier.fillMaxWidth(), SB, CV) {
+    Row(Modifier.weight(1f), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      Text("#${idxInList + 1}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CA)
+      if (isPin) Text("📌", fontSize = 11.sp)
+      Surface(color = CG.copy(alpha = 0.18f), shape = RoundedCornerShape(6.dp), border = BorderStroke(0.7.dp, CG.copy(alpha = 0.6f)), modifier = Modifier.clickable { editId = b.id; editT = b.title; editC = b.category }) { Text(b.category.ifBlank { "기타" }, fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG, modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)) }
+      val bmStr = if (bmCnt > 0) " · 🔖${bmCnt}" else ""
+      Text("${b.author} · 진도 ${pct}%$bmStr", fontSize = ui.subSp, color = mut, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
+      Text(if (isPin) "📌" else "📍", fontSize = ui.bodySp, color = if (isPin) CA else mut, modifier = Modifier.clickable { onTogglePin(b.id) }.padding(horizontal = 6.dp, vertical = 3.dp))
+      Text("🔊", fontSize = ui.bodySp, color = CA, modifier = Modifier.clickable { onOpenBook(b, true) }.padding(horizontal = 6.dp, vertical = 3.dp))
+      Text("✏️", fontSize = ui.bodySp, color = CG, modifier = Modifier.clickable { editId = b.id; editT = b.title; editC = b.category }.padding(horizontal = 6.dp, vertical = 3.dp))
+      Text("🗑️", fontSize = ui.bodySp, color = Color(0xFFEF4444), modifier = Modifier.clickable { onDeleteBook(b.id) }.padding(horizontal = 6.dp, vertical = 3.dp))
+    }
+  }
+  Text(b.title, fontSize = ui.bodySp, fontWeight = FontWeight.Bold, color = fg, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
+  if (bodyHit != null && bookQuery.isNotBlank()) {
+    Text("🎯 본문 위치(약 ${bodyHit.approxPct}%): ${bodyHit.snippet}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CG, maxLines = 2, overflow = TextOverflow.Ellipsis)
+  }
 }
 if (reorderMode || sortMode == "CUSTOM") {
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {

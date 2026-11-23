@@ -322,7 +322,7 @@ object EbookTextReflower {
   val paint = createBookPaint(fontSizePx, useSerif)
   val maxW = (colWPx.toFloat() - fontSizePx * 0.36f).coerceAtLeast(60f)
   val safeLineH = lineHeightPx.coerceAtLeast(fontSizePx * 1.2f)
-  val maxLines = ((textHPx - fontSizePx * 0.25f) / safeLineH).toInt().coerceAtLeast(3)
+  val maxLines = (((textHPx - fontSizePx * 1.16f).coerceAtLeast(0f) / safeLineH).toInt() + 1).coerceAtLeast(3)
   val out = ArrayList<PageSlice>((n / 420).coerceAtLeast(8))
   var pos = 0
   while (pos < n && (full[pos] == CH_NL || full[pos] == CH_CR)) pos++

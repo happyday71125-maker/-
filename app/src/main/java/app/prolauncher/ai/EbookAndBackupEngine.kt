@@ -42,6 +42,17 @@ data class FootnoteSpan(
  val isUnicodeSup: Boolean,
  val isLineStartRef: Boolean = false
 )
+data class FootnoteLookupHit(
+ val numLabel: String,
+ val noteText: String,
+ val charOffset: Int
+)
+class WrappedPageMap(
+ val display: String,
+ val rawToDisp: IntArray,
+ val dispToRaw: IntArray,
+ val softWrappedLineStarts: HashSet<Int>
+)
 object EbookTextReflower {
  private val sentenceEndChars = setOf('.', '?', '!', '。', '！', '？', '…', ':', ';', '】', '》', '〉', '』', '」')
  private val closingWrapperChars = setOf(CH_DQ, CH_SQ, '”', '’', ')', ']', '}', '』', '」', '〉', '》')
@@ -384,27 +395,211 @@ object EbookTextReflower {
   }
   return out ?: emptyList()
  }
- fun wrapPageKeepAll(pageTx: String, colWPx: Int, fontSizePx: Float, useSerif: Boolean): String {
-  if (pageTx.isEmpty() || colWPx <= 60) return pageTx
+ fun extractFootnoteNumber(rawToken: String): String? {
+  if (rawToken.isBlank()) return null
+  val supDigits = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+  val sb = StringBuilder(4)
+  for (ch in rawToken) {
+   val si = supDigits.indexOf(ch)
+   if (si >= 0) sb.append(('0'.code + si).toChar())
+   else if (ch.isDigit()) sb.append(ch)
+  }
+  return sb.toString().takeIf { it.isNotEmpty() }
+ }
+ private fun toSuperscriptNumber(numStr: String): String {
+  val supDigits = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+  val sb = StringBuilder(numStr.length)
+  for (ch in numStr) {
+   if (ch in '0'..'9') sb.append(supDigits[ch - '0'])
+  }
+  return sb.toString()
+ }
+ fun lookupFootnoteDefinition(fullText: String, tapGlobalOff: Int, rawToken: String): FootnoteLookupHit? {
+  val numStr = extractFootnoteNumber(rawToken) ?: return null
+  val numVal = numStr.toIntOrNull() ?: return null
+  val supStr = toSuperscriptNumber(numStr)
+  val n = fullText.length
+  if (n == 0) return null
+  var bestScore = -999
+  var bestLineStart = -1
+  fun hasPlainNeighborNote(aroundIdx: Int, targetNum: Int): Boolean {
+   if (targetNum <= 0) return false
+   val sWin = (aroundIdx - 900).coerceAtLeast(0)
+   val eWin = (aroundIdx + 900).coerceAtMost(n)
+   val prevS = (targetNum - 1).toString()
+   val nextS = (targetNum + 1).toString()
+   var k = sWin
+   while (k < eWin) {
+    if (k == 0 || fullText[k - 1] == CH_NL) {
+     var p = k
+     while (p < eWin && (fullText[p] == ' ' || fullText[p] == '　' || fullText[p] == CH_TAB)) p++
+     if (targetNum > 1 && fullText.startsWith(prevS, p)) {
+      val af = p + prevS.length
+      if (af < eWin && (fullText[af] == ' ' || fullText[af] == ')' || fullText[af] == '.')) return true
+     }
+     if (fullText.startsWith(nextS, p)) {
+      val af = p + nextS.length
+      if (af < eWin && (fullText[af] == ' ' || fullText[af] == ')' || fullText[af] == '.')) return true
+     }
+    }
+    val nx = fullText.indexOf(CH_NL, k)
+    if (nx < 0) break
+    k = nx + 1
+   }
+   return false
+  }
+  fun hasNearbyNotesHeader(beforeIdx: Int): Boolean {
+   val sWin = (beforeIdx - 4500).coerceAtLeast(0)
+   val sub = fullText.substring(sWin, beforeIdx)
+   return sub.contains("미주") || sub.contains("각주") || sub.contains("주석") ||
+    sub.contains("옮긴이 주") || sub.contains("Notes") || sub.contains("Endnotes") ||
+    sub.contains("[주]") || sub.contains(STR_NL + "주" + STR_NL)
+  }
+  var ls = 0
+  while (ls < n) {
+   val le = fullText.indexOf(CH_NL, ls).let { if (it < 0) n else it }
+   var p = ls
+   while (p < le && (fullText[p] == ' ' || fullText[p] == '　' || fullText[p] == CH_TAB)) p++
+   if (p < le && kotlin.math.abs(p - tapGlobalOff) > 4) {
+    var tier = 0
+    var bodyStart = -1
+    val c0 = fullText[p]
+    if (c0 == '[' || c0 == '〔') {
+     val closeCh = if (c0 == '[') ']' else '〕'
+     var q = p + 1
+     if (fullText.startsWith("각주", q)) q += 2
+     else if (fullText.startsWith("주", q)) q += 1
+     while (q < le && fullText[q] == ' ') q++
+     if (fullText.startsWith(numStr, q)) {
+      val af = q + numStr.length
+      if (af < le && fullText[af] == closeCh) {
+       tier = 1
+       bodyStart = af + 1
+      }
+     }
+    } else if (supStr.isNotEmpty() && fullText.startsWith(supStr, p)) {
+     val af = p + supStr.length
+     if (af < le && unicodeSupChars.indexOf(fullText[af]) < 0) {
+      tier = 1
+      bodyStart = af
+     }
+    } else if (fullText.startsWith(numStr, p)) {
+     val af = p + numStr.length
+     if (af < le && !fullText[af].isDigit()) {
+      val sep = fullText[af]
+      if (sep == ')') {
+       tier = 1
+       bodyStart = af + 1
+      } else if (sep == '.' && af + 1 < le && fullText[af + 1] == ' ') {
+       val restLen = le - (af + 2)
+       if (restLen >= 10 && (hasPlainNeighborNote(ls, numVal) || hasNearbyNotesHeader(ls))) {
+        tier = 2
+        bodyStart = af + 2
+       } else if (restLen >= 24 && ls > tapGlobalOff) {
+        tier = 3
+        bodyStart = af + 2
+       }
+      } else if (sep == ' ' && af + 1 < le) {
+       val nextCh = fullText[af + 1]
+       val restLen = le - (af + 1)
+       if (counterHeadChars.indexOf(nextCh) < 0 && restLen >= 8 && (hasPlainNeighborNote(ls, numVal) || hasNearbyNotesHeader(ls))) {
+        tier = 2
+        bodyStart = af + 1
+       }
+      }
+     }
+    }
+    if (tier > 0 && bodyStart in 0 until le) {
+     val previewRest = fullText.substring(bodyStart, le).trim()
+     if (previewRest.length >= 2) {
+      var sc = when (tier) {
+       1 -> 125
+       2 -> 85
+       else -> 40
+      }
+      if (ls > tapGlobalOff) {
+       val dist = ls - tapGlobalOff
+       sc += if (dist <= 45000) (85 - dist / 900) else (42 - (dist / 25000).coerceAtMost(24))
+      } else {
+       sc -= 35
+      }
+      if (sc > bestScore) {
+       bestScore = sc
+       bestLineStart = ls
+      }
+     }
+    }
+   }
+   ls = le + 1
+  }
+  if (bestLineStart < 0 || bestScore < 65) return null
+  val paraEnd = fullText.indexOf(STR_PARA, bestLineStart).let { if (it < 0) minOf(n, bestLineStart + 900) else minOf(it, bestLineStart + 900) }
+  val extracted = fullText.substring(bestLineStart, paraEnd).trim()
+  if (extracted.isEmpty()) return null
+  return FootnoteLookupHit(numStr, extracted, bestLineStart)
+ }
+ fun shouldIndentParagraphStart(text: String, lineStart: Int, lineEnd: Int): Boolean {
+  if (lineStart >= lineEnd || lineStart < 0 || lineEnd > text.length) return false
+  val first = text[lineStart]
+  if (first == ' ' || first == '　' || first == CH_TAB) return false
+  if (first == '[' || first == '〔' || unicodeSupChars.indexOf(first) >= 0) return false
+  val sampleEnd = minOf(lineEnd, lineStart + 64)
+  val sample = text.substring(lineStart, sampleEnd).trim()
+  if (sample.isEmpty()) return false
+  if (isStructuralLineStart(sample)) return false
+  if ((lineEnd - lineStart) <= 22 && looksLikeStandaloneHeading(sample)) return false
+  var d = 0
+  while (d < sample.length && d < 4 && sample[d].isDigit()) d++
+  if (d in 1..3 && d < sample.length && sample[d] == ')') return false
+  return true
+ }
+ fun wrapPageWithIndentAndMap(
+  pageTx: String,
+  colWPx: Int,
+  fontSizePx: Float,
+  useSerif: Boolean,
+  paraIndentOn: Boolean,
+  pageStartsAtPara: Boolean,
+  pageContinuesMidPara: Boolean
+ ): WrappedPageMap {
+  val n = pageTx.length
+  if (n == 0) {
+   return WrappedPageMap("", intArrayOf(0), intArrayOf(0), HashSet())
+  }
   val paint = createBookPaint(fontSizePx, useSerif)
   val maxW = (colWPx.toFloat() - fontSizePx * 0.36f).coerceAtLeast(60f)
-  val chars = pageTx.toCharArray()
-  val n = chars.size
+  val indentWPx = if (paraIndentOn) paint.measureText("　") else 0f
+  val sb = StringBuilder(n + 24)
+  val rawToDisp = IntArray(n + 1)
+  val dispToRawList = ArrayList<Int>(n + 25)
+  val softStarts = HashSet<Int>(24)
   var segStart = 0
   var i = 0
   while (i <= n) {
-   if (i == n || chars[i] == CH_NL) {
+   if (i == n || pageTx[i] == CH_NL) {
+    val canIndentSeg = paraIndentOn && (segStart > 0 || pageStartsAtPara) && shouldIndentParagraphStart(pageTx, segStart, i)
     var cur = segStart
+    var firstLineOfSeg = true
     while (cur < i) {
+     val lineDispStart = sb.length
+     val useIndent = canIndentSeg && firstLineOfSeg
+     val lineMaxW = if (useIndent) (maxW - indentWPx).coerceAtLeast(48f) else maxW
      var scanStart = cur
-     while (scanStart < i && chars[scanStart] == ' ') scanStart++
-     if (scanStart >= i) break
+     while (scanStart < i && pageTx[scanStart] == ' ') scanStart++
+     if (scanStart >= i) {
+      for (k in cur until i) {
+       rawToDisp[k] = sb.length
+       dispToRawList.add(k)
+       sb.append(pageTx[k])
+      }
+      break
+     }
      var bestEnd = cur
      var j = scanStart + 1
      while (j <= i) {
-      if (j == i || chars[j] == ' ') {
-       val w = paint.measureText(chars, cur, j - cur)
-       if (w <= maxW) {
+      if (j == i || pageTx[j] == ' ') {
+       val w = paint.measureText(pageTx, cur, j)
+       if (w <= lineMaxW || colWPx <= 60) {
         bestEnd = j
         if (j == i) break
        } else {
@@ -413,32 +608,68 @@ object EbookTextReflower {
       }
       j++
      }
+     var splitSpaceIdx = -1
+     val segEndForLine: Int
      if (bestEnd == i) {
-      break
+      segEndForLine = i
      } else if (bestEnd > cur) {
-      chars[bestEnd] = CH_NL
-      cur = bestEnd + 1
+      splitSpaceIdx = bestEnd
+      segEndForLine = bestEnd
      } else {
       var sp = -1
       for (k in scanStart + 1 until i) {
-       if (chars[k] == ' ') {
+       if (pageTx[k] == ' ') {
         sp = k
         break
        }
       }
       if (sp != -1) {
-       chars[sp] = CH_NL
-       cur = sp + 1
+       splitSpaceIdx = sp
+       segEndForLine = sp
       } else {
-       break
+       segEndForLine = i
       }
      }
+     if (useIndent) {
+      dispToRawList.add(cur)
+      sb.append('　')
+     }
+     for (k in cur until segEndForLine) {
+      rawToDisp[k] = sb.length
+      dispToRawList.add(k)
+      sb.append(pageTx[k])
+     }
+     if (splitSpaceIdx >= 0) {
+      softStarts.add(lineDispStart)
+      rawToDisp[splitSpaceIdx] = sb.length
+      dispToRawList.add(splitSpaceIdx)
+      sb.append(CH_NL)
+      cur = splitSpaceIdx + 1
+     } else {
+      if (i == n && pageContinuesMidPara) {
+       softStarts.add(lineDispStart)
+      }
+      cur = i
+     }
+     firstLineOfSeg = false
+    }
+    if (i < n && pageTx[i] == CH_NL) {
+     rawToDisp[i] = sb.length
+     dispToRawList.add(i)
+     sb.append(CH_NL)
     }
     segStart = i + 1
    }
    i++
   }
-  return String(chars)
+  rawToDisp[n] = sb.length
+  dispToRawList.add((n - 1).coerceAtLeast(0))
+  val dispArr = IntArray(dispToRawList.size)
+  for (idx in dispToRawList.indices) dispArr[idx] = dispToRawList[idx]
+  return WrappedPageMap(sb.toString(), rawToDisp, dispArr, softStarts)
+ }
+ fun wrapPageKeepAll(pageTx: String, colWPx: Int, fontSizePx: Float, useSerif: Boolean): String {
+  return wrapPageWithIndentAndMap(pageTx, colWPx, fontSizePx, useSerif, false, false, false).display
  }
  fun paginateBookKeepAll(
   full: String,
@@ -446,7 +677,8 @@ object EbookTextReflower {
   textHPx: Float,
   fontSizePx: Float,
   lineHeightPx: Float,
-  useSerif: Boolean
+  useSerif: Boolean,
+  paraIndentOn: Boolean = false
  ): List<PageSlice> {
   if (full.isBlank()) return listOf(PageSlice(0, full.length))
   val n = full.length
@@ -462,6 +694,7 @@ object EbookTextReflower {
   }
   val paint = createBookPaint(fontSizePx, useSerif)
   val maxW = (colWPx.toFloat() - fontSizePx * 0.36f).coerceAtLeast(60f)
+  val indentWPx = if (paraIndentOn) paint.measureText("　") else 0f
   val safeLineH = lineHeightPx.coerceAtLeast(fontSizePx * 1.2f)
   val maxLines = (((textHPx - fontSizePx * 1.16f).coerceAtLeast(0f) / safeLineH).toInt() + 1).coerceAtLeast(3)
   val out = ArrayList<PageSlice>((n / 420).coerceAtLeast(8))
@@ -484,6 +717,8 @@ object EbookTextReflower {
     val searchLim = minOf(n, cur + 2400)
     var segEnd = cur
     while (segEnd < searchLim && full[segEnd] != CH_NL) segEnd++
+    val isParaFirst = paraIndentOn && (cur == 0 || full[cur - 1] == CH_NL) && shouldIndentParagraphStart(full, cur, segEnd)
+    val lineMaxW = if (isParaFirst) (maxW - indentWPx).coerceAtLeast(48f) else maxW
     var scanStart = cur
     while (scanStart < segEnd && full[scanStart] == ' ') scanStart++
     var bestEnd = cur
@@ -492,7 +727,7 @@ object EbookTextReflower {
      while (j <= segEnd) {
       if (j == segEnd || full[j] == ' ') {
        val w = paint.measureText(full, cur, j)
-       if (w <= maxW) {
+       if (w <= lineMaxW) {
         bestEnd = j
         if (j == segEnd) break
        } else {
@@ -513,7 +748,7 @@ object EbookTextReflower {
      }
      usedLines++
     } else {
-     val broken = paint.breakText(full, cur, segEnd, true, maxW, null).coerceAtLeast(1)
+     val broken = paint.breakText(full, cur, segEnd, true, lineMaxW, null).coerceAtLeast(1)
      var nextCur = (cur + broken).coerceAtMost(segEnd)
      if (nextCur < segEnd && Character.isLowSurrogate(full[nextCur]) && nextCur > cur + 1) nextCur--
      cur = nextCur

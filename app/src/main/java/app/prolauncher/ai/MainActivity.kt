@@ -165,8 +165,11 @@ if (target == 1) cut else "• $cut"
 }
 }
 }
+var homeResumeTick by mutableStateOf(0)
+var homeNewIntentTick by mutableStateOf(0)
 class MainActivity : ComponentActivity() {
-override fun onResume() { super.onResume(); mainActRef = this; appInFg = true; JarvisRuntime.onActivityResume() }
+override fun onResume() { super.onResume(); mainActRef = this; appInFg = true; homeResumeTick++; JarvisRuntime.onActivityResume() }
+override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if (intent.hasCategory(Intent.CATEGORY_HOME)) homeNewIntentTick++ }
 override fun onPause() { appInFg = false; super.onPause() }
 override fun onCreate(savedInstanceState: Bundle?) {
 super.onCreate(savedInstanceState); mainActRef = this; appCtxRef = applicationContext; appInFg = true; loadAiCfg(this); val prevEh = Thread.getDefaultUncaughtExceptionHandler(); Thread.setDefaultUncaughtExceptionHandler { th, ex -> if (th.name != "main") { ex.printStackTrace() } else { prevEh?.uncaughtException(th, ex) } }
@@ -213,8 +216,21 @@ var isDefHome by remember { mutableStateOf(repo.isDefaultHomeApp()) }
 var drawerOpen by remember { mutableStateOf(false) }
 var settingsOpen by remember { mutableStateOf(false) }
 var interruptApp by remember { mutableStateOf<AppEntry?>(null) }
+LaunchedEffect(homeResumeTick) { isDefHome = repo.isDefaultHomeApp() }
+LaunchedEffect(homeNewIntentTick) {
+if (homeNewIntentTick > 0) {
+interruptApp = null
+settingsOpen = false
+drawerOpen = false
+}
+}
 val homeRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { isDefHome = repo.isDefaultHomeApp() }
-fun askDefaultHome() { runCatching { homeRoleLauncher.launch(repo.buildRequestDefaultHomeIntent()) }.onFailure { repo.openSystemDefaultAppsSettings() } }
+fun askDefaultHome() {
+if (repo.isXiaomiOrPocoDevice() && !repo.isIgnoringBatteryOptimizations()) {
+repo.requestIgnoreBatteryOptimizations()
+}
+runCatching { homeRoleLauncher.launch(repo.buildRequestDefaultHomeIntent()) }.onFailure { repo.openSystemDefaultAppsSettings() }
+}
 LaunchedEffect(LauncherBackupManager.backupRev) {
 if (LauncherBackupManager.backupRev > 0) {
 cfg = repo.loadConfig()
@@ -223,13 +239,13 @@ notes = SmartMemoClassifier.sanitizeNotes(repo.loadNotes(), repo)
 books = SmartMemoClassifier.sanitizeBooks(repo.loadBooks(), repo)
 }
 }
-    fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
-BackHandler(enabled = drawerOpen || settingsOpen || interruptApp != null || pager.currentPage != 2) {
+fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
+BackHandler(enabled = true) {
 when {
 interruptApp != null -> interruptApp = null
 settingsOpen -> settingsOpen = false
 drawerOpen -> drawerOpen = false
-else -> scope.launch { pager.animateScrollToPage(2) }
+pager.currentPage != 2 -> scope.launch { pager.animateScrollToPage(2) }
 }
 }
 SideEffect { JarvisRuntime.bindCallbacks(rootCtx, { pg -> scope.launch { pager.scrollToPage(pg.coerceIn(0, 4)) } }, { raw0 -> val isVm = raw0.startsWith("__VOICEMEMO__"); val raw = if (isVm) raw0.removePrefix("__VOICEMEMO__").trim() else raw0.trim(); val mc0 = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = if (isVm) { if (!mc0.contains("음성메모")) SmartMemoClassifier.saveMemoCats(rootCtx, listOf("음성메모") + mc0); "음성메모" } else SmartMemoClassifier.guessCategory(raw, mc0); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "🎙️ [$c0] 탭 저장 + ⏰알림 ${sc}건 예약됨" else if (isVm) "🎙️ [음성메모] 탭에 즉시 저장되었습니다!" else "✅ [$c0] 메모 즉시 저장됨" }, { books }, { notes }) }
@@ -719,7 +735,28 @@ Surface(
         }
     }
 }
-if (!isDefHome) { Surface(color = Color(0xFF14261F), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().clickable { onAskHome() }) { Row(Modifier.padding(ui.cardPad), SB, CV) { Column(Modifier.weight(1f)) { Text("🏠 기본 홈 화면(런처) 권한 지정하기", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG); Text("탭하여 기본 홈 앱으로 설정하세요", fontSize = ui.subSp, color = Color(0xFFA7F3D0)) }; Text("→", fontSize = (ui.subSp.value + 1).sp, color = CG) } } }
+if (!isDefHome) {
+val hRepo = remember(homeCtx) { LauncherRepository(homeCtx) }
+val isPoco = remember { hRepo.isXiaomiOrPocoDevice() }
+Surface(color = Color(0xFF14261F), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+Column(Modifier.padding(ui.cardPad), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+Row(Modifier.fillMaxWidth().clickable { onAskHome() }, SB, CV) {
+Column(Modifier.weight(1f)) {
+Text("🏠 기본 홈 화면(런처) 권한 지정하기", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG)
+Text(if (isPoco) "포코·샤오미는 ①배터리 제한해제 → ②자동실행 ON → ③기본런처 선택 시 풀리지 않습니다" else "탭하여 기본 홈 앱으로 설정하세요", fontSize = ui.subSp, color = Color(0xFFA7F3D0))
+}
+Text("→", fontSize = (ui.subSp.value + 1).sp, color = CG)
+}
+if (isPoco) {
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+ChipBtn("① 배터리 제한해제", hRepo.isIgnoringBatteryOptimizations(), CA) { hRepo.requestIgnoreBatteryOptimizations() }
+ChipBtn("② 자동실행 켜기", false, CG) { hRepo.openXiaomiAutoStartSettings() }
+ChipBtn("③ 기본 런처 선택", false, CW) { hRepo.openSystemDefaultAppsSettings() }
+}
+}
+}
+}
+}
 Surface(color = Color(0xFF0F1624), shape = RoundedCornerShape(16.dp), border = BorderStroke(0.8.dp, Color(0xFF222E44)), modifier = Modifier.fillMaxWidth().clickable { onRightNotes() }) { Column(Modifier.padding(ui.cardPad), verticalArrangement = Arrangement.spacedBy(4.dp)) { Row(Modifier.fillMaxWidth(), SB, CV) { Text("📌 중요 메모 (${importantNotes.size})", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA); Text("→", fontSize = ui.subSp, color = CM) }; if (importantNotes.isEmpty()) { Text("메모에서 ★ 중요 표시를 켜면 홈 화면에서 바로 확인됩니다.", fontSize = (ui.subSp.value + 1).sp, color = CD) } else importantNotes.forEach { n -> val cat = SmartMemoClassifier.categoryOf(n, memoCats); Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) { val ls = n.content.lines().filter { !it.trim().startsWith("#") && it.isNotBlank() }; ls.take(3).forEachIndexed { idx, ln -> val tr = ln.trimStart(); val isChk = tr.startsWith("☐") || tr.startsWith("☑"); val done = tr.startsWith("☑"); val origIdx = n.content.lines().indexOf(ln).coerceAtLeast(idx); Row(Modifier.fillMaxWidth().clickable { if (isChk) onToggleCheck(n.id, origIdx) else onRightNotes() }.padding(vertical = 1.dp), verticalAlignment = CV) { if (idx == 0) Text("[$cat] ", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG); Text(ln, fontSize = (ui.subSp.value + 1).sp, color = if (done) CD else Color(0xFFE5E7EB), textDecoration = if (done) TextDecoration.LineThrough else null, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)) } } } } } }
 }
 if (!isKeyboardOpen) {

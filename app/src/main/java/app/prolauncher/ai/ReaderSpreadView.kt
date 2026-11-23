@@ -36,11 +36,20 @@ object ReaderLayoutCache {
     }
 }
 
+private tailrec fun Context.findReaderHostActivity(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findReaderHostActivity()
+    else -> null
+}
+
 fun buildWrappedHighlightedBookPage(
     rawText: String,
     colWPx: Int,
     fontSizePx: Float,
+    curPt: Int,
     useSerif: Boolean,
+    justifyOn: Boolean,
+    continuesMidPara: Boolean,
     query: String,
     isNight: Boolean,
     pageStartOff: Int,
@@ -48,15 +57,88 @@ fun buildWrappedHighlightedBookPage(
 ): AnnotatedString {
     if (rawText.isEmpty()) return AnnotatedString("")
     val wrapped = EbookTextReflower.wrapPageKeepAll(rawText, colWPx, fontSizePx, useSerif)
+    val fnSpans = EbookTextReflower.findFootnoteSpans(rawText)
     val q = query.trim()
     val qRanges = if (q.isEmpty()) emptyList() else BookPassageSearcher.findMatchRangesInText(rawText, q, maxHits = 60)
     val pageEndOff = pageStartOff + wrapped.length
     val pageHls = if (bookHighlights.isEmpty()) emptyList() else bookHighlights.filter { it.endOff > pageStartOff && it.startOff < pageEndOff }
-    if (qRanges.isEmpty() && pageHls.isEmpty()) return AnnotatedString(wrapped)
+    if (!justifyOn && fnSpans.isEmpty() && qRanges.isEmpty() && pageHls.isEmpty()) return AnnotatedString(wrapped)
     val hlBg = if (isNight) Color(0x99D97706) else Color(0x88FACC15)
     val hlFg = if (isNight) Color(0xFFFFFBEB) else Color(0xFF1C1917)
+    val fnColor = if (isNight) Color(0xFF38BDF8) else Color(0xFF0284C7)
     return buildAnnotatedString {
         append(wrapped)
+        if (justifyOn && colWPx > 80 && fontSizePx >= 12f) {
+            val paint = EbookTextReflower.createBookPaint(fontSizePx, useSerif)
+            val justifyTargetW = (colWPx.toFloat() - fontSizePx * 0.40f).coerceAtLeast(60f)
+            val n = wrapped.length
+            var ls = 0
+            while (ls < n) {
+                var le = ls
+                while (le < n && wrapped[le] != CH_NL) le++
+                var effEnd = le
+                while (effEnd > ls && wrapped[effEnd - 1] == ' ') effEnd--
+                val isSoftWrapped = (le < rawText.length && rawText[le] == ' ' && wrapped[le] == CH_NL) ||
+                    (le == n && continuesMidPara)
+                if (isSoftWrapped && (effEnd - ls) >= 6) {
+                    var lineW = paint.measureText(wrapped, ls, effEnd)
+                    for (fn in fnSpans) {
+                        if (!fn.isUnicodeSup && !fn.isLineStartRef && fn.end > ls && fn.start < effEnd) {
+                            val fs = maxOf(ls, fn.start)
+                            val fe = minOf(effEnd, fn.end)
+                            if (fe > fs) lineW -= paint.measureText(wrapped, fs, fe) * 0.36f
+                        }
+                    }
+                    val slackPx = justifyTargetW - lineW
+                    if (slackPx > 1.2f) {
+                        val spaceIndices = ArrayList<Int>(6)
+                        for (k in (ls + 1) until (effEnd - 1)) {
+                            if (wrapped[k] == ' ') spaceIndices.add(k)
+                        }
+                        val interiorCnt = (effEnd - ls - 2).coerceAtLeast(1)
+                        val spaceCnt = spaceIndices.size
+                        val baseSpaceShare = if (spaceCnt > 0) minOf(slackPx * 0.58f, spaceCnt * fontSizePx * 0.56f) else 0f
+                        val remAfterBase = (slackPx - baseSpaceShare).coerceAtLeast(0f)
+                        val charBudget = minOf(remAfterBase, interiorCnt * fontSizePx * 0.28f)
+                        val extraSpaceTopUp = if (spaceCnt > 0) minOf(remAfterBase - charBudget, spaceCnt * fontSizePx * 0.42f).coerceAtLeast(0f) else 0f
+                        val totalSpacePx = baseSpaceShare + extraSpaceTopUp
+                        val spaceAddPx = if (spaceCnt > 0) totalSpacePx / spaceCnt else 0f
+                        val charAddPx = charBudget / interiorCnt
+                        val charEm = charAddPx / fontSizePx
+                        if (charEm >= 0.002f && (effEnd - 1) > (ls + 1)) {
+                            addStyle(SpanStyle(letterSpacing = charEm.em), ls + 1, effEnd - 1)
+                        }
+                        if (spaceAddPx >= 0.3f) {
+                            val spEm = ((charAddPx + spaceAddPx) / fontSizePx).em
+                            for (spIdx in spaceIndices) {
+                                addStyle(SpanStyle(letterSpacing = spEm), spIdx, spIdx + 1)
+                            }
+                        }
+                    }
+                }
+                ls = le + 1
+            }
+        }
+        for (fn in fnSpans) {
+            val s = fn.start.coerceIn(0, wrapped.length)
+            val e = fn.end.coerceIn(s, wrapped.length)
+            if (s < e) {
+                if (fn.isLineStartRef || fn.isUnicodeSup) {
+                    addStyle(SpanStyle(fontSize = (curPt * 0.85f).sp, fontWeight = FontWeight.Bold, color = fnColor), s, e)
+                } else {
+                    addStyle(
+                        SpanStyle(
+                            fontSize = (curPt * 0.62f).sp,
+                            baselineShift = BaselineShift(0.32f),
+                            fontWeight = FontWeight.Bold,
+                            color = fnColor
+                        ),
+                        s,
+                        e
+                    )
+                }
+            }
+        }
         pageHls.forEach { h ->
             val ls = (h.startOff - pageStartOff).coerceIn(0, wrapped.length)
             val le = (h.endOff - pageStartOff).coerceIn(ls, wrapped.length)
@@ -140,6 +222,7 @@ fun ReaderView(
     SideEffect { ReaderTtsRuntime.syncState(books, repo, onSaveBooks) }
     var twoPageMode by remember { mutableStateOf(readerPrefs.getBoolean("reader_two_page", false)) }
     var smartReflowOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_smart_reflow", true)) }
+    var readerJustifyOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_justify_on", true)) }
     var bCats by remember { mutableStateOf(SmartMemoClassifier.loadBookCats(ctx)) }
     var selCat by remember { mutableStateOf("전체") }
     var catBarOpen by remember { mutableStateOf(false) }
@@ -469,6 +552,16 @@ onClose = { searchOpen = false }
                                         }
                                     }
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                                        ReaderPointBtn("📐 양쪽정렬 (도서형)", readerJustifyOn, CG, Modifier.weight(1f)) {
+                                            readerJustifyOn = true
+                                            readerPrefs.edit().putBoolean("reader_justify_on", true).apply()
+                                        }
+                                        ReaderPointBtn("⬅️ 왼쪽정렬", !readerJustifyOn, CG, Modifier.weight(1f)) {
+                                            readerJustifyOn = false
+                                            readerPrefs.edit().putBoolean("reader_justify_on", false).apply()
+                                        }
+                                    }
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                                         listOf(0 to "줄간격 좁게", 1 to "줄간격 보통", 2 to "줄간격 넓게").forEach { (idx, lbl) ->
                                             ReaderPointBtn(lbl, lineHeightIdx == idx, CA, Modifier.weight(1f)) {
                                                 lineHeightIdx = idx
@@ -585,20 +678,39 @@ onClose = { searchOpen = false }
                     color = fg
                 )
             }
+            val realDm = remember(conf.orientation) {
+                val dm = android.util.DisplayMetrics()
+                runCatching {
+                    val dispMgr = ctx.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+                    @Suppress("DEPRECATION")
+                    dispMgr?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.getRealMetrics(dm)
+                }
+                if (dm.widthPixels <= 0 || dm.heightPixels <= 0) dm.setTo(ctx.resources.displayMetrics)
+                dm
+            }
+            val isPhysicalLandscape = realDm.widthPixels > realDm.heightPixels
+            val realFullWPx = realDm.widthPixels.toFloat()
+            val realFullHPx = realDm.heightPixels.toFloat()
+            val hostAct = ctx.findReaderHostActivity() ?: mainActRef
+            val inMultiWindow = hostAct?.isInMultiWindowMode == true
+            val imeBottomPx = WindowInsets.ime.getBottom(density)
+            val isWindowShrunk = inMultiWindow ||
+                (realFullHPx > 400f && rootMaxHPx < realFullHPx * 0.80f) ||
+                (realFullWPx > 300f && rootMaxWPx < realFullWPx * 0.85f)
+            val fsWKey = "reader_fs_w_${isPhysicalLandscape}_${twoPageMode}"
+            val fsHKey = "reader_fs_h_${isPhysicalLandscape}_${twoPageMode}"
             val outerPad = if (twoPageMode) 10.dp else 12.dp
             val spineW = if (twoPageMode) 20.dp else 0.dp
-            val fixedBookW = (conf.screenWidthDp.dp - readerOuterHPad * 2).coerceAtLeast(220.dp)
-            val measuredBookWPxState = remember(conf.screenWidthDp, conf.screenHeightDp, twoPageMode) { mutableStateOf(0f) }
-            val fallbackTextH = (conf.screenHeightDp.dp - ui.vPad * 2 - 148.dp).coerceAtLeast(180.dp)
-            val measuredTextHPxState = remember(conf.screenWidthDp, conf.screenHeightDp, twoPageMode) { mutableStateOf(0f) }
+            val measuredBookWPxState = remember(isPhysicalLandscape, twoPageMode) { mutableStateOf(readerPrefs.getFloat(fsWKey, 0f)) }
+            val measuredTextHPxState = remember(isPhysicalLandscape, twoPageMode) { mutableStateOf(readerPrefs.getFloat(fsHKey, 0f)) }
             val cardInnerChromePx = with(density) { 45.dp.toPx() }
-            val imeBottomPx = WindowInsets.ime.getBottom(density)
             val outerPadPx = with(density) { outerPad.toPx() }
             val spineWPx = with(density) { spineW.toPx() }
-            val activeBookWPx = if (measuredBookWPxState.value >= 200f) measuredBookWPxState.value else with(density) { fixedBookW.toPx() }
+            val fallbackFullBookWPx = (realFullWPx - with(density) { (readerOuterHPad * 2).toPx() }).coerceAtLeast(220f)
+            val fallbackFullTextHPx = (realFullHPx - with(density) { (ui.vPad * 2 + 216.dp).toPx() }).coerceAtLeast(180f)
+            val activeBookWPx = if (measuredBookWPxState.value >= 200f) measuredBookWPxState.value else fallbackFullBookWPx
             val fixedColWPx = (if (twoPageMode) ((activeBookWPx - outerPadPx * 2f - spineWPx) / 2f) else (activeBookWPx - outerPadPx * 2f)).roundToInt().coerceAtLeast(80)
-            val fallbackTextHPx = (with(density) { fallbackTextH.toPx() } - 4f).coerceAtLeast(120f)
-            val fixedTextHPx = if (measuredTextHPxState.value >= 120f) measuredTextHPxState.value else fallbackTextHPx
+            val fixedTextHPx = if (measuredTextHPxState.value >= 120f) measuredTextHPxState.value else fallbackFullTextHPx
             val fixedTextH = with(density) { fixedTextHPx.toDp() }.coerceAtLeast(180.dp)
 
             val pageCacheKey = "v4ka_${act.id}_${reflowSrc.fullText.length}_${reflowSrc.fullText.hashCode()}_${fixedColWPx}_${fixedTextHPx.roundToInt()}_${curPt}_${cfg.readerUseSerif}_${lineHeightIdx}_${smartReflowOn}"
@@ -738,12 +850,8 @@ commitExcerptHook = ::commitDraftIfEditing
              val nx = if (hit != null) allHighlights.filterNot { it.id == hit.id } else allHighlights + BookHighlight(System.currentTimeMillis(), act.id, gs, ge, hlColorIdx)
              allHighlights = nx; saveBookHighlights(ctx, nx)
             }
-            val leftPageDisplay = remember(leftPageTx, fixedColWPx, fontSizePx, cfg.readerUseSerif, searchQuery, isNightTheme, leftSlice.s, bookHls) {
-                buildWrappedHighlightedBookPage(leftPageTx, fixedColWPx, fontSizePx, cfg.readerUseSerif, searchQuery, isNightTheme, leftSlice.s, bookHls)
-            }
-            val rightPageDisplay = remember(rightPageTx, fixedColWPx, fontSizePx, cfg.readerUseSerif, searchQuery, isNightTheme, rightSlice?.s, bookHls) {
-                buildWrappedHighlightedBookPage(rightPageTx, fixedColWPx, fontSizePx, cfg.readerUseSerif, searchQuery, isNightTheme, rightSlice?.s ?: 0, bookHls)
-            }
+            val leftContinuesMidPara = leftSlice.e < reflowSrc.fullText.length && leftSlice.e > leftSlice.s && reflowSrc.fullText[leftSlice.e - 1] != CH_NL
+            val rightContinuesMidPara = rightSlice != null && rightSlice.e < reflowSrc.fullText.length && rightSlice.e > rightSlice.s && reflowSrc.fullText[rightSlice.e - 1] != CH_NL
             renderReaderTopBar {
              Surface(color = CG.copy(alpha = 0.18f), shape = RoundedCornerShape(6.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.65f)), modifier = Modifier.clickable { catBarOpen = !catBarOpen }) {
               Text("${act.category.ifBlank { "전자책" }}▾", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CG, maxLines = 1, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
@@ -859,12 +967,26 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
             LaunchedEffect(vIdx, act.id) {
                 if (ovScroll.value != 0) ovScroll.scrollTo(0)
             }
-            val transientChromeOpen = imeBottomPx > 0 || searchOpen || highlightMode || (readerAiOpen && readerAiMode == 1) || selBannerVisible || sliderBarVisible || catBarOpen || (ReaderTtsRuntime.on && !ttsBarMin) 
+            val transientChromeOpen = imeBottomPx > 0 || cfgOpen || bmOpen || searchOpen || highlightMode ||
+                (readerAiOpen && readerAiMode == 1) || (readerMemoOpen && readerMemoMode == 1) ||
+                selBannerVisible || sliderBarVisible || catBarOpen || topTtsVisible || topStatusVisible
+            val isFullUnobstructed = !isWindowShrunk && !transientChromeOpen
+            val floatingOverlayOpen = (readerMemoOpen && readerMemoMode == 2 && !memoFloatMin) || (readerAiOpen && readerAiMode == 2 && !aiFloatMin)
+            val shouldScrollPage = !isFullUnobstructed || floatingOverlayOpen
+            val scrollBottomExtra = if (floatingOverlayOpen) 150.dp else 6.dp
             val isHorizMemoSplit = readerMemoOpen && readerMemoMode == 1 && memoSplitHoriz
             val renderBookViewport: @Composable (Modifier) -> Unit = { paneMod ->
             BoxWithConstraints(paneMod) {
                 val availW = this.maxWidth
                 val renderColW = if (twoPageMode) ((availW - outerPad * 2 - spineW) / 2f).coerceAtLeast(80.dp) else (availW - outerPad * 2).coerceAtLeast(100.dp)
+                val rawRenderColWPx = with(density) { renderColW.toPx() }.roundToInt().coerceAtLeast(80)
+                val effColWPx = if (abs(rawRenderColWPx - fixedColWPx) <= 6) fixedColWPx else rawRenderColWPx
+                val leftPageDisplay = remember(leftPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, leftContinuesMidPara, searchQuery, isNightTheme, leftSlice.s, bookHls) {
+                    buildWrappedHighlightedBookPage(leftPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, leftContinuesMidPara, searchQuery, isNightTheme, leftSlice.s, bookHls)
+                }
+                val rightPageDisplay = remember(rightPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, rightContinuesMidPara, searchQuery, isNightTheme, rightSlice?.s, bookHls) {
+                    buildWrappedHighlightedBookPage(rightPageTx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, rightContinuesMidPara, searchQuery, isNightTheme, rightSlice?.s ?: 0, bookHls)
+                }
 
                 if (selectMode) {
                     Surface(
@@ -994,8 +1116,13 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                         border = BorderStroke(0.8.dp, mut.copy(alpha = 0.28f)),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        val splitScrollMod = if (readerMemoOpen && readerMemoMode == 1) Modifier.verticalScroll(ovScroll) else Modifier
+                        val splitScrollMod = if (shouldScrollPage) Modifier.verticalScroll(ovScroll) else Modifier
                         if (twoPageMode) {
+                            val twoPgColMod = if (shouldScrollPage) {
+                                Modifier.width(renderColW).padding(top = 8.dp, bottom = scrollBottomExtra)
+                            } else {
+                                Modifier.width(renderColW).fillMaxHeight().padding(top = 8.dp, bottom = 6.dp)
+                            }
                             Row(
                                 Modifier
                                     .fillMaxSize()
@@ -1003,14 +1130,26 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                     .padding(horizontal = outerPad),
                                 verticalAlignment = Alignment.Top
                             ) {
-                                Column(Modifier.width(renderColW).fillMaxHeight().padding(top = 8.dp, bottom = 6.dp)) {
+                                Column(twoPgColMod) {
                                     Box(Modifier.fillMaxWidth().height(16.dp), contentAlignment = Alignment.CenterStart) {
                                         Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                     Spacer(Modifier.height(4.dp))
-                                    Box(if (readerMemoOpen && readerMemoMode == 1) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
-                                    var pLay by remember(leftPageTx, curPt, twoPageMode) { mutableStateOf<TextLayoutResult?>(null) }
-                                Text(leftPageDisplay, style = pageTextStyle, onTextLayout = { pLay = it }, modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls) { if (highlightMode) { detectTapGestures { pos -> val off = pLay?.getOffsetForPosition(pos) ?: return@detectTapGestures; toggleHighlightTap(leftPageTx, leftSlice.s, off) } } })
+                                    Box(if (shouldScrollPage) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
+                                        var lLay by remember(leftPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn) { mutableStateOf<TextLayoutResult?>(null) }
+                                        Text(
+                                            leftPageDisplay,
+                                            style = pageTextStyle,
+                                            onTextLayout = { lLay = it },
+                                            modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls) {
+                                                if (highlightMode) {
+                                                    detectTapGestures { pos ->
+                                                        val off = lLay?.getOffsetForPosition(pos) ?: return@detectTapGestures
+                                                        toggleHighlightTap(leftPageTx, leftSlice.s, off)
+                                                    }
+                                                }
+                                            }
+                                        )
                                     }
                                     Spacer(Modifier.height(4.dp))
                                     Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.CenterStart) {
@@ -1036,16 +1175,28 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                 ) {
                                     Box(Modifier.width(1.dp).fillMaxHeight(0.94f).background(mut.copy(alpha = 0.26f)))
                                 }
-                                Column(Modifier.width(renderColW).fillMaxHeight().padding(top = 8.dp, bottom = 6.dp)) {
+                                Column(twoPgColMod) {
                                     Box(Modifier.fillMaxWidth().height(16.dp), contentAlignment = Alignment.CenterEnd) {
                                         Text("${act.category.ifBlank { "독서" }} · ${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1)
                                     }
                                     Spacer(Modifier.height(4.dp))
-                                    Box(if (readerMemoOpen && readerMemoMode == 1) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
-                                     if (hasRightPage && rightSlice != null) {
-                                 var rLay by remember(rightPageTx, curPt, twoPageMode) { mutableStateOf<TextLayoutResult?>(null) }
-                                 Text(rightPageDisplay, style = pageTextStyle, onTextLayout = { rLay = it }, modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, rightSlice.s, rightPageTx, hlColorIdx, bookHls) { if (highlightMode) { detectTapGestures { pos -> val off = rLay?.getOffsetForPosition(pos) ?: return@detectTapGestures; toggleHighlightTap(rightPageTx, rightSlice.s, off) } } })
-                                } else {
+                                    Box(if (shouldScrollPage) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
+                                        if (hasRightPage && rightSlice != null) {
+                                            var rLay by remember(rightPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn) { mutableStateOf<TextLayoutResult?>(null) }
+                                            Text(
+                                                rightPageDisplay,
+                                                style = pageTextStyle,
+                                                onTextLayout = { rLay = it },
+                                                modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, rightSlice.s, rightPageTx, hlColorIdx, bookHls) {
+                                                    if (highlightMode) {
+                                                        detectTapGestures { pos ->
+                                                            val off = rLay?.getOffsetForPosition(pos) ?: return@detectTapGestures
+                                                            toggleHighlightTap(rightPageTx, rightSlice.s, off)
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                        } else {
                                             Box(Modifier.fillMaxWidth().height(fixedTextH), contentAlignment = Alignment.Center) {
                                                 Text("— 마지막 페이지 —", fontSize = ui.subSp, color = mut.copy(alpha = 0.65f))
                                             }
@@ -1062,21 +1213,36 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                 Modifier
                                     .fillMaxSize()
                                     .then(splitScrollMod)
-                                    .padding(horizontal = outerPad, vertical = 5.dp)
+                                    .padding(start = outerPad, end = outerPad, top = 5.dp, bottom = if (shouldScrollPage) scrollBottomExtra else 5.dp)
                             ) {
                                 Row(Modifier.fillMaxWidth().height(15.dp), SB, CV) {
                                     Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                                     Text("${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.8f))
                                 }
                                 Spacer(Modifier.height(2.dp))
-                                Box((if (readerMemoOpen && readerMemoMode == 1) Modifier.fillMaxWidth().heightIn(min = fixedTextH) else Modifier.fillMaxWidth().weight(1f)).onSizeChanged { bsz ->
-                                    if (!transientChromeOpen && !(readerMemoOpen && readerMemoMode == 1) && bsz.height > 120) {
+                                Box((if (shouldScrollPage) Modifier.fillMaxWidth().heightIn(min = fixedTextH) else Modifier.fillMaxWidth().weight(1f)).onSizeChanged { bsz ->
+                                    if (!shouldScrollPage && isFullUnobstructed && bsz.height > 120) {
                                         val hCand = bsz.height.toFloat()
-                                        if (abs(hCand - measuredTextHPxState.value) >= 5f) measuredTextHPxState.value = hCand
+                                        if (abs(hCand - measuredTextHPxState.value) >= 5f) {
+                                            measuredTextHPxState.value = hCand
+                                            readerPrefs.edit().putFloat(fsHKey, hCand).apply()
+                                        }
                                     }
-                                    }) {
-                                 var pLay by remember(leftPageTx, curPt, twoPageMode) { mutableStateOf<TextLayoutResult?>(null) }
- Text(leftPageDisplay, style = pageTextStyle, onTextLayout = { pLay = it }, modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls) { if (highlightMode) { detectTapGestures { pos -> val off = pLay?.getOffsetForPosition(pos) ?: return@detectTapGestures; toggleHighlightTap(leftPageTx, leftSlice.s, off) } } })
+                                }) {
+                                    var sLay by remember(leftPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn) { mutableStateOf<TextLayoutResult?>(null) }
+                                    Text(
+                                        leftPageDisplay,
+                                        style = pageTextStyle,
+                                        onTextLayout = { sLay = it },
+                                        modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls) {
+                                            if (highlightMode) {
+                                                detectTapGestures { pos ->
+                                                    val off = sLay?.getOffsetForPosition(pos) ?: return@detectTapGestures
+                                                    toggleHighlightTap(leftPageTx, leftSlice.s, off)
+                                                }
+                                            }
+                                        }
+                                    )
                                 }
                                 Spacer(Modifier.height(2.dp))
                                 Row(Modifier.fillMaxWidth().height(16.dp), SB, CV) {
@@ -1088,23 +1254,24 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                     }
                 }
             }
+
             }
-
-
-Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp).onSizeChanged { sz ->
-if (!isHorizMemoSplit && sz.width > 200) {
-val wCand = sz.width.toFloat()
-if (abs(wCand - measuredBookWPxState.value) >= 4f) {
-measuredBookWPxState.value = wCand
-}
-}
-if (twoPageMode && !transientChromeOpen && sz.height > 200) {
-val cand = (sz.height.toFloat() - cardInnerChromePx).coerceAtLeast(120f)
-if (abs(cand - measuredTextHPxState.value) >= 8f) {
-measuredTextHPxState.value = cand
-}
-}
-}) {
+            Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp).onSizeChanged { sz ->
+                if (!shouldScrollPage && isFullUnobstructed && !isHorizMemoSplit && sz.width > 200) {
+                    val wCand = sz.width.toFloat()
+                    if (abs(wCand - measuredBookWPxState.value) >= 4f) {
+                        measuredBookWPxState.value = wCand
+                        readerPrefs.edit().putFloat(fsWKey, wCand).apply()
+                    }
+                }
+                if (twoPageMode && !shouldScrollPage && isFullUnobstructed && sz.height > 200) {
+                    val cand = (sz.height.toFloat() - cardInnerChromePx).coerceAtLeast(120f)
+                    if (abs(cand - measuredTextHPxState.value) >= 8f) {
+                        measuredTextHPxState.value = cand
+                        readerPrefs.edit().putFloat(fsHKey, cand).apply()
+                    }
+                }
+            }) {
     if (readerMemoOpen && readerMemoMode == 1) {
                     if (memoSplitHoriz) {
                         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

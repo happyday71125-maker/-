@@ -575,6 +575,10 @@ onClose = { searchOpen = false }
                 TextStyle(
                     fontSize = curPt.sp,
                     lineHeight = (curPt * lineHeightMult).sp,
+                    lineHeightStyle = LineHeightStyle(
+                         alignment = LineHeightStyle.Alignment.Center,
+                         trim = LineHeightStyle.Trim.Both
+                     ),
                     fontFamily = if (cfg.readerUseSerif) FontFamily.Serif else FontFamily.SansSerif,
                     lineBreak = LineBreak.Simple,
                     hyphens = Hyphens.None,
@@ -587,7 +591,7 @@ onClose = { searchOpen = false }
             val measuredBookWPxState = remember(conf.screenWidthDp, conf.screenHeightDp, twoPageMode) { mutableStateOf(0f) }
             val fallbackTextH = (conf.screenHeightDp.dp - ui.vPad * 2 - 148.dp).coerceAtLeast(180.dp)
             val measuredTextHPxState = remember(conf.screenWidthDp, conf.screenHeightDp, twoPageMode) { mutableStateOf(0f) }
-            val cardInnerChromePx = with(density) { 64.dp.toPx() }
+            val cardInnerChromePx = with(density) { 45.dp.toPx() }
             val imeBottomPx = WindowInsets.ime.getBottom(density)
             val outerPadPx = with(density) { outerPad.toPx() }
             val spineWPx = with(density) { spineW.toPx() }
@@ -597,9 +601,9 @@ onClose = { searchOpen = false }
             val fixedTextHPx = if (measuredTextHPxState.value >= 120f) measuredTextHPxState.value else fallbackTextHPx
             val fixedTextH = with(density) { fixedTextHPx.toDp() }.coerceAtLeast(180.dp)
 
-            val pageCacheKey = "v3ka_${act.id}_${reflowSrc.fullText.length}_${reflowSrc.fullText.hashCode()}_${fixedColWPx}_${fixedTextHPx.roundToInt()}_${curPt}_${cfg.readerUseSerif}_${lineHeightIdx}_${smartReflowOn}"
+            val pageCacheKey = "v4ka_${act.id}_${reflowSrc.fullText.length}_${reflowSrc.fullText.hashCode()}_${fixedColWPx}_${fixedTextHPx.roundToInt()}_${curPt}_${cfg.readerUseSerif}_${lineHeightIdx}_${smartReflowOn}"
             var lastStablePages by remember(act.id) {
-                val prior = ReaderLayoutCache.pagesCache.entries.lastOrNull { it.key.startsWith("v3ka_${act.id}_") }?.value
+                val prior = ReaderLayoutCache.pagesCache.entries.lastOrNull { it.key.startsWith("v4ka_${act.id}_") }?.value
                     ?: EbookTextReflower.paginateBookKeepAll(reflowSrc.fullText.take(6000), fixedColWPx, fixedTextHPx, fontSizePx, lineHeightPx, cfg.readerUseSerif)
                 mutableStateOf(prior)
             }
@@ -744,7 +748,7 @@ commitExcerptHook = ::commitDraftIfEditing
              Surface(color = CG.copy(alpha = 0.18f), shape = RoundedCornerShape(6.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.65f)), modifier = Modifier.clickable { catBarOpen = !catBarOpen }) {
               Text("${act.category.ifBlank { "전자책" }}▾", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CG, maxLines = 1, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
              }
-             Text(act.title.take(12), fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, softWrap = false)
+             Text(act.title, fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, softWrap = false)
              ChipBtn(if (readerAiMode == 2) "🪟" else "🦙", readerAiOpen, CG) { commitDraftIfEditing(); aiFloatMin = false; readerAiOpen = !readerAiOpen }
              ChipBtn("🖍️", highlightMode, CA) { highlightMode = !highlightMode; if (highlightMode) selectMode = false }
             if (bookHls.isNotEmpty()) { ChipBtn("📑${bookHls.size}", hlListOpen, CG) { hlListOpen = true } }
@@ -855,6 +859,8 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
             LaunchedEffect(vIdx, act.id) {
                 if (ovScroll.value != 0) ovScroll.scrollTo(0)
             }
+            val transientChromeOpen = imeBottomPx > 0 || searchOpen || highlightMode || (readerAiOpen && readerAiMode == 1) || selBannerVisible || sliderBarVisible || catBarOpen || (ReaderTtsRuntime.on && !ttsBarMin) 
+            val isHorizMemoSplit = readerMemoOpen && readerMemoMode == 1 && memoSplitHoriz
             val renderBookViewport: @Composable (Modifier) -> Unit = { paneMod ->
             BoxWithConstraints(paneMod) {
                 val availW = this.maxWidth
@@ -1056,19 +1062,24 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                 Modifier
                                     .fillMaxSize()
                                     .then(splitScrollMod)
-                                    .padding(horizontal = outerPad, vertical = 7.dp)
+                                    .padding(horizontal = outerPad, vertical = 5.dp)
                             ) {
-                                Row(Modifier.fillMaxWidth().height(16.dp), SB, CV) {
+                                Row(Modifier.fillMaxWidth().height(15.dp), SB, CV) {
                                     Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                                     Text("${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.8f))
                                 }
-                                Spacer(Modifier.height(4.dp))
-                                Box(if (readerMemoOpen && readerMemoMode == 1) Modifier.fillMaxWidth().heightIn(min = fixedTextH) else Modifier.fillMaxWidth().weight(1f)) {
+                                Spacer(Modifier.height(2.dp))
+                                Box((if (readerMemoOpen && readerMemoMode == 1) Modifier.fillMaxWidth().heightIn(min = fixedTextH) else Modifier.fillMaxWidth().weight(1f)).onSizeChanged { bsz ->
+                                    if (!transientChromeOpen && !(readerMemoOpen && readerMemoMode == 1) && bsz.height > 120) {
+                                        val hCand = bsz.height.toFloat()
+                                        if (abs(hCand - measuredTextHPxState.value) >= 5f) measuredTextHPxState.value = hCand
+                                    }
+                                    }) {
                                  var pLay by remember(leftPageTx, curPt, twoPageMode) { mutableStateOf<TextLayoutResult?>(null) }
  Text(leftPageDisplay, style = pageTextStyle, onTextLayout = { pLay = it }, modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls) { if (highlightMode) { detectTapGestures { pos -> val off = pLay?.getOffsetForPosition(pos) ?: return@detectTapGestures; toggleHighlightTap(leftPageTx, leftSlice.s, off) } } })
                                 }
-                                Spacer(Modifier.height(4.dp))
-                                Row(Modifier.fillMaxWidth().height(18.dp), SB, CV) {
+                                Spacer(Modifier.height(2.dp))
+                                Row(Modifier.fillMaxWidth().height(16.dp), SB, CV) {
                                     Text(act.category.ifBlank { "독서" }, fontSize = 10.sp, color = mut.copy(alpha = 0.65f))
                                     Text("${vIdx + 1} / ${vPages.size}", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = mut)
                                 }
@@ -1078,8 +1089,8 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                 }
             }
             }
-val transientChromeOpen = imeBottomPx > 0 || searchOpen || highlightMode || (readerAiOpen && readerAiMode == 1) || selBannerVisible || sliderBarVisible || catBarOpen || (ReaderTtsRuntime.on && !ttsBarMin)
-val isHorizMemoSplit = readerMemoOpen && readerMemoMode == 1 && memoSplitHoriz
+
+
 Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp).onSizeChanged { sz ->
 if (!isHorizMemoSplit && sz.width > 200) {
 val wCand = sz.width.toFloat()
@@ -1087,7 +1098,7 @@ if (abs(wCand - measuredBookWPxState.value) >= 4f) {
 measuredBookWPxState.value = wCand
 }
 }
-if (!transientChromeOpen && sz.height > 200) {
+if (twoPageMode && !transientChromeOpen && sz.height > 200) {
 val cand = (sz.height.toFloat() - cardInnerChromePx).coerceAtLeast(120f)
 if (abs(cand - measuredTextHPxState.value) >= 8f) {
 measuredTextHPxState.value = cand

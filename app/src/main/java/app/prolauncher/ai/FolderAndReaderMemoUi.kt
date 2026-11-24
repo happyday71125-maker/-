@@ -141,7 +141,7 @@ fun ReaderMemoWorkspaceCard(
   if (ok) toggleMemoDict() else { memoDictOn = false; memoNotice = "⚠️ 마이크 권한이 필요합니다." }
  }
  Surface(
-  color = Color(0xF50D1524),
+  color = CS,
   shape = RoundedCornerShape(12.dp),
   border = BorderStroke(1.dp, CG.copy(alpha = 0.7f)),
   modifier = modifier
@@ -267,7 +267,7 @@ fun ReaderDraggableFloatBox(
  val clampedX = fx.coerceIn(4f, maxX)
  val clampedY = fy.coerceIn(8f, maxY)
  Surface(
-  color = Color(0xF50E1628),
+  color = CS,
   shape = RoundedCornerShape(14.dp),
   shadowElevation = 12.dp,
   border = BorderStroke(1.2.dp, CA.copy(alpha = 0.88f)),
@@ -280,7 +280,7 @@ fun ReaderDraggableFloatBox(
    Row(
     Modifier
      .fillMaxWidth()
-     .background(Color(0xFF17253E))
+     .background(CS2)
      .pointerInput(maxWPx, maxHPx, floatWPx, floatHPx) {
       detectDragGestures(
        onDragEnd = { onPersistPos(fx, fy) },
@@ -425,9 +425,9 @@ fun FolderManageDialog(
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
      folders.forEach { f ->
       Surface(
-       color = Color(0xFF10192B),
+       color = CS2,
        shape = RoundedCornerShape(9.dp),
-       border = BorderStroke(0.7.dp, Color(0xFF253552)),
+       border = BorderStroke(0.7.dp, CBDR),
        modifier = Modifier.fillMaxWidth()
       ) {
        if (renameTarget == f) {
@@ -454,7 +454,7 @@ fun FolderManageDialog(
       }
      }
     }
-    Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1E2D47)))
+    Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
     Text("💾 이 탭 개별 백업 / 무충돌 병합 복원", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG)
     Text("복원 시 기존 자료를 덮어쓰지 않고 중복 없이 새 항목만 안전하게 추가합니다.", fontSize = 10.sp, color = CM)
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
@@ -582,9 +582,9 @@ fun HomeAppFolderDialog(
       items(filteredApps, key = { it.packageName }) { app ->
        val inFolder = app.packageName in af.packages
        Surface(
-        color = if (inFolder) CG.copy(alpha = 0.16f) else Color(0xFF101827),
+        color = if (inFolder) CG.copy(alpha = 0.16f) else CS2,
         shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(0.7.dp, if (inFolder) CG else Color(0xFF223049)),
+        border = BorderStroke(0.7.dp, if (inFolder) CG else CBDR),
         modifier = Modifier.fillMaxWidth().clickable {
          val nxPkgs = if (inFolder) af.packages - app.packageName else af.packages + app.packageName
          val nx = folders.map { if (it.id == af.id) it.copy(packages = nxPkgs.distinct()) else it }
@@ -661,7 +661,7 @@ fun UnifiedBackupSettingsPanel(ctx: Context, repo: LauncherRepository, ui: Respo
   exportLauncher.launch(fileName)
  }
  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-  Surface(color = Color(0xFF0E1A2B), shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, CG.copy(alpha = 0.75f)), modifier = Modifier.fillMaxWidth()) {
+  Surface(color = CS, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, CG.copy(alpha = 0.75f)), modifier = Modifier.fillMaxWidth()) {
    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
     Text("📦 런처 전체 통합 백업 및 무충돌 병합 복원", fontWeight = FontWeight.Bold, fontSize = ui.bodySp, color = CG)
     Text(
@@ -673,16 +673,16 @@ fun UnifiedBackupSettingsPanel(ctx: Context, repo: LauncherRepository, ui: Respo
      Button(
       onClick = { triggerExport("FULL", "prolauncher_full_backup_v10_5.json") },
       modifier = Modifier.weight(1f),
-      colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = Color(0xFF062019))
+      colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = CON_ACCENT)
      ) { Text("📤 전체 통합 백업", fontSize = ui.subSp, fontWeight = FontWeight.Bold) }
      Button(
       onClick = { importLauncher.launch(arrayOf("*/*")) },
       modifier = Modifier.weight(1f),
-      colors = ButtonDefaults.buttonColors(containerColor = CA, contentColor = Color(0xFF1E1303))
+      colors = ButtonDefaults.buttonColors(containerColor = CA, contentColor = CON_ACCENT)
      ) { Text("♻️ 백업 파일 복원(병합)", fontSize = ui.subSp, fontWeight = FontWeight.Bold) }
     }
     statusMsg?.let { st ->
-     Surface(color = Color(0xFF09121E), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+     Surface(color = CS2, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
       Text(st, fontSize = ui.subSp, color = CG, modifier = Modifier.padding(8.dp))
      }
     }
@@ -697,7 +697,7 @@ fun UnifiedBackupSettingsPanel(ctx: Context, repo: LauncherRepository, ui: Respo
   )
   itemsInfo.forEach { (label, stat, pair) ->
    val (sc, fn) = pair
-   Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(12.dp), border = BorderStroke(0.8.dp, Color(0xFF23324B)), modifier = Modifier.fillMaxWidth()) {
+   Surface(color = CS, shape = RoundedCornerShape(12.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
     Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), SB, CV) {
      Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
       Text(label, fontSize = ui.bodySp, fontWeight = FontWeight.Bold, color = CW)
@@ -835,7 +835,7 @@ fun ReaderUnifiedSearchBar(
   return "📁${h.category} · 약 ${h.approxPct}%"
  }
  Surface(
-  color = Color(0xF50E1628),
+  color = CS,
   shape = RoundedCornerShape(13.dp),
   border = BorderStroke(1.dp, CA.copy(alpha = 0.8f)),
   modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
@@ -916,7 +916,7 @@ fun ReaderUnifiedSearchBar(
       val h = hits[i]
       val sel = !effectiveAll && i == curSafe
       Surface(
-       color = if (sel) CG.copy(alpha = 0.18f) else Color(0xFF131E33),
+       color = if (sel) CG.copy(alpha = 0.18f) else CS2,
        shape = RoundedCornerShape(9.dp),
        border = BorderStroke(0.7.dp, if (sel) CG else CG.copy(alpha = 0.4f)),
        modifier = Modifier.fillMaxWidth().clickable {
@@ -931,7 +931,7 @@ fun ReaderUnifiedSearchBar(
           Text(pageLabelOf(h), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = CA)
          }
         }
-        Text(h.snippet, fontSize = 11.sp, color = Color(0xFFD1FAE5), maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(h.snippet, fontSize = 11.sp, color = CW, maxLines = 2, overflow = TextOverflow.Ellipsis)
        }
       }
      }

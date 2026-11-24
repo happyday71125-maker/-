@@ -31,12 +31,18 @@ import java.text.SimpleDateFormat
 import java.util.*
 val SB = Arrangement.SpaceBetween
 val CV = Alignment.CenterVertically
-val CW = Color(0xFFF1F5F9)
-val CG = Color(0xFF34D399)
-val CA = Color(0xFFFBBF24)
-val CM = Color(0xFF94A3B8)
-val CD = Color(0xFF64748B)
-val CS = Color(0xFF101624)
+var activeAppTheme by mutableStateOf("AMOLED")
+val isLightAppTheme: Boolean get() = activeAppTheme == "SEPIA" || activeAppTheme == "PAPER"
+val CBG: Color get() = when (activeAppTheme) { "SEPIA" -> Color(0xFFF4ECD8); "PAPER" -> Color(0xFFF3F1EC); "SLATE" -> Color(0xFF0B1120); "FOREST" -> Color(0xFF07120E); else -> Color(0xFF07090E) }
+val CS: Color get() = when (activeAppTheme) { "SEPIA" -> Color(0xFFFBF6E9); "PAPER" -> Color(0xFFFFFFFF); "SLATE" -> Color(0xFF121B2E); "FOREST" -> Color(0xFF0D1B15); else -> Color(0xFF101624) }
+val CS2: Color get() = when (activeAppTheme) { "SEPIA" -> Color(0xFFEAE0C8); "PAPER" -> Color(0xFFE8E4DC); "SLATE" -> Color(0xFF18243C); "FOREST" -> Color(0xFF13261E); else -> Color(0xFF151E30) }
+val CBDR: Color get() = when (activeAppTheme) { "SEPIA" -> Color(0xFFD1BFA0); "PAPER" -> Color(0xFFD4CFC5); "SLATE" -> Color(0xFF263654); "FOREST" -> Color(0xFF1E382D); else -> Color(0xFF23324B) }
+val CW: Color get() = when (activeAppTheme) { "SEPIA" -> Color(0xFF2C221E); "PAPER" -> Color(0xFF1C1917); else -> Color(0xFFF1F5F9) }
+val CM: Color get() = when (activeAppTheme) { "SEPIA" -> Color(0xFF685449); "PAPER" -> Color(0xFF57534E); else -> Color(0xFF94A3B8) }
+val CD: Color get() = when (activeAppTheme) { "SEPIA" -> Color(0xFF8A7567); "PAPER" -> Color(0xFF78716C); else -> Color(0xFF64748B) }
+val CG: Color get() = when (activeAppTheme) { "SEPIA" -> Color(0xFF0F766E); "PAPER" -> Color(0xFF047857); else -> Color(0xFF34D399) }
+val CA: Color get() = when (activeAppTheme) { "SEPIA" -> Color(0xFFB45309); "PAPER" -> Color(0xFFB45309); else -> Color(0xFFFBBF24) }
+val CON_ACCENT: Color get() = if (isLightAppTheme) Color(0xFFFFFFFF) else Color(0xFF062019)
 data class QuickBtnConfig(
 val showCheck: Boolean = true,
 val showBullet: Boolean = true,
@@ -168,27 +174,91 @@ if (target == 1) cut else "• $cut"
 object ReaderVolumeKeyBridge {
 var isReaderTabCurrent: Boolean = false; var readerBookActive: Boolean = false; var volumeTurnEnabled: Boolean = true
 var isTabActiveCheck: (() -> Boolean)? = null; var isBookReadyCheck: (() -> Boolean)? = null; var onTurnPage: ((Int) -> Unit)? = null
-private var lastTurnMs: Long = 0L; private var consumedDownCode: Int = 0
-private fun shouldInterceptNow(): Boolean { val tabOk = isTabActiveCheck?.invoke() ?: isReaderTabCurrent; val bookOk = isBookReadyCheck?.invoke() ?: (readerBookActive && volumeTurnEnabled); val spk = ReaderTtsRuntime.on || SupertonicTtsEngine.playing || briefingSpeakingNow || runCatching { ttsEngine?.isSpeaking == true }.getOrDefault(false); return tabOk && bookOk && volumeTurnEnabled && !spk && onTurnPage != null }
-fun handleKeyEvent(event: android.view.KeyEvent): Boolean { val code = event.keyCode; if (code != android.view.KeyEvent.KEYCODE_VOLUME_UP && code != android.view.KeyEvent.KEYCODE_VOLUME_DOWN) return false; if (event.action == android.view.KeyEvent.ACTION_UP) { if (consumedDownCode == code) { consumedDownCode = 0; return true }; return shouldInterceptNow() }; if (!shouldInterceptNow()) { consumedDownCode = 0; return false }; if (event.action == android.view.KeyEvent.ACTION_DOWN) { consumedDownCode = code; val now = android.os.SystemClock.uptimeMillis(); if (now - lastTurnMs >= (if (event.repeatCount == 0) 35L else 220L)) { lastTurnMs = now; onTurnPage?.invoke(if (code == android.view.KeyEvent.KEYCODE_VOLUME_UP) -1 else 1) } }; return true }
+private var lastTurnMs: Long = 0L; private var lastHwKeyMs: Long = 0L; private var lastSoftTurnMs: Long = 0L
+private var ignoreSelfVolUntilMs: Long = 0L; private var consumedDownCode: Int = 0; private var restoredZeroNeeded: Boolean = false
+private val lastStreamVol = android.util.SparseIntArray()
+private fun isAudioSpeakingNow(): Boolean = ReaderTtsRuntime.on || SupertonicTtsEngine.playing || briefingSpeakingNow || runCatching { ttsEngine?.isSpeaking == true }.getOrDefault(false)
+fun shouldInterceptNow(): Boolean { val tabOk = isTabActiveCheck?.invoke() ?: isReaderTabCurrent; val bookOk = isBookReadyCheck?.invoke() ?: (readerBookActive && volumeTurnEnabled); return tabOk && bookOk && volumeTurnEnabled && !isAudioSpeakingNow() && onTurnPage != null }
+fun syncBaselineVolumes(ctx: Context, prepareHeadroom: Boolean = false) = runCatching {
+val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return@runCatching
+intArrayOf(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.STREAM_RING, android.media.AudioManager.STREAM_SYSTEM, android.media.AudioManager.STREAM_NOTIFICATION).forEach { st -> lastStreamVol.put(st, am.getStreamVolume(st)) }
+if (prepareHeadroom && shouldInterceptNow()) {
+val maxM = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC); val curM = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+if (curM <= 0 && !am.isMusicActive && maxM >= 2) { ignoreSelfVolUntilMs = android.os.SystemClock.uptimeMillis() + 300L; restoredZeroNeeded = true; am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 1, 0); lastStreamVol.put(android.media.AudioManager.STREAM_MUSIC, 1) }
+else if (curM >= maxM && maxM >= 2) { ignoreSelfVolUntilMs = android.os.SystemClock.uptimeMillis() + 300L; am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, maxM - 1, 0); lastStreamVol.put(android.media.AudioManager.STREAM_MUSIC, maxM - 1) }
+} else if (!prepareHeadroom && restoredZeroNeeded) {
+restoredZeroNeeded = false
+if (!am.isMusicActive) { ignoreSelfVolUntilMs = android.os.SystemClock.uptimeMillis() + 300L; am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0); lastStreamVol.put(android.media.AudioManager.STREAM_MUSIC, 0) }
+}
+}
+fun onSoftwareVolumeChanged(ctx: Context, streamType: Int, newVol: Int, prevVolExtra: Int) {
+if (streamType !in intArrayOf(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.STREAM_RING, android.media.AudioManager.STREAM_SYSTEM, android.media.AudioManager.STREAM_NOTIFICATION)) return
+val now = android.os.SystemClock.uptimeMillis()
+if (now < ignoreSelfVolUntilMs) { if (newVol >= 0) lastStreamVol.put(streamType, newVol); return }
+val prevKnown = lastStreamVol.get(streamType, -1)
+val oldVol = if (prevKnown >= 0) prevKnown else if (prevVolExtra >= 0) prevVolExtra else newVol
+if (newVol >= 0) lastStreamVol.put(streamType, newVol)
+if (streamType == android.media.AudioManager.STREAM_MUSIC && newVol > 1) restoredZeroNeeded = false
+if (!shouldInterceptNow() || now - lastHwKeyMs < 180L) return
+val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+val maxV = runCatching { am?.getStreamMaxVolume(streamType) ?: 15 }.getOrDefault(15).coerceAtLeast(1)
+val diff = newVol - oldVol
+val dir = when { diff > 0 -> -1; diff < 0 -> 1; newVol <= 0 && prevVolExtra == 0 -> 1; newVol >= maxV && prevVolExtra == maxV -> -1; else -> 0 }
+if (dir != 0 && now - lastSoftTurnMs >= 105L) { lastSoftTurnMs = now; uiP(0L) { onTurnPage?.invoke(dir) } }
+if (am != null && streamType == android.media.AudioManager.STREAM_MUSIC && maxV >= 2) {
+if (newVol <= 0 && !am.isMusicActive) uiP(95L) { runCatching { ignoreSelfVolUntilMs = android.os.SystemClock.uptimeMillis() + 260L; am.setStreamVolume(streamType, 1, 0); lastStreamVol.put(streamType, 1) } }
+else if (newVol >= maxV) uiP(95L) { runCatching { ignoreSelfVolUntilMs = android.os.SystemClock.uptimeMillis() + 260L; am.setStreamVolume(streamType, maxV - 1, 0); lastStreamVol.put(streamType, maxV - 1) } }
+}
+}
+fun pollSystemVolumeObserver(ctx: Context) = runCatching {
+val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return@runCatching
+val curM = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC); val prevM = lastStreamVol.get(android.media.AudioManager.STREAM_MUSIC, curM)
+if (curM != prevM) onSoftwareVolumeChanged(ctx, android.media.AudioManager.STREAM_MUSIC, curM, prevM)
+}
+fun handleKeyEvent(event: android.view.KeyEvent): Boolean {
+val code = event.keyCode; if (code != android.view.KeyEvent.KEYCODE_VOLUME_UP && code != android.view.KeyEvent.KEYCODE_VOLUME_DOWN) return false
+if (event.action == android.view.KeyEvent.ACTION_UP) { if (consumedDownCode == code) { consumedDownCode = 0; lastHwKeyMs = android.os.SystemClock.uptimeMillis(); return true }; return shouldInterceptNow() }
+if (!shouldInterceptNow()) { consumedDownCode = 0; return false }
+lastHwKeyMs = android.os.SystemClock.uptimeMillis()
+if (event.action == android.view.KeyEvent.ACTION_DOWN) { consumedDownCode = code; if (lastHwKeyMs - lastTurnMs >= (if (event.repeatCount == 0) 35L else 220L)) { lastTurnMs = lastHwKeyMs; onTurnPage?.invoke(if (code == android.view.KeyEvent.KEYCODE_VOLUME_UP) -1 else 1) } }
+return true
+}
 }
 var homeResumeTick by mutableStateOf(0)
 var homeNewIntentTick by mutableStateOf(0)
 class MainActivity : ComponentActivity() {
+private var softVolRegistered = false
+private val softVolReceiver = object : BroadcastReceiver() {
+override fun onReceive(context: Context?, intent: Intent?) {
+if (intent?.action == "android.media.VOLUME_CHANGED_ACTION" && context != null) {
+ReaderVolumeKeyBridge.onSoftwareVolumeChanged(context, intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1), intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1), intent.getIntExtra("android.media.EXTRA_PREV_VOLUME_STREAM_VALUE", -1))
+}
+}
+}
+private val softVolObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+override fun onChange(selfChange: Boolean) { ReaderVolumeKeyBridge.pollSystemVolumeObserver(this@MainActivity) }
+}
 override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean = if (ReaderVolumeKeyBridge.handleKeyEvent(event)) true else super.dispatchKeyEvent(event)
 override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean = if (event != null && ReaderVolumeKeyBridge.handleKeyEvent(event)) true else super.onKeyDown(keyCode, event)
 override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent?): Boolean = if (event != null && ReaderVolumeKeyBridge.handleKeyEvent(event)) true else super.onKeyUp(keyCode, event)
-    override fun onResume() { super.onResume(); mainActRef = this; appInFg = true; homeResumeTick++; JarvisRuntime.onActivityResume() }
+override fun onStart() {
+super.onStart(); ReaderVolumeKeyBridge.syncBaselineVolumes(this, false)
+if (!softVolRegistered) runCatching { val flt = IntentFilter("android.media.VOLUME_CHANGED_ACTION"); if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(softVolReceiver, flt, Context.RECEIVER_EXPORTED) else registerReceiver(softVolReceiver, flt); contentResolver.registerContentObserver(android.provider.Settings.System.CONTENT_URI, true, softVolObserver); softVolRegistered = true }
+}
+override fun onStop() {
+if (softVolRegistered) { softVolRegistered = false; runCatching { unregisterReceiver(softVolReceiver) }; runCatching { contentResolver.unregisterContentObserver(softVolObserver) } }
+ReaderVolumeKeyBridge.syncBaselineVolumes(this, false); super.onStop()
+}
+override fun onResume() { super.onResume(); mainActRef = this; appInFg = true; homeResumeTick++; JarvisRuntime.onActivityResume() }
 override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if (intent.hasCategory(Intent.CATEGORY_HOME)) homeNewIntentTick++ }
 override fun onPause() { appInFg = false; super.onPause() }
 override fun onCreate(savedInstanceState: Bundle?) {
-super.onCreate(savedInstanceState); mainActRef = this; appCtxRef = applicationContext; appInFg = true; loadAiCfg(this); val prevEh = Thread.getDefaultUncaughtExceptionHandler(); Thread.setDefaultUncaughtExceptionHandler { th, ex -> if (th.name != "main") { ex.printStackTrace() } else { prevEh?.uncaughtException(th, ex) } }
-val repo = LauncherRepository(this)
-val ai = LocalAiNoteEngine(this)
+super.onCreate(savedInstanceState); mainActRef = this; appCtxRef = applicationContext; appInFg = true; volumeControlStream = android.media.AudioManager.STREAM_MUSIC; loadAiCfg(this); val prevEh = Thread.getDefaultUncaughtExceptionHandler(); Thread.setDefaultUncaughtExceptionHandler { th, ex -> if (th.name != "main") { ex.printStackTrace() } else { prevEh?.uncaughtException(th, ex) } }
+val repo = LauncherRepository(this); activeAppTheme = repo.loadConfig().themeName; val ai = LocalAiNoteEngine(this)
 setContent {
-MaterialTheme(colorScheme = darkColorScheme(background = Color(0xFF07090E), surface = CS, primary = CG, secondary = CA, surfaceVariant = Color(0xFF161E2E), outline = Color(0xFF253248))) {
-ProLauncherRoot(repo, ai)
-}
+val scheme = if (isLightAppTheme) lightColorScheme(background = CBG, surface = CS, onBackground = CW, onSurface = CW, primary = CG, onPrimary = Color.White, secondary = CA, surfaceVariant = CS2, outline = CBDR) else darkColorScheme(background = CBG, surface = CS, onBackground = CW, onSurface = CW, primary = CG, secondary = CA, surfaceVariant = CS2, outline = CBDR)
+SideEffect { runCatching { val argb = android.graphics.Color.rgb((CBG.red * 255).toInt(), (CBG.green * 255).toInt(), (CBG.blue * 255).toInt()); window.statusBarColor = argb; window.navigationBarColor = argb; if (android.os.Build.VERSION.SDK_INT >= 30) { val mask = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS; window.insetsController?.setSystemBarsAppearance(if (isLightAppTheme) mask else 0, mask) } else { @Suppress("DEPRECATION") window.decorView.systemUiVisibility = if (isLightAppTheme) (android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR) else 0 } } }
+MaterialTheme(colorScheme = scheme) { ProLauncherRoot(repo, ai) }
 }
 }
 }
@@ -250,8 +320,10 @@ books = SmartMemoClassifier.sanitizeBooks(repo.loadBooks(), repo)
 }
 }
 fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
+activeAppTheme = cfg.themeName
 val isReaderTabNow = (pager.currentPage == 1 && !drawerOpen && !settingsOpen && interruptApp == null)
 ReaderVolumeKeyBridge.isReaderTabCurrent = isReaderTabNow; ReaderVolumeKeyBridge.isTabActiveCheck = { pager.currentPage == 1 && !drawerOpen && !settingsOpen && interruptApp == null }
+LaunchedEffect(isReaderTabNow) { ReaderVolumeKeyBridge.syncBaselineVolumes(rootCtx, prepareHeadroom = isReaderTabNow) }
     BackHandler(enabled = true) {
 when {
 interruptApp != null -> interruptApp = null
@@ -261,7 +333,7 @@ pager.currentPage != 2 -> scope.launch { pager.animateScrollToPage(2) }
 }
 }
 SideEffect { JarvisRuntime.bindCallbacks(rootCtx, { pg -> scope.launch { pager.scrollToPage(pg.coerceIn(0, 4)) } }, { raw0 -> val isVm = raw0.startsWith("__VOICEMEMO__"); val raw = if (isVm) raw0.removePrefix("__VOICEMEMO__").trim() else raw0.trim(); val mc0 = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = if (isVm) { if (!mc0.contains("음성메모")) SmartMemoClassifier.saveMemoCats(rootCtx, listOf("음성메모") + mc0); "음성메모" } else SmartMemoClassifier.guessCategory(raw, mc0); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "🎙️ [$c0] 탭 저장 + ⏰알림 ${sc}건 예약됨" else if (isVm) "🎙️ [음성메모] 탭에 즉시 저장되었습니다!" else "✅ [$c0] 메모 즉시 저장됨" }, { books }, { notes }) }
-val bgCol = when (cfg.themeName) { "SLATE" -> Color(0xFF0B1120); "FOREST" -> Color(0xFF07120E); else -> Color(0xFF07090E) }
+val bgCol = CBG
 Box(Modifier.fillMaxSize().background(bgCol).systemBarsPadding().imePadding()) {
 HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
 when (page) {
@@ -313,15 +385,15 @@ InterruptModal(app, cfg.interruptSeconds, onCancel = { interruptApp = null }, on
 @Composable
 fun HomeAppTileItem(a: AppEntry, appGapMode: Int, subSp: TextUnit, alignEnd: Boolean, onLaunch: (AppEntry) -> Unit) {
 if (appGapMode == 0) {
-Surface(color = Color(0xFF0E1626), shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, Color(0xFF1F2E47)), modifier = Modifier.fillMaxWidth().clickable { onLaunch(a) }) {
+Surface(color = CS, shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth().clickable { onLaunch(a) }) {
 Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp), horizontalArrangement = if (alignEnd) Arrangement.End else SB, verticalAlignment = CV) {
-Text(a.label, fontSize = 17.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF3F4F6), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = if (alignEnd) Modifier else Modifier.weight(1f, fill = false))
+Text(a.label, fontSize = 17.sp, fontWeight = FontWeight.Medium, color = CW, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = if (alignEnd) Modifier else Modifier.weight(1f, fill = false))
 if (a.isInterruptEnabled) Text(" ⏳", fontSize = subSp, color = CA)
 }
 }
 } else {
 Row(verticalAlignment = CV, horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start, modifier = Modifier.fillMaxWidth().clickable { onLaunch(a) }.padding(horizontal = 6.dp, vertical = if (appGapMode == 1) 7.dp else 3.dp)) {
-Text(a.label, fontSize = if (appGapMode == 1) 18.sp else 17.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF3F4F6), maxLines = 1, overflow = TextOverflow.Ellipsis)
+Text(a.label, fontSize = if (appGapMode == 1) 18.sp else 17.sp, fontWeight = FontWeight.Medium, color = CW, maxLines = 1, overflow = TextOverflow.Ellipsis)
 if (a.isInterruptEnabled) Text(" ⏳", fontSize = subSp, color = CA)
 }
 }
@@ -393,9 +465,9 @@ Text(df.format(now), fontSize = ui.subSp, color = CM, maxLines = 1, overflow = T
 }
 
 Surface(
-color = Color(0xFF0E1626),
+color = CS,
 shape = RoundedCornerShape(10.dp),
-border = BorderStroke(0.8.dp, Color(0xFF23324B)),
+border = BorderStroke(0.8.dp, CBDR),
 modifier = Modifier.padding(horizontal = 4.dp).clickable { releaseEmbedGguf(); System.gc(); JarvisRuntime.status = "🧹 메모리 정리 완료 (RAM ${ramTxt})" }
 ) {
 Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -405,27 +477,27 @@ Text("RAM ${ramPct}%", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color
 }
 }
 Row(verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-Surface(color = Color(0xFF101827), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, Color(0xFF24324A)), modifier = Modifier.clickable { val py = ScheduleBriefingManager.buildVoiceBriefingPayload(allNotes.ifEmpty { importantNotes }); JarvisRuntime.status = py.visualSummary; speakOneShot(ctx, py.spokenScript) }) {
+Surface(color = CS, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.clickable { val py = ScheduleBriefingManager.buildVoiceBriefingPayload(allNotes.ifEmpty { importantNotes }); JarvisRuntime.status = py.visualSummary; speakOneShot(ctx, py.spokenScript) }) {
 Text("🔊", fontSize = 14.sp, color = CG, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
 }
-Surface(color = Color(0xFF101827), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, Color(0xFF24324A)), modifier = Modifier.clickable { onSettings() }) {
+Surface(color = CS, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.clickable { onSettings() }) {
 Text("⚙️", fontSize = 14.sp, color = CW, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
 }
 }
 }
 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
 Surface(
-    color = Color(0xFF0E1525),
+    color = CS,
     shape = RoundedCornerShape(16.dp),
-    border = BorderStroke(1.dp, if (JarvisRuntime.on) CG else Color(0xFF25344E)),
+    border = BorderStroke(1.dp, if (JarvisRuntime.on) CG else CBDR),
     modifier = Modifier.fillMaxWidth()
 ) {
     Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Surface(
-                color = if (JarvisRuntime.on) (if (JarvisController.sleeping || (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil)) Color(0xFF1E293B) else Color(0xFF0F3D3E)) else Color(0xFF172236),
+                color = if (JarvisRuntime.on) (if (JarvisController.sleeping || (wakeOnly && System.currentTimeMillis() >= wakeFollowUpUntil)) CS2 else CG.copy(alpha = 0.22f)) else CS2,
                 shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, if (JarvisRuntime.on) CG else Color(0xFF2E4057)),
+                border = BorderStroke(1.dp, if (JarvisRuntime.on) CG else CBDR),
                 modifier = Modifier.clickable {
                     if (JarvisRuntime.on) JarvisRuntime.stop(homeCtx)
                     else if (homeCtx.checkSelfPermission("android.permission.RECORD_AUDIO") == 0) {
@@ -481,9 +553,9 @@ Surface(
     
       val hasTxt = JarvisRuntime.input.isNotBlank()
             Surface(
-                color = if (hasTxt) CA else Color(0xFF172236),
+                color = if (hasTxt) CA else CS2,
                 shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, if (hasTxt) CA else Color(0xFF2E4057)),
+                border = BorderStroke(1.dp, if (hasTxt) CA else CBDR),
                 modifier = Modifier.clickable {
                     val t = JarvisRuntime.input.trim()
                     if (t.isNotEmpty()) {
@@ -501,7 +573,7 @@ Surface(
                     "⚡",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (hasTxt) Color(0xFF07090E) else CA,
+                    color = if (hasTxt) CON_ACCENT else CA,
                     modifier = Modifier.padding(horizontal = 9.dp, vertical = 9.dp)
                 )
             }
@@ -591,7 +663,7 @@ Surface(
         }
         if (briefPanelOpen) {
             Surface(
-                color = Color(0xFF09101D),
+                color = CS2,
                 shape = RoundedCornerShape(12.dp),
                 border = BorderStroke(0.9.dp, CA.copy(alpha = 0.65f)),
                 modifier = Modifier.fillMaxWidth()
@@ -644,9 +716,9 @@ Surface(
                         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             briefCfg.slots.forEach { slot ->
                                 Surface(
-                                    color = if (slot.enabled && briefCfg.enabled) Color(0xFF102027) else Color(0xFF111827),
+                                    color = if (slot.enabled && briefCfg.enabled) CG.copy(alpha = 0.14f) else CS2,
                                     shape = RoundedCornerShape(9.dp),
-                                    border = BorderStroke(0.7.dp, if (slot.enabled && briefCfg.enabled) CG.copy(alpha = 0.6f) else Color(0xFF24324A)),
+                                    border = BorderStroke(0.7.dp, if (slot.enabled && briefCfg.enabled) CG.copy(alpha = 0.6f) else CBDR),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), SB, CV) {
@@ -718,7 +790,7 @@ Surface(
                             }
                         }
                     }
-                    Box(Modifier.fillMaxWidth().height(0.7.dp).background(Color(0xFF1E2C45)))
+                    Box(Modifier.fillMaxWidth().height(0.7.dp).background(CBDR))
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                         ChipBtn(
                             text = if (briefCfg.forceOnSilent) "🔔 무음이어도 알람음량 낭독" else "📳 무음·진동 시 매너보호(알림만)",
@@ -750,12 +822,12 @@ Surface(
 if (!isDefHome) {
 val hRepo = remember(homeCtx) { LauncherRepository(homeCtx) }
 val isPoco = remember { hRepo.isXiaomiOrPocoDevice() }
-Surface(color = Color(0xFF14261F), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CG.copy(alpha = 0.14f), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(ui.cardPad), verticalArrangement = Arrangement.spacedBy(6.dp)) {
 Row(Modifier.fillMaxWidth().clickable { onAskHome() }, SB, CV) {
 Column(Modifier.weight(1f)) {
 Text("🏠 기본 홈 화면(런처) 권한 지정하기", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG)
-Text(if (isPoco) "포코·샤오미는 ①배터리 제한해제 → ②자동실행 ON → ③기본런처 선택 시 풀리지 않습니다" else "탭하여 기본 홈 앱으로 설정하세요", fontSize = ui.subSp, color = Color(0xFFA7F3D0))
+Text(if (isPoco) "포코·샤오미는 ①배터리 제한해제 → ②자동실행 ON → ③기본런처 선택 시 풀리지 않습니다" else "탭하여 기본 홈 앱으로 설정하세요", fontSize = ui.subSp, color = CW)
 }
 Text("→", fontSize = (ui.subSp.value + 1).sp, color = CG)
 }
@@ -769,7 +841,7 @@ ChipBtn("③ 기본 런처 선택", false, CW) { hRepo.openSystemDefaultAppsSett
 }
 }
 }
-Surface(color = Color(0xFF0F1624), shape = RoundedCornerShape(16.dp), border = BorderStroke(0.8.dp, Color(0xFF222E44)), modifier = Modifier.fillMaxWidth().clickable { onRightNotes() }) { Column(Modifier.padding(ui.cardPad), verticalArrangement = Arrangement.spacedBy(4.dp)) { Row(Modifier.fillMaxWidth(), SB, CV) { Text("📌 중요 메모 (${importantNotes.size})", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA); Text("→", fontSize = ui.subSp, color = CM) }; if (importantNotes.isEmpty()) { Text("메모에서 ★ 중요 표시를 켜면 홈 화면에서 바로 확인됩니다.", fontSize = (ui.subSp.value + 1).sp, color = CD) } else importantNotes.forEach { n -> val cat = SmartMemoClassifier.categoryOf(n, memoCats); Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) { val ls = n.content.lines().filter { !it.trim().startsWith("#") && it.isNotBlank() }; ls.take(3).forEachIndexed { idx, ln -> val tr = ln.trimStart(); val isChk = tr.startsWith("☐") || tr.startsWith("☑"); val done = tr.startsWith("☑"); val origIdx = n.content.lines().indexOf(ln).coerceAtLeast(idx); Row(Modifier.fillMaxWidth().clickable { if (isChk) onToggleCheck(n.id, origIdx) else onRightNotes() }.padding(vertical = 1.dp), verticalAlignment = CV) { if (idx == 0) Text("[$cat] ", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG); Text(ln, fontSize = (ui.subSp.value + 1).sp, color = if (done) CD else Color(0xFFE5E7EB), textDecoration = if (done) TextDecoration.LineThrough else null, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)) } } } } } }
+Surface(color = CS, shape = RoundedCornerShape(16.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth().clickable { onRightNotes() }) { Column(Modifier.padding(ui.cardPad), verticalArrangement = Arrangement.spacedBy(4.dp)) { Row(Modifier.fillMaxWidth(), SB, CV) { Text("📌 중요 메모 (${importantNotes.size})", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA); Text("→", fontSize = ui.subSp, color = CM) }; if (importantNotes.isEmpty()) { Text("메모에서 ★ 중요 표시를 켜면 홈 화면에서 바로 확인됩니다.", fontSize = (ui.subSp.value + 1).sp, color = CD) } else importantNotes.forEach { n -> val cat = SmartMemoClassifier.categoryOf(n, memoCats); Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) { val ls = n.content.lines().filter { !it.trim().startsWith("#") && it.isNotBlank() }; ls.take(3).forEachIndexed { idx, ln -> val tr = ln.trimStart(); val isChk = tr.startsWith("☐") || tr.startsWith("☑"); val done = tr.startsWith("☑"); val origIdx = n.content.lines().indexOf(ln).coerceAtLeast(idx); Row(Modifier.fillMaxWidth().clickable { if (isChk) onToggleCheck(n.id, origIdx) else onRightNotes() }.padding(vertical = 1.dp), verticalAlignment = CV) { if (idx == 0) Text("[$cat] ", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG); Text(ln, fontSize = (ui.subSp.value + 1).sp, color = if (done) CD else CW, textDecoration = if (done) TextDecoration.LineThrough else null, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)) } } } } } }
 }
 if (!isKeyboardOpen) {
 val activeHomeApps = remember(selHomeFolderId, favs, allApps, homeAppFolders) {
@@ -798,7 +870,7 @@ ChipBtn("➕", homeFolderDlgOpen, CW) { homeFolderDlgOpen = true }
     val vGap = when (appGapMode) { 0 -> 10.dp; 1 -> 14.dp; else -> 8.dp }
 val hGap = when (appGapMode) { 0 -> 14.dp; 1 -> 24.dp; else -> 16.dp }
 if (activeHomeApps.isEmpty()) {
-Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(12.dp), border = BorderStroke(0.8.dp, Color(0xFF1E2B42)), modifier = Modifier.fillMaxWidth().clickable { if (selHomeFolderId > 0L) homeFolderDlgOpen = true else onSwipeUp() }) {
+Surface(color = CS, shape = RoundedCornerShape(12.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth().clickable { if (selHomeFolderId > 0L) homeFolderDlgOpen = true else onSwipeUp() }) {
 Text(if (selHomeFolderId > 0L) "이 폴더가 비어 있습니다. 탭하여 앱을 폴더에 담아 보세요." else "위로 스와이프(↑)하여 자주 쓰는 앱을 ★ 홈에 고정해 보세요", fontSize = ui.bodySp, color = CM, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
 }
 } else if (appColMode == 2) {
@@ -818,7 +890,7 @@ rightApps.forEach { a -> HomeAppTileItem(a, appGapMode, ui.subSp, appColMode == 
 }
 }
 }
-Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Surface(color = Color(0xFF101624), shape = RoundedCornerShape(50), border = BorderStroke(0.8.dp, Color(0xFF233047)), modifier = Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = CV) { Text("✍️", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CW, modifier = Modifier.clickable { onLeftWriter() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📖", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onLeftReader() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🔼앱서랍", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CW, modifier = Modifier.clickable { onSwipeUp() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📝", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CG, modifier = Modifier.clickable { onRightNotes() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🦙", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CA, modifier = Modifier.clickable { onRightAi() }.padding(horizontal = 8.dp, vertical = 4.dp)) } } }
+Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Surface(color = CS, shape = RoundedCornerShape(50), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = CV) { Text("✍️", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CW, modifier = Modifier.clickable { onLeftWriter() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📖", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onLeftReader() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🔼앱서랍", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CW, modifier = Modifier.clickable { onSwipeUp() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📝", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CG, modifier = Modifier.clickable { onRightNotes() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🦙", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CA, modifier = Modifier.clickable { onRightAi() }.padding(horizontal = 8.dp, vertical = 4.dp)) } } }
 }
 }
  

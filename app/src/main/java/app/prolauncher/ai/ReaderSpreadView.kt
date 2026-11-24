@@ -276,6 +276,7 @@ fun ReaderView(
     DisposableEffect(Unit) {
         onDispose {
             ReaderVolumeKeyBridge.readerBookActive = false
+            ReaderVolumeKeyBridge.isBookReadyCheck = null
             ReaderVolumeKeyBridge.onTurnPage = null
         }
     }
@@ -289,6 +290,8 @@ var allHighlights by remember { mutableStateOf(loadBookHighlights(ctx)) }
 var highlightMode by remember { mutableStateOf(false) }
     var hlColorIdx by remember { mutableStateOf(0) }
     var hlListOpen by remember { mutableStateOf(false) }
+        var tocOpen by remember { mutableStateOf(false) }
+        var tocFilterQuery by remember { mutableStateOf("") }
     var lineHeightIdx by remember { mutableStateOf(readerPrefs.getInt("reader_line_height_idx", 1).coerceIn(0, 2)) }
     // Built-in Reader Memo & AI Floating states — exact MarkdownWriterStudio free-drag MutableState architecture!
     var readerMemoOpen by remember { mutableStateOf(false) }
@@ -695,6 +698,7 @@ onClose = { searchOpen = false }
         if (shelf || act == null) {
             SideEffect {
                 ReaderVolumeKeyBridge.readerBookActive = false
+                ReaderVolumeKeyBridge.isBookReadyCheck = { false }
                 ReaderVolumeKeyBridge.onTurnPage = null
             }
             ReaderShelfSection(
@@ -774,6 +778,7 @@ onClose = { searchOpen = false }
             val hostAct = ctx.findReaderHostActivity() ?: mainActRef
             val inMultiWindow = hostAct?.isInMultiWindowMode == true
             val imeBottomPx = WindowInsets.ime.getBottom(density)
+            val isKeyboardOpen = imeBottomPx > with(density) { 80.dp.toPx() }
             val isWindowShrunk = inMultiWindow ||
                 (realFullHPx > 400f && rootMaxHPx < realFullHPx * 0.80f) ||
                 (realFullWPx > 300f && rootMaxWPx < realFullWPx * 0.85f)
@@ -891,12 +896,15 @@ liveSpreadText = spreadText
 liveActiveExcerpt = activeExcerpt
 commitExcerptHook = ::commitDraftIfEditing
 }
-            fun goToVPage(targetV: Int) {
+            val liveVIdxHolder = remember(act.id) { intArrayOf(0) }
+            liveVIdxHolder[0] = vIdx
+            fun goToVPage(targetV: Int, baseIdx: Int = vIdx) {
                 if (vPages.isEmpty()) return
                 val aligned = if (twoPageMode) (targetV / 2) * 2 else targetV
                 val maxStart = if (twoPageMode) ((vPages.size - 1).coerceAtLeast(0) / 2) * 2 else (vPages.size - 1).coerceAtLeast(0)
                 val nextV = aligned.coerceIn(0, maxStart)
-                if (nextV == vIdx) return
+                if (nextV == baseIdx) return
+                liveVIdxHolder[0] = nextV
                 val newOff = vPages[nextV].s
                 val newRaw = reflowSrc.rawIdxOf(newOff)
                 curCharOff = newOff
@@ -931,19 +939,25 @@ commitExcerptHook = ::commitDraftIfEditing
              val nx = if (hit != null) allHighlights.filterNot { it.id == hit.id } else allHighlights + BookHighlight(System.currentTimeMillis(), act.id, gs, ge, hlColorIdx)
              allHighlights = nx; saveBookHighlights(ctx, nx)
             }
+            val tocEntries = remember(act.id, reflowSrc.fullText, isPoetryBook) { EbookTextReflower.extractBookTocEntries(ctx, act.id, reflowSrc.fullText, isPoetryBook) }
+            val curTocIdx = remember(tocEntries, leftSlice.s) { tocEntries.indexOfLast { it.charOffset <= leftSlice.s + 8 } }
+            val curTocEntry = if (curTocIdx in tocEntries.indices) tocEntries[curTocIdx] else null
+            val curChapPct = remember(tocEntries, curTocIdx, curSpreadEndChar, reflowSrc.fullText.length) { if (curTocIdx !in tocEntries.indices) progressPct else { val cs = tocEntries[curTocIdx].charOffset; val ce = tocEntries.getOrNull(curTocIdx + 1)?.charOffset ?: reflowSrc.fullText.length; val span = (ce - cs).coerceAtLeast(1); (((curSpreadEndChar - cs).coerceIn(1, span) * 100) / span).coerceIn(1, 100) } }
             var activeFootnotePopup by remember(act.id) { mutableStateOf<ActiveFootnotePopup?>(null) }
             var footnoteReturnOff by remember(act.id) { mutableStateOf<Int?>(null) }
             LaunchedEffect(vIdx, act.id) {
                 activeFootnotePopup = null
             }
-            val volumeKeyReady = !shelf && !cfgOpen && !bmOpen && !hlListOpen && !folderDialogOpen && !selectMode && imeBottomPx <= 0
-            SideEffect {
-                ReaderVolumeKeyBridge.volumeTurnEnabled = readerVolumeTurnOn
-                ReaderVolumeKeyBridge.readerBookActive = volumeKeyReady
-                ReaderVolumeKeyBridge.onTurnPage = { dir ->
-                    goToVPage(vIdx + dir * stepPg)
-                }
-            }
+            val volumeKeyReady = !shelf && readerVolumeTurnOn && !tocOpen && !hlListOpen && !folderDialogOpen && !isKeyboardOpen
+                val latestVolReady by rememberUpdatedState(volumeKeyReady)
+                val latestVolTurnOn by rememberUpdatedState(readerVolumeTurnOn)
+                val latestVolTurnAction by rememberUpdatedState<(Int) -> Unit> { dir -> val curBase = liveVIdxHolder[0]; goToVPage(curBase + dir * stepPg, curBase) }
+                SideEffect {
+                    ReaderVolumeKeyBridge.volumeTurnEnabled = latestVolTurnOn
+                    ReaderVolumeKeyBridge.readerBookActive = latestVolReady
+                    ReaderVolumeKeyBridge.isBookReadyCheck = { latestVolReady && latestVolTurnOn }
+                    ReaderVolumeKeyBridge.onTurnPage = { dir -> latestVolTurnAction(dir) }
+                } 
             fun handleReaderBodyTap(pageRender: RenderedBookPage, pageText: String, pageStartOff: Int, dispOff: Int) {
                 val rawOff = pageRender.rawOffsetOf(dispOff)
                 val tappedFn = pageRender.footnotes
@@ -985,7 +999,8 @@ commitExcerptHook = ::commitDraftIfEditing
              Surface(color = CG.copy(alpha = 0.18f), shape = RoundedCornerShape(6.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.65f)), modifier = Modifier.clickable { catBarOpen = !catBarOpen }) {
               Text("${act.category.ifBlank { "전자책" }}▾", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CG, maxLines = 1, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
              }
-             Text(act.title, fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, softWrap = false)
+             Text(act.title, fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, softWrap = false, modifier = Modifier.clickable { tocFilterQuery = ""; tocOpen = true })
+                ChipBtn("☰", tocOpen, CG) { tocFilterQuery = ""; tocOpen = !tocOpen }
              ChipBtn(if (readerAiMode == 2) "🪟" else "🦙", readerAiOpen, CG) { commitDraftIfEditing(); aiFloatMin = false; readerAiOpen = !readerAiOpen }
              ChipBtn("🖍️", highlightMode, CA) { highlightMode = !highlightMode; if (highlightMode) selectMode = false }
             if (bookHls.isNotEmpty()) { ChipBtn("📑${bookHls.size}", hlListOpen, CG) { hlListOpen = true } }
@@ -1096,7 +1111,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
             LaunchedEffect(vIdx, act.id) {
                 if (ovScroll.value != 0) ovScroll.scrollTo(0)
             }
-            val transientChromeOpen = imeBottomPx > 0 || cfgOpen || bmOpen || searchOpen || highlightMode ||
+            val transientChromeOpen = isKeyboardOpen || cfgOpen || bmOpen || searchOpen || highlightMode ||
                 (readerAiOpen && readerAiMode == 1) || (readerMemoOpen && readerMemoMode == 1) ||
                 selBannerVisible || sliderBarVisible || catBarOpen || topTtsVisible || topStatusVisible
             val isFullUnobstructed = !isWindowShrunk && !transientChromeOpen
@@ -1305,9 +1320,10 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                     Box(Modifier.width(1.dp).fillMaxHeight(0.94f).background(mut.copy(alpha = 0.26f)))
                                 }
                                 Column(twoPgColMod) {
-                                    Box(Modifier.fillMaxWidth().height(16.dp), contentAlignment = Alignment.CenterEnd) {
-                                        Text("${act.category.ifBlank { "독서" }} · ${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1)
-                                    }
+                                                Box(Modifier.fillMaxWidth().height(16.dp).clickable { tocFilterQuery = ""; tocOpen = true }, contentAlignment = Alignment.CenterEnd) {
+                                        val chapTag = curTocEntry?.let { "☰ ${it.title.take(16)} (${curChapPct}%)" } ?: "☰ ${act.category.ifBlank { "독서" }}"
+                                        Text("$chapTag · 전체 ${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                }
                                     Spacer(Modifier.height(4.dp))
                                     Box(if (shouldScrollPage) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
                                         if (hasRightPage && rightSlice != null) {
@@ -1375,7 +1391,8 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                 }
                                 Spacer(Modifier.height(2.dp))
                                 Row(Modifier.fillMaxWidth().height(16.dp), SB, CV) {
-                                    Text(act.category.ifBlank { "독서" }, fontSize = 10.sp, color = mut.copy(alpha = 0.65f))
+                                               val footerChap = curTocEntry?.let { "☰ ${it.title} · 챕터 ${curChapPct}%" } ?: "☰ ${act.category.ifBlank { "독서" }}"
+                                    Text(footerChap, fontSize = 10.sp, color = mut.copy(alpha = 0.78f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp).clickable { tocFilterQuery = ""; tocOpen = true })
                                     Text("${vIdx + 1} / ${vPages.size}", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = mut)
                                 }
                             }
@@ -1528,6 +1545,60 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                     }
                 }
            }
+            if (tocOpen) {
+                val qTrim = tocFilterQuery.trim()
+                val indexedToc = remember(tocEntries, qTrim) { val allIndexed = tocEntries.mapIndexed { idx, entry -> idx to entry }; if (qTrim.isEmpty()) allIndexed else allIndexed.filter { (_, entry) -> KoreanChosungMatcher.matches(entry.title, qTrim) } }
+                val initScrollIdx = remember(tocOpen, indexedToc, curTocIdx) { if (qTrim.isNotEmpty() || curTocIdx < 0) 0 else indexedToc.indexOfFirst { it.first == curTocIdx }.let { if (it >= 0) (it - 2).coerceAtLeast(0) else 0 } }
+                val tocListState = rememberLazyListState(initialFirstVisibleItemIndex = initScrollIdx)
+                AlertDialog(
+                    onDismissRequest = { tocOpen = false },
+                    containerColor = Color(0xFF0C1322),
+                    title = {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(Modifier.fillMaxWidth(), SB, CV) {
+                                Text("☰ 목차 · 챕터 이동 (${tocEntries.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = CG)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                                    if (curTocIdx > 0) ChipBtn("◀이전장", false, CW) { val prevE = tocEntries[curTocIdx - 1]; if (abs(prevE.charOffset - leftSlice.s) > 60) footnoteReturnOff = leftSlice.s; tocOpen = false; jumpToCharOffset(prevE.charOffset) }
+                                    if (curTocIdx >= 0 && curTocIdx + 1 < tocEntries.size) ChipBtn("다음장▶", false, CA) { val nextE = tocEntries[curTocIdx + 1]; if (abs(nextE.charOffset - leftSlice.s) > 60) footnoteReturnOff = leftSlice.s; tocOpen = false; jumpToCharOffset(nextE.charOffset) }
+                                }
+                            }
+                            curTocEntry?.let { curE -> Text("📖 현재: ${curE.title} (챕터 ${curChapPct}% · 전체 ${progressPct}%)", fontSize = 11.5.sp, color = CA, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            if (tocEntries.size >= 7) OutlinedTextField(value = tocFilterQuery, onValueChange = { tocFilterQuery = it }, placeholder = { Text("챕터·소제목 검색 (초성 지원)...", fontSize = 11.5.sp) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        }
+                    },
+                    text = {
+                        if (indexedToc.isEmpty()) Text("일치하는 목차 항목이 없습니다.", fontSize = ui.subSp, color = CM) else {
+                            LazyColumn(state = tocListState, modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(indexedToc, key = { (origIdx, e) -> "${origIdx}_${e.charOffset}" }) { (origIdx, entry) ->
+                                    val isCurChap = origIdx == curTocIdx; val isPassedChap = curTocIdx >= 0 && origIdx < curTocIdx
+                                    val entryPg = vPages.indexOfLast { it.s <= entry.charOffset }.coerceAtLeast(0) + 1
+                                    val nextOff = tocEntries.getOrNull(origIdx + 1)?.charOffset ?: reflowSrc.fullText.length
+                                    val pgSpanCnt = ((vPages.indexOfLast { it.s < nextOff }.coerceAtLeast(entryPg - 1) + 1) - entryPg + 1).coerceAtLeast(1)
+                                    val entryBookPct = (((entry.charOffset.coerceAtLeast(0).toLong() * 100L) / reflowSrc.fullText.length.coerceAtLeast(1).toLong()).toInt()).coerceIn(0, 100)
+                                    Surface(color = if (isCurChap) CG.copy(alpha = 0.17f) else Color(0xFF131C2E), shape = RoundedCornerShape(10.dp), border = BorderStroke(if (isCurChap) 1.3.dp else 0.8.dp, if (isCurChap) CG else Color(0xFF25344E)), modifier = Modifier.fillMaxWidth().padding(start = if (entry.level >= 2) 12.dp else 0.dp).clickable { if (abs(entry.charOffset - leftSlice.s) > 60) footnoteReturnOff = leftSlice.s; tocOpen = false; jumpToCharOffset(entry.charOffset) }) {
+                                        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Row(Modifier.fillMaxWidth(), SB, CV) {
+                                                Text((if (entry.level >= 2) "└ " else "") + entry.title, fontSize = if (entry.level == 1) (ui.subSp.value + 1f).sp else ui.subSp, fontWeight = if (isCurChap || entry.level == 1) FontWeight.Bold else FontWeight.Medium, color = if (isCurChap) CG else if (isPassedChap) CW.copy(alpha = 0.72f) else CW, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
+                                                Column(horizontalAlignment = Alignment.End) {
+                                                    Text("${entryPg}쪽", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isCurChap) CG else CA)
+                                                    Text("${pgSpanCnt}쪽 분량 · ${entryBookPct}%", fontSize = 9.5.sp, color = CM)
+                                                }
+                                            }
+                                            if (isCurChap) {
+                                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
+                                                    Box(Modifier.weight(1f).height(4.dp).background(Color(0xFF23324B), RoundedCornerShape(50))) { Box(Modifier.fillMaxWidth(curChapPct / 100f).fillMaxHeight().background(CG, RoundedCornerShape(50))) }
+                                                    Text("읽는 중 ${curChapPct}%", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CG)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { tocOpen = false }) { Text("닫기", color = CG, fontWeight = FontWeight.Bold) } }
+                )
+            }
             if (hlListOpen) { val sortedHls = remember(bookHls) { bookHls.sortedBy { it.startOff } }; AlertDialog(onDismissRequest = { hlListOpen = false }, containerColor = Color(0xFF0E1525), title = { Row(Modifier.fillMaxWidth(), SB, CV) { Text("🖍️ 형광펜 모아보기 (${sortedHls.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = CA); if (sortedHls.isNotEmpty()) { ChipBtn("🗑️전체삭제", false, Color(0xFFF87171)) { val nx = allHighlights.filterNot { it.bookId == act.id }; allHighlights = nx; saveBookHighlights(ctx, nx); hlListOpen = false } } } }, text = { if (sortedHls.isEmpty()) { Text("이 책에 저장된 형광펜이 없습니다. 상단 🖍️ 버튼으로 문장을 탭해 밑줄을 칠 수 있어요.", fontSize = ui.subSp, color = CM) } else { LazyColumn(Modifier.fillMaxWidth().heightIn(max = 340.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { items(sortedHls, key = { it.id }) { hl -> val dot = when (hl.colorIdx) { 1 -> "🟢"; 2 -> "🩷"; else -> "🟡" }; val hlPg = vPages.indexOfLast { it.s <= hl.startOff }.coerceAtLeast(0) + 1; val sIdx = hl.startOff.coerceIn(0, reflowSrc.fullText.length); val eIdx = hl.endOff.coerceIn(sIdx, reflowSrc.fullText.length); val snippet = reflowSrc.fullText.substring(sIdx, eIdx).replace(10.toChar(), ' ').trim().ifEmpty { "(빈 구절)" }; Surface(color = Color(0xFF141D2E), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, Color(0xFF283753)), modifier = Modifier.fillMaxWidth().clickable { hlListOpen = false; jumpToCharOffset(hl.startOff) }) { Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) { Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) { Text("$dot ${hlPg}쪽", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG); Text(snippet, fontSize = ui.subSp, color = CW, maxLines = 3, overflow = TextOverflow.Ellipsis) }; Text("🗑️", fontSize = 15.sp, modifier = Modifier.clickable { val nx = allHighlights.filterNot { it.id == hl.id }; allHighlights = nx; saveBookHighlights(ctx, nx) }.padding(4.dp)) } } } } } }, confirmButton = { TextButton(onClick = { hlListOpen = false }) { Text("닫기", color = CG, fontWeight = FontWeight.Bold) } }) }; if (sliderBarVisible) {
                 Surface(
                     color = Color(0xFF0E1626),
@@ -1537,8 +1608,13 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                 ) {
                     Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Row(Modifier.fillMaxWidth(), SB, CV) {
-                            Text("🎚️ 빠른 페이지 이동 (${pgLabel})", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG)
-                            Text("✕ 닫기", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { sliderOpen = false }.padding(2.dp))
+                                       Text("🎚️ 빠른 이동 (${pgLabel})", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG, modifier = Modifier.weight(1f))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                                if (curTocIdx > 0) ChipBtn("◀장", false, CW) { jumpToCharOffset(tocEntries[curTocIdx - 1].charOffset) }
+                                ChipBtn("☰목차", tocOpen, CA) { tocFilterQuery = ""; tocOpen = true }
+                                if (curTocIdx >= 0 && curTocIdx + 1 < tocEntries.size) ChipBtn("장▶", false, CW) { jumpToCharOffset(tocEntries[curTocIdx + 1].charOffset) }
+                                Text("✕", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { sliderOpen = false }.padding(horizontal = 4.dp))
+                            } 
                         }
                         Slider(
                             value = vIdx.toFloat(),

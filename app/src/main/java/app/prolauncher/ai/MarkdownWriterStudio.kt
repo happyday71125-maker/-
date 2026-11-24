@@ -123,7 +123,7 @@ fun buildInlineMarkdownAnnotated(raw: String, baseColor: Color): AnnotatedString
             raw.startsWith("**", i) -> {
                 val end = raw.indexOf("**", i + 2)
                 if (end > i + 2) {
-                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24)))
+                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold, color = CA))
                     append(raw.substring(i + 2, end))
                     pop()
                     i = end + 2
@@ -141,7 +141,7 @@ fun buildInlineMarkdownAnnotated(raw: String, baseColor: Color): AnnotatedString
             raw[i] == '`' -> {
                 val end = raw.indexOf('`', i + 1)
                 if (end > i + 1) {
-                    pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0xFF1E293B), color = Color(0xFF6EE7B7)))
+                    pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = CS2, color = CG))
                     append(" " + raw.substring(i + 1, end) + " ")
                     pop()
                     i = end + 1
@@ -150,7 +150,7 @@ fun buildInlineMarkdownAnnotated(raw: String, baseColor: Color): AnnotatedString
             raw[i] == '*' && (i + 1 < n && raw[i + 1] != ' ') -> {
                 val end = raw.indexOf('*', i + 1)
                 if (end > i + 1) {
-                    pushStyle(SpanStyle(fontStyle = FontStyle.Italic, color = Color(0xFFBAE6FD)))
+                    pushStyle(SpanStyle(fontStyle = FontStyle.Italic, color = CM))
                     append(raw.substring(i + 1, end))
                     pop()
                     i = end + 1
@@ -192,9 +192,9 @@ fun MarkdownRenderedView(
                     idx++
                 }
                 Surface(
-                    color = Color(0xFF090D16),
+                    color = CS2,
                     shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(0.8.dp, Color(0xFF24324B)),
+                    border = BorderStroke(0.8.dp, CBDR),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -204,7 +204,7 @@ fun MarkdownRenderedView(
                             fontSize = (bodySp - 1.5f).coerceAtLeast(11f).sp,
                             lineHeight = ((bodySp - 1.5f).coerceAtLeast(11f) * 1.45f).sp,
                             fontFamily = FontFamily.Monospace,
-                            color = Color(0xFFE2E8F0)
+                            color = CW
                         )
                     }
                 }
@@ -214,7 +214,7 @@ fun MarkdownRenderedView(
             when {
                 tr.isEmpty() -> Spacer(Modifier.height(2.dp))
                 tr == "---" || tr == "***" || tr == "___" -> {
-                    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(Color(0xFF2B3B55)))
+                    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(CBDR))
                 }
                 tr.startsWith("# ") -> {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -225,20 +225,20 @@ fun MarkdownRenderedView(
                 tr.startsWith("## ") -> {
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(buildInlineMarkdownAnnotated(tr.removePrefix("## ").trim(), CW), fontSize = (bodySp + 4f).sp, lineHeight = ((bodySp + 4f) * 1.35f).sp, fontWeight = FontWeight.Bold)
-                        Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF25344E)))
+                        Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
                     }
                 }
                 tr.startsWith("### ") -> {
-                    Text(buildInlineMarkdownAnnotated(tr.removePrefix("### ").trim(), Color(0xFFA7F3D0)), fontSize = (bodySp + 2f).sp, lineHeight = ((bodySp + 2f) * 1.38f).sp, fontWeight = FontWeight.Bold)
+                    Text(buildInlineMarkdownAnnotated(tr.removePrefix("### ").trim(), CG), fontSize = (bodySp + 2f).sp, lineHeight = ((bodySp + 2f) * 1.38f).sp, fontWeight = FontWeight.Bold)
                 }
                 tr.startsWith("#### ") -> {
                     Text(buildInlineMarkdownAnnotated(tr.removePrefix("#### ").trim(), CA), fontSize = (bodySp + 0.5f).sp, lineHeight = ((bodySp + 0.5f) * 1.4f).sp, fontWeight = FontWeight.SemiBold)
                 }
                 tr.startsWith("> ") || tr == ">" -> {
-                    Row(Modifier.fillMaxWidth().background(Color(0xFF10192B), RoundedCornerShape(8.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().background(CS2, RoundedCornerShape(8.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.width(3.dp).height((bodySp + 6f).dp).background(CG))
                         Spacer(Modifier.width(8.dp))
-                        Text(buildInlineMarkdownAnnotated(tr.removePrefix(">").trim(), Color(0xFFD1FAE5)), fontSize = bodySp.sp, lineHeight = (bodySp * 1.5f).sp)
+                        Text(buildInlineMarkdownAnnotated(tr.removePrefix(">").trim(), CW), fontSize = bodySp.sp, lineHeight = (bodySp * 1.5f).sp)
                     }
                 }
                 tr.startsWith("- [ ] ") || tr.startsWith("- [x] ") || tr.startsWith("- [X] ") -> {
@@ -514,9 +514,9 @@ fun WriterAiAssistantContent(
             ChipBtn("📌요약", false, CG) { onAsk("현재 작성된 문서의 핵심 요점을 3~5줄 마크다운 목록으로 요약해줘.") }
         }
         Surface(
-            color = Color(0xFF080D17),
+            color = CS2,
             shape = RoundedCornerShape(10.dp),
-            border = BorderStroke(0.8.dp, Color(0xFF1F2D46)),
+            border = BorderStroke(0.8.dp, CBDR),
             modifier = Modifier.weight(1f).fillMaxWidth()
         ) {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp)) {
@@ -549,7 +549,7 @@ fun WriterAiAssistantContent(
             } else {
                 Button(
                     onClick = { val q = aiPromptIn.trim(); if (q.isNotEmpty()) { onPromptChange(""); onAsk(q) } },
-                    colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = Color(0xFF062019))
+                    colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = CON_ACCENT)
                 ) { Text("↑", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
             }
         }
@@ -611,9 +611,9 @@ fun WriterEditorWorkspacePane(
             }
             1 -> {
                 Surface(
-                    color = Color(0xFF0C121E),
+                    color = CS,
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(0.8.dp, Color(0xFF23324B)),
+                    border = BorderStroke(0.8.dp, CBDR),
                     modifier = Modifier.weight(1f).fillMaxWidth()
                 ) {
                     MarkdownRenderedView(
@@ -634,9 +634,9 @@ fun WriterEditorWorkspacePane(
             }
             else -> {
                 Surface(
-                    color = Color(0xFF0C121E),
+                    color = CS,
                     shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(0.8.dp, Color(0xFF23324B)),
+                    border = BorderStroke(0.8.dp, CBDR),
                     modifier = Modifier.weight(0.45f).fillMaxWidth()
                 ) {
                     MarkdownRenderedView(
@@ -924,7 +924,7 @@ fun MarkdownWriterView(
         aiAns = aiAns.removeSuffix(" ▍")
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFF07090E))) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(CBG)) {
         val boxW = this.maxWidth
         val boxH = this.maxHeight
         val density = LocalDensity.current
@@ -954,7 +954,7 @@ fun MarkdownWriterView(
             }
             if (fontBarOpen) {
                 Surface(
-                    color = Color(0xFF0E1524),
+                    color = CS,
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, CG.copy(alpha = 0.75f)),
                     modifier = Modifier.fillMaxWidth()
@@ -1040,7 +1040,7 @@ fun MarkdownWriterView(
                     if (shelfFolderFilter == "전체") docs else docs.filter { it.folder == shelfFolderFilter }
                 }
                 Surface(
-                    color = Color(0xFF0E1524),
+                    color = CS,
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, CA.copy(alpha = 0.7f)),
                     modifier = Modifier.fillMaxWidth().heightIn(max = 250.dp)
@@ -1071,7 +1071,7 @@ fun MarkdownWriterView(
                             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 items(visibleDocs, key = { it.id }) { d ->
                                     Surface(
-                                        color = if (d.id == curDocId) Color(0xFF132924) else CS,
+                                        color = if (d.id == curDocId) CG.copy(alpha = 0.18f) else CS,
                                         shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier.fillMaxWidth().clickable {
                                             curDocId = d.id
@@ -1130,13 +1130,13 @@ fun MarkdownWriterView(
                             onSetBodyRaw = ::setBodyText
                         )
                         Surface(
-                            color = Color(0xFF0E1626),
+                            color = CS,
                             shape = RoundedCornerShape(12.dp),
                             border = BorderStroke(1.dp, CG.copy(alpha = 0.65f)),
                             modifier = Modifier.weight(0.46f).fillMaxHeight()
                         ) {
                             Column(Modifier.fillMaxSize()) {
-                                Row(Modifier.fillMaxWidth().background(Color(0xFF132036)).padding(horizontal = 10.dp, vertical = 6.dp), SB, CV) {
+                                Row(Modifier.fillMaxWidth().background(CS2).padding(horizontal = 10.dp, vertical = 6.dp), SB, CV) {
                                     Text("🦙 화면분할 AI (좌우)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG)
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
                                         Text("↕상하", fontSize = 11.sp, color = CW, modifier = Modifier.clickable { splitHorizontal = false })
@@ -1174,13 +1174,13 @@ fun MarkdownWriterView(
                             onSetBodyRaw = ::setBodyText
                         )
                         Surface(
-                            color = Color(0xFF0E1626),
+                            color = CS,
                             shape = RoundedCornerShape(12.dp),
                             border = BorderStroke(1.dp, CG.copy(alpha = 0.65f)),
                             modifier = Modifier.weight(0.45f).fillMaxWidth()
                         ) {
                             Column(Modifier.fillMaxSize()) {
-                                Row(Modifier.fillMaxWidth().background(Color(0xFF132036)).padding(horizontal = 10.dp, vertical = 6.dp), SB, CV) {
+                                Row(Modifier.fillMaxWidth().background(CS2).padding(horizontal = 10.dp, vertical = 6.dp), SB, CV) {
                                     Text("🦙 화면분할 AI 도우미 (상하)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG)
                                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = CV) {
                                         Text("↔좌우분할", fontSize = 11.sp, color = CW, modifier = Modifier.clickable { splitHorizontal = true })
@@ -1223,7 +1223,7 @@ fun MarkdownWriterView(
             val clampedX = floatX.coerceIn(4f, (maxWPx - floatWPx - 4f).coerceAtLeast(4f))
             val clampedY = floatY.coerceIn(8f, (maxHPx - floatHPx - 8f).coerceAtLeast(8f))
             Surface(
-                color = Color(0xF50E1628),
+                color = CS,
                 shape = RoundedCornerShape(14.dp),
                 shadowElevation = 12.dp,
                 border = BorderStroke(1.2.dp, CA.copy(alpha = 0.85f)),
@@ -1236,7 +1236,7 @@ fun MarkdownWriterView(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF17253E))
+                            .background(CS2)
                             .pointerInput(maxWPx, maxHPx, floatWPx, floatHPx) {
                                 detectDragGestures { change, dragAmount ->
                                     change.consume()

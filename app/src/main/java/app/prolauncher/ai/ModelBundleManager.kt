@@ -40,12 +40,12 @@ ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE).edit().putStri
 @Composable
 fun ChipBtn(text: String, sel: Boolean = false, col: Color = CG, onClick: () -> Unit) {
 Surface(
-color = if (sel) col.copy(alpha = 0.18f) else Color(0xFF151C2C),
+color = if (sel) col.copy(alpha = 0.18f) else CS2,
 shape = RoundedCornerShape(50),
-border = BorderStroke(if (sel) 1.dp else 0.7.dp, if (sel) col.copy(alpha = 0.75f) else Color(0xFF243047)),
+border = BorderStroke(if (sel) 1.dp else 0.7.dp, if (sel) col.copy(alpha = 0.75f) else CBDR),
 modifier = Modifier.clickable { onClick() }
 ) {
-Text(text, fontSize = 11.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium, color = if (sel) col else Color(0xFFCBD5E1), maxLines = 1, softWrap = false, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+Text(text, fontSize = 11.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium, color = if (sel) col else CW, maxLines = 1, softWrap = false, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
 }
 }
 data class BookSortMeta(val sortOrder: Int = 0, val lastReadAt: Long = 0L, val pinned: Boolean = false, val charOffset: Int = -1)
@@ -221,7 +221,7 @@ base.filter { KoreanChosungMatcher.matches(it.label, q) }
 Column(
 Modifier
 .fillMaxSize()
-.background(Color(0xFA07090E))
+.background(CBG)
 .nestedScroll(downNested)
 .pointerInput(Unit) {
 detectVerticalDragGestures(
@@ -235,7 +235,7 @@ if (pullDown > 75f) { pullDown = 0f; onClose() }
 .padding(horizontal = ui.hPad + 4.dp, vertical = ui.vPad + 4.dp)
 ) {
 Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
-Box(Modifier.width(44.dp).height(4.dp).background(Color(0xFF334155), RoundedCornerShape(50)))
+Box(Modifier.width(44.dp).height(4.dp).background(CBDR, RoundedCornerShape(50)))
 }
 Row(Modifier.fillMaxWidth(), SB, CV) { Text("▼ 앱 서랍 (아래로 내려 닫기)", fontSize = ui.titleSp, fontWeight = FontWeight.Bold, color = CW); TextButton(onClick = onClose) { Text("✕", color = CM) } }
 OutlinedTextField(value = q, onValueChange = { q = it }, placeholder = { Text("초성 검색 (예: ㅋㅋㅇㅌ)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -255,11 +255,11 @@ items(flt, key = { it.packageName }) { a ->
 Row(Modifier.fillMaxWidth().combinedClickable(onClick = { onLaunch(a) }, onLongClick = { onFav(a) }).padding(vertical = 8.dp), SB, CV) {
 val assignedNames = appFolders.filter { a.packageName in it.packages }.joinToString(",") { it.name }
 Column(Modifier.weight(1f)) {
-  Text(a.label + (if (a.isFavorite) " ★" else ""), fontSize = (ui.bodySp.value + 2).sp, color = Color(0xFFE5E7EB))
+  Text(a.label + (if (a.isFavorite) " ★" else ""), fontSize = (ui.bodySp.value + 2).sp, color = CW)
 if (assignedNames.isNotEmpty()) Text("📁 $assignedNames", fontSize = 10.sp, color = CG)
 }
 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
-Text(if (a.isFavorite) "★" else "☆", fontSize = (ui.subSp.value + 2).sp, color = if (a.isFavorite) CA else Color(0xFF64748B), modifier = Modifier.clickable { onFav(a) }.padding(4.dp))
+Text(if (a.isFavorite) "★" else "☆", fontSize = (ui.subSp.value + 2).sp, color = if (a.isFavorite) CA else CD, modifier = Modifier.clickable { onFav(a) }.padding(4.dp))
 Text("📁+", fontSize = ui.subSp, color = CG, modifier = Modifier.clickable {
 if (appFolders.isNotEmpty()) {
 val targetF = appFolders.find { it.id == selFolderId } ?: appFolders.first()
@@ -268,7 +268,7 @@ val nx = appFolders.map { if (it.id == targetF.id) it.copy(packages = nxPkgs.dis
 appFolders = nx; FolderRegistry.saveAppFolders(ctx, nx)
 } else folderMgrOpen = true
 }.padding(4.dp))
-  Text(if (a.isInterruptEnabled) "⏳★" else "⏳", fontSize = (ui.subSp.value + 1).sp, color = if (a.isInterruptEnabled) CA else Color(0xFF4B5563), modifier = Modifier.clickable { onInt(a) }.padding(6.dp))
+  Text(if (a.isInterruptEnabled) "⏳★" else "⏳", fontSize = (ui.subSp.value + 1).sp, color = if (a.isInterruptEnabled) CA else CD, modifier = Modifier.clickable { onInt(a) }.padding(6.dp))
 }
 }
 }
@@ -294,7 +294,7 @@ val ui = rememberUi(aiCfg.uiScale)
 var cats by remember { mutableStateOf(SmartMemoClassifier.loadMemoCats(ctx)) }
 var newCat by remember { mutableStateOf("") }
 var sTab by remember { mutableStateOf(0) }
-Column(Modifier.fillMaxSize().background(Color(0xFA07090E)).padding(horizontal = ui.hPad + 4.dp, vertical = ui.vPad + 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+Column(Modifier.fillMaxSize().background(CBG).padding(horizontal = ui.hPad + 4.dp, vertical = ui.vPad + 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 Row(Modifier.fillMaxWidth(), SB, CV) {
 Column {
 Text("⚙️ 런처 통합 환경설정", fontSize = (ui.titleSp.value + 2).sp, fontWeight = FontWeight.Bold, color = CW)
@@ -310,7 +310,7 @@ AiPromptRagPanel(ctx, aiCfg, ui, onUpdate = { aiCfg = it; saveAiCfg(ctx, it) }, 
 } else if (sTab == 4) {
   UnifiedBackupSettingsPanel(ctx, settingsRepo, ui)
 } else {
-Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, Color(0xFF23324B)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS, shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
 Text("📐 화면 글자·UI 배율", fontWeight = FontWeight.Bold, fontSize = ui.bodySp, color = CG)
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -318,13 +318,24 @@ listOf("AUTO" to "자동(해상도 맞춤)", "COMPACT" to "컴팩트(작게)", "
 ChipBtn(l, aiCfg.uiScale == k, CG) { aiCfg = aiCfg.copy(uiScale = k); saveAiCfg(ctx, aiCfg) }
 }
 }
-Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1C2940)))
+Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
 Text("🎨 배경 컬러 테마 & 정렬", fontWeight = FontWeight.Bold, fontSize = ui.bodySp, color = CA)
-Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("AMOLED" to "🌑 아몰레드 블랙", "SLATE" to "🌌 슬레이트 네이비", "FOREST" to "🌲 포레스트 그린").forEach { (k, l) -> ChipBtn(l, cfg.themeName == k, CA) { onCfg(cfg.copy(themeName = k)) } } }
+Text("☀️ 산뜻한 라이트 테마 (독서대 감성 · LCD 추천)", fontSize = ui.subSp, color = CG, fontWeight = FontWeight.SemiBold)
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+  listOf("SEPIA" to "📜 세피아 (독서대·LCD)", "PAPER" to "📄 종이 화이트 (독서대·LCD)").forEach { (k, l) ->
+    ChipBtn(l, cfg.themeName == k, CG) { onCfg(cfg.copy(themeName = k, readerTheme = k)) }
+  }
+}
+Text("🌙 다크 테마", fontSize = ui.subSp, color = CM, fontWeight = FontWeight.SemiBold)
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+  listOf("AMOLED" to "🌑 아몰레드 블랙", "SLATE" to "🌌 슬레이트 네이비", "FOREST" to "🌲 포레스트 그린").forEach { (k, l) ->
+    ChipBtn(l, cfg.themeName == k, CA) { val nextR = if (cfg.themeName == "SEPIA" || cfg.themeName == "PAPER") "NIGHT" else cfg.readerTheme; onCfg(cfg.copy(themeName = k, readerTheme = nextR)) }
+  }
+}
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("LEFT" to "왼쪽 정렬", "CENTER" to "가운데 정렬", "RIGHT" to "오른쪽 정렬").forEach { (k, l) -> ChipBtn(l, cfg.textAlign == k, CW) { onCfg(cfg.copy(textAlign = k)) } } }
 }
 }
-Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, Color(0xFF23324B)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS, shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
 Text("🏷️ 기본 메모 카테고리 관리", fontWeight = FontWeight.Bold, fontSize = ui.bodySp, color = CW)
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -336,7 +347,7 @@ Button(onClick = { val t = newCat.trim(); if (t.isNotEmpty() && !cats.contains(t
 }
 }
 }
-Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, Color(0xFF23324B)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS, shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Text("🏠 기본 홈 런처 지정", fontWeight = FontWeight.Bold, fontSize = ui.bodySp, color = CG)
 Text("스마트폰 홈 버튼을 눌렀을 때 Pro Launcher AI가 바로 열리도록 설정합니다.", fontSize = ui.subSp, color = CM)
@@ -350,7 +361,7 @@ Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalA
 }
 }
 }
-Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, Color(0xFF23324B)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS, shape = RoundedCornerShape(14.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Text("🤖 자비스 음성 호출·접근성·도움말", fontWeight = FontWeight.Bold, fontSize = ui.bodySp, color = CA)
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
@@ -370,7 +381,7 @@ ChipBtn("❓ 전체 기능 도움말", false, CW) { onClose(); showEmojiHelp = t
 fun InterruptModal(app: AppEntry, sec: Int, onCancel: () -> Unit, onGo: () -> Unit) {
 var left by remember(app, sec) { mutableStateOf(sec) }
 LaunchedEffect(app, sec) { left = sec; while (left > 0) { delay(1000L); left-- } }
-Box(Modifier.fillMaxSize().background(Color(0xF208080A)).padding(32.dp), contentAlignment = Alignment.Center) {
+Box(Modifier.fillMaxSize().background(CBG.copy(alpha = 0.96f)).padding(32.dp), contentAlignment = Alignment.Center) {
 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
 Text("잠시 숨을 고르세요", fontSize = 26.sp, fontWeight = FontWeight.Light, color = CW)
 Text("'${app.label}' 앱을 열기 전 의식적인 멈춤 시간입니다.", fontSize = 14.sp, color = CM, textAlign = TextAlign.Center)

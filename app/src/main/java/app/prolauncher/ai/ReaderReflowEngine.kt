@@ -51,7 +51,7 @@ Slider(value = SupertonicTtsEngine.steps.toFloat(), onValueChange = { Supertonic
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = CV) {
 stepPresets.forEach { (st, lb) -> ChipBtn(lb, SupertonicTtsEngine.steps == st, CA) { SupertonicTtsEngine.setVoiceCfg(ctx, SupertonicTtsEngine.voice, st, SupertonicTtsEngine.speed) } }
 }
-Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1C2940)))
+Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
 Row(Modifier.fillMaxWidth(), SB, CV) {
 Text("⏩ 말하기 속도: ${String.format(java.util.Locale.US, "%.2fx", SupertonicTtsEngine.speed)}", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CA)
 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
@@ -63,7 +63,7 @@ Slider(value = SupertonicTtsEngine.speed, onValueChange = { val r = ((it * 20f).
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = CV) {
 spdPresets.forEach { (sp, lb) -> ChipBtn(lb, kotlin.math.abs(SupertonicTtsEngine.speed - sp) < 0.03f, CW) { SupertonicTtsEngine.setVoiceCfg(ctx, SupertonicTtsEngine.voice, SupertonicTtsEngine.steps, sp) } }
 }
-Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1C2940)))
+Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
 Text("🗣️ 보이스 스타일 & 음향 마스터링 (현재: ${SupertonicTtsEngine.voice})", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CW)
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = CV) {
 listOf("F1" to "F1(차분)", "F2" to "F2(밝음)", "F3" to "F3(아나운서)", "F4" to "F4(또렷)", "F5" to "F5(부드러움)", "M1" to "M1(차분)", "M2" to "M2(중후)", "M3" to "M3(친근)", "M4" to "M4(신뢰)", "M5" to "M5(따뜻)").forEach { (v, lb) ->

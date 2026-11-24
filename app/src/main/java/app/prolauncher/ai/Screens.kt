@@ -205,7 +205,7 @@ Text("⚙️", fontSize = ui.subSp)
 }
 if (cfgOpen && mode != "AI") {
 Spacer(Modifier.height(6.dp))
-Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, CG.copy(alpha = 0.75f)), modifier = FMW.heightIn(max = ui.panelMaxH)) {
+Surface(color = CS, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, CG.copy(alpha = 0.75f)), modifier = FMW.heightIn(max = ui.panelMaxH)) {
 Column(Modifier.verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
 Row(FMW, SB, CV) {
 Text("⚙️ 메모장 환경설정", fontSize = (ui.subSp.value + 1.5f).sp, fontWeight = FontWeight.Bold, color = CW)
@@ -214,12 +214,12 @@ Text("✕ 닫기", fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color 
 SettingsTabBar(listOf("🏷️ 분류 관리", "🛠️ 버튼·알림", "💾 백업·화면"), memoCfgTab) { memoCfgTab = it }
 when (memoCfgTab) {
 0 -> {
-Surface(color = Color(0xFF09101C), shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = FMW) {
+Surface(color = CS2, shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, CBDR), modifier = FMW) {
 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Text("카테고리 이름 변경(탭) 및 삭제(✕)", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG)
 Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6) {
 cats.forEach { c ->
-Surface(color = CS, shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, Color(0xFF233047))) {
+Surface(color = CS, shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, CBDR)) {
 Row(Modifier.padding(horizontal = 9.dp, vertical = 5.dp), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
 Text("✏️ $c", fontSize = ui.subSp, color = CW, modifier = Modifier.clickable { renTarget = c; renVal = c })
 if (cats.size > 1) Text("✕", fontSize = ui.subSp, color = Color(0xFFEF4444), modifier = Modifier.clickable {
@@ -250,7 +250,7 @@ Button(onClick = { val t = newCat.trim(); if (t.isNotEmpty() && !cats.contains(t
 }
 }
 1 -> {
-Surface(color = Color(0xFF09101C), shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = FMW) {
+Surface(color = CS2, shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, CBDR), modifier = FMW) {
 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Text("🛠️ 빠른 작성 도구 버튼 표시", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG)
 Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6) {
@@ -260,13 +260,13 @@ ChipBtn("📅 날짜시간", bCfg.showDate) { bCfg = bCfg.copy(showDate = !bCfg.
 ChipBtn("── 구분선", bCfg.showDivider) { bCfg = bCfg.copy(showDivider = !bCfg.showDivider); SMC.saveBtnCfg(ctx, bCfg) }
 ChipBtn("↵ 줄바꿈", bCfg.showNewline) { bCfg = bCfg.copy(showNewline = !bCfg.showNewline); SMC.saveBtnCfg(ctx, bCfg) }
 }
-Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1C2940)))
+Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
 Text("⏰ 자동 음성 일정 브리핑: 홈 탭 마이크 아래 [🕒 시간 설정]에서 하루 여러 번 원하는 시:분으로 관리할 수 있습니다.", fontSize = ui.subSp, color = CM)
 }
 }
 }
 else -> {
-Surface(color = Color(0xFF09101C), shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = FMW) {
+Surface(color = CS2, shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, CBDR), modifier = FMW) {
 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Text("💾 메모 데이터 백업 및 복원", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG)
 Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6) {
@@ -277,7 +277,7 @@ ChipBtn("♻️ 파일 병합 복원(무충돌)", false, CA) { bkImp.launch(arra
 ChipBtn("⚡ 내부 즉시백업", false, CG) { val j = ctx.getSharedPreferences("pl_ai_v2_prefs", 0).getString("notes_json", "[]") ?: "[]"; ctx.getSharedPreferences("pl_ai_v4_custom", 0).edit().putString("memo_backup_json", j).apply(); aiMsg = "✅ 메모 " + notes.size + "건 즉시 백업 완료!" }
 ChipBtn("♻️ 내부 복원", false, CA) { val j = ctx.getSharedPreferences("pl_ai_v4_custom", 0).getString("memo_backup_json", null); if (!j.isNullOrBlank()) { val old = notes; ctx.getSharedPreferences("pl_ai_v2_prefs", 0).edit().putString("notes_json", j).commit(); val merged = (repo.loadNotes() + old).distinctBy { it.id }; onSaveNotes(merged); aiMsg = "✅ 메모 " + merged.size + "건 복원 완료!" } }
 }
-Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1C2940)))
+Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
 Text("📐 화면 글자·UI 배율", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CW)
 Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6) {
 listOf("AUTO" to "자동(맞춤)", "COMPACT" to "작게", "NORMAL" to "표준", "LARGE" to "크게").forEach { (k, l) -> ChipBtn(l, aiCfg.uiScale == k, CG) { aiCfg = aiCfg.copy(uiScale = k); saveAiCfg(ctx, aiCfg) } }
@@ -341,7 +341,7 @@ ChipBtn("🌙", blkOn, CW) { keepAw(ctx, true); blkOn = true }
 if (aiShelfOpen) {
 Spacer(Modifier.height(4.dp))
 val visSessions = if (aiShelfFilter == "전체") aiSessions else aiSessions.filter { it.folder == aiShelfFilter }
-Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, CA.copy(alpha = 0.7f)), modifier = FMW.heightIn(max = 230.dp)) {
+Surface(color = CS, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, CA.copy(alpha = 0.7f)), modifier = FMW.heightIn(max = 230.dp)) {
 Column(Modifier.padding(10.dp), verticalArrangement = VS6) {
 Row(FMW, SB, CV) {
 Text("📂 AI 대화 폴더 보관함 (${visSessions.size}/${aiSessions.size}건)", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CA)
@@ -363,7 +363,7 @@ Text("이 폴더에 저장된 대화가 없습니다. 상단 [💾대화저장]�
 } else {
 LazyColumn(verticalArrangement = VS6) {
 items(visSessions, key = { it.id }) { s ->
-Surface(color = if (s.id == curAiSessionId) Color(0xFF132924) else CS, shape = RoundedCornerShape(8.dp), modifier = FMW.clickable {
+Surface(color = if (s.id == curAiSessionId) CG.copy(alpha = 0.18f) else CS, shape = RoundedCornerShape(8.dp), modifier = FMW.clickable {
 curAiSessionId = s.id
 curAiFolder = s.folder
 chatMsgs = s.messages
@@ -408,9 +408,9 @@ val uShape = RoundedCornerShape(topStart = 18.dp, topEnd = 4.dp, bottomStart = 1
 val aShape = RoundedCornerShape(topStart = 4.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
 Row(FMW, horizontalArrangement = if (m.isUser) Arrangement.End else Arrangement.Start) {
 Surface(
-color = if (m.isUser) Color(0xFF112A24) else Color(0xFF101624),
+color = if (m.isUser) CG.copy(alpha = 0.16f) else CS,
 shape = if (m.isUser) uShape else aShape,
-border = BorderStroke(0.8.dp, if (m.isUser) CG.copy(alpha = 0.45f) else Color(0xFF222E44)),
+border = BorderStroke(0.8.dp, if (m.isUser) CG.copy(alpha = 0.45f) else CBDR),
 modifier = if (m.isUser) Modifier.widthIn(min = 72.dp, max = 300.dp) else Modifier.fillMaxWidth(0.95f)
 ) {
 Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -429,7 +429,7 @@ aiMsg = "✅ AI 답변을 [$cat] 메모로 저장했습니다."
 }
 }
 }
-Text(m.text, fontSize = ui.bodySp, lineHeight = (ui.bodySp.value + 6).sp, color = if (m.isUser) Color(0xFFECFDF5) else CW)
+Text(m.text, fontSize = ui.bodySp, lineHeight = (ui.bodySp.value + 6).sp, color = if (m.isUser) CW else CW)
 }
 }
 }
@@ -438,7 +438,7 @@ item(key = "btm_anchor") { Spacer(Modifier.height(4.dp)) }
 }
 if (!nearBottom && chatMsgs.size > 2) {
 Surface(
-color = Color(0xEE131C2E), shape = RoundedCornerShape(50),
+color = CS, shape = RoundedCornerShape(50),
 border = BorderStroke(0.9.dp, CG.copy(alpha = 0.65f)),
 modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 8.dp, end = 6.dp).clickable { scope.launch { runCatching { chatListState.animateScrollToItem(chatMsgs.size) } } }
 ) {
@@ -464,7 +464,7 @@ Spacer(Modifier.height(6.dp))
 LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth(), verticalArrangement = VS8) {
 sOut?.let { o ->
 item {
-Surface(color = Color(0xFF14202E), shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, Color(0xFF38BDF8)), modifier = FMW) {
+Surface(color = CS2, shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, Color(0xFF38BDF8)), modifier = FMW) {
 Column(Modifier.padding(ui.cardPad)) {
 Row(FMW, SB, CV) { Text("🔎 검색 결과", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8)); Text("✕", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { sOut = null }) }
 Text(o, fontSize = ui.bodySp, lineHeight = 18.sp, color = CW)
@@ -472,11 +472,11 @@ Text(o, fontSize = ui.bodySp, lineHeight = 18.sp, color = CW)
 }
 }
 }
-items(list, key = { it.id }) { n -> val cat = SMC.categoryOf(n, cats); val imp = SMC.isImportant(n); val ed = editId == n.id; Surface(color = CS, shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, if (ed) CG else if (imp) CA.copy(alpha = 0.65f) else Color(0xFF1E293B)), modifier = FMW) { if (ed) { Column(Modifier.padding(ui.cardPad), verticalArrangement = VS6) { Row(FMW, SB, CV) { Text("✏️ 화면 내 바로 수정", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG); Text(if (editImp) "★" else "☆", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (editImp) CA else CM, modifier = Modifier.clickable { editImp = !editImp }.padding(4.dp)) }; Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) { Text("분류:", fontSize = ui.subSp, color = CM); cats.forEach { c -> ChipBtn(c, editCat == c) { editCat = c } } }; Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) { ChipBtn(if (dictMode == 3) "🔴전사중" else "🎙️음성전사", dictMode == 3, CA) { triggerDictation(3) }; if (bCfg.showCheck) ChipBtn("☑", editTxt.contains("☐") || editTxt.contains("☑"), CG) { val r = applySmartCheck(editTxt); setEditProg(r) }; if (bCfg.showBullet) ChipBtn("•", editTxt.contains("•"), CW) { val r = applySmartBullet(editTxt); setEditProg(r) }; if (bCfg.showDate) ChipBtn("📅") { val sp = if (editTxt.isEmpty() || editTxt.endsWith(" ") || editTxt.endsWith("\n")) "" else " "; val r = editTxt + sp + nowStr() + " "; setEditProg(r) }; if (bCfg.showDivider) ChipBtn("──") { val r = ins(editTxt, "────────────\n"); setEditProg(r) }; if (bCfg.showNewline) ChipBtn("↵") { val r = handleMemoEnterKey(editTxt); setEditProg(r) } }; OutlinedTextField(value = editTfv, onValueChange = { tfv -> val nv = onMemoValueChange(editTfv, tfv); val chg = nv.text != editTfv.text; editTfv = nv; if (chg && dictMode == 3) syncDictationBuffer(ctx, nv.text) }, singleLine = false, minLines = 3, maxLines = 10, modifier = FMW); Row(FMW, SB, CV) { TextButton(onClick = { val tg = makeHashtags(cleanMemoText(editTxt), editCat); onSaveNotes(notes.map { if (it.id == n.id) it.copy(content = tg, summary = "", tags = listOf(editCat, if (editImp) "중요" else "일반")) else it }); editId = null; aiMsg = "🏷️ 해시태그 생성 및 저장 완료!" }) { Text("🏷️", fontSize = ui.subSp, color = CG) }; Row(horizontalArrangement = HS6) { TextButton(onClick = { if (dictMode == 3) { dictMode = 0; stopOneShotDictation() }; editId = null }) { Text("✕", fontSize = (ui.subSp.value + 1).sp, color = CM) }; Button(onClick = { val clE = cleanMemoText(editTxt); if (clE.isNotEmpty()) { val kept = if (clE.lines().size <= 2 && clE.length < 75) "" else n.summary; onSaveNotes(notes.map { if (it.id == n.id) it.copy(content = clE, summary = kept, tags = listOf(editCat, if (editImp) "중요" else "일반")) else it }); if (dictMode == 3) { dictMode = 0; stopOneShotDictation() }; editId = null; aiMsg = "✅ 메모 수정 완료!" } }) { Text("💾", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold) } } } } } else { Column(Modifier.padding(ui.cardPad)) { Row(FMW, SB, CV) { Row(verticalAlignment = CV, horizontalArrangement = HS6) { Surface(color = Color(0xFF1E2433), shape = RoundedCornerShape(6.dp)) { Text(cat, fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = CG, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)) }; Text(n.createdAt, fontSize = ui.subSp, color = CD); val chkTot = n.content.lines().count { val t = it.trimStart(); t.startsWith("☐") || t.startsWith("☑") }; if (chkTot > 0) { val chkDone = n.content.lines().count { it.trimStart().startsWith("☑") }; Text("☑ $chkDone/$chkTot", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (chkDone == chkTot) CG else CA) }; ScheduleBriefingManager.detectNoteScheduleLabel(n)?.let { slb -> Text("⏰ " + slb, fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = CA) } }; Text(if (imp) "★" else "☆", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (imp) CA else CD, modifier = Modifier.clickable { onSaveNotes(notes.map { if (it.id == n.id) SMC.toggleImportant(it) else it }) }.padding(4.dp)) }; Spacer(Modifier.height(4.dp)); n.content.lines().forEachIndexed { idx, ln -> val tr = ln.trimStart(); if (tr.startsWith("☐") || tr.startsWith("☑")) { val chk = tr.startsWith("☑"); Surface(color = if (chk) Color(0xFF0B111E) else Color(0xFF152033), shape = RoundedCornerShape(8.dp), border = BorderStroke(0.7.dp, if (chk) Color(0xFF1E293B) else CG.copy(alpha = 0.45f)), modifier = FMW.padding(vertical = 2.dp).clickable { val nx = notes.map { if (it.id == n.id) SMC.toggleCheckLine(it, idx) else it }; onSaveNotes(nx); aiMsg = if (!chk) "✅ 체크 완료!" else "☐ 체크 해제됨" }) { Text(ln, fontSize = ui.bodySp, lineHeight = (ui.bodySp.value + 5).sp, color = if (chk) CD else CW, textDecoration = if (chk) TextDecoration.LineThrough else null, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) } } else Text(ln, fontSize = ui.bodySp, lineHeight = (ui.bodySp.value + 5).sp, color = CW) }; Row(FMW.padding(top = 4.dp), SB, CV) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) { Text("☑", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA, modifier = Modifier.clickable { val nx = notes.map { if (it.id == n.id) convertOrToggleNoteChecks(it) else it }; onSaveNotes(nx); aiMsg = "☑ 체크리스트 변환/전체체크 적용됨!" }.padding(4.dp)); Text("🏷️", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG, modifier = Modifier.clickable { onSaveNotes(notes.map { if (it.id == n.id) it.copy(content = makeHashtags(cleanMemoText(n.content), cat), summary = "") else it }); aiMsg = "🏷️ 메모 하단에 해시태그가 생성되었습니다!" }.padding(4.dp)) }; Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) { Text("🤖", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA, modifier = Modifier.clickable { copyMemoToAi(n.content); aiMsg = "🤖 AI 대화창에 메모+구분선 복사됨!" }.padding(horizontal = 5.dp, vertical = 6.dp)); Text("📋", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CW, modifier = Modifier.clickable { copyToClip(ctx, n.content); aiMsg = "📋 클립보드에 복사되었습니다." }.padding(horizontal = 5.dp, vertical = 6.dp)); Text("✏️", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG, modifier = Modifier.clickable { editId = n.id; setEditProg(n.content); editCat = cat; editImp = imp }.padding(horizontal = 5.dp, vertical = 6.dp)); Text("🗑️", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444), modifier = Modifier.clickable { onSaveNotes(notes.filterNot { it.id == n.id }) }.padding(horizontal = 5.dp, vertical = 6.dp)) } } } } } } } }
+items(list, key = { it.id }) { n -> val cat = SMC.categoryOf(n, cats); val imp = SMC.isImportant(n); val ed = editId == n.id; Surface(color = CS, shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, if (ed) CG else if (imp) CA.copy(alpha = 0.65f) else CBDR), modifier = FMW) { if (ed) { Column(Modifier.padding(ui.cardPad), verticalArrangement = VS6) { Row(FMW, SB, CV) { Text("✏️ 화면 내 바로 수정", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG); Text(if (editImp) "★" else "☆", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (editImp) CA else CM, modifier = Modifier.clickable { editImp = !editImp }.padding(4.dp)) }; Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) { Text("분류:", fontSize = ui.subSp, color = CM); cats.forEach { c -> ChipBtn(c, editCat == c) { editCat = c } } }; Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) { ChipBtn(if (dictMode == 3) "🔴전사중" else "🎙️음성전사", dictMode == 3, CA) { triggerDictation(3) }; if (bCfg.showCheck) ChipBtn("☑", editTxt.contains("☐") || editTxt.contains("☑"), CG) { val r = applySmartCheck(editTxt); setEditProg(r) }; if (bCfg.showBullet) ChipBtn("•", editTxt.contains("•"), CW) { val r = applySmartBullet(editTxt); setEditProg(r) }; if (bCfg.showDate) ChipBtn("📅") { val sp = if (editTxt.isEmpty() || editTxt.endsWith(" ") || editTxt.endsWith("\n")) "" else " "; val r = editTxt + sp + nowStr() + " "; setEditProg(r) }; if (bCfg.showDivider) ChipBtn("──") { val r = ins(editTxt, "────────────\n"); setEditProg(r) }; if (bCfg.showNewline) ChipBtn("↵") { val r = handleMemoEnterKey(editTxt); setEditProg(r) } }; OutlinedTextField(value = editTfv, onValueChange = { tfv -> val nv = onMemoValueChange(editTfv, tfv); val chg = nv.text != editTfv.text; editTfv = nv; if (chg && dictMode == 3) syncDictationBuffer(ctx, nv.text) }, singleLine = false, minLines = 3, maxLines = 10, modifier = FMW); Row(FMW, SB, CV) { TextButton(onClick = { val tg = makeHashtags(cleanMemoText(editTxt), editCat); onSaveNotes(notes.map { if (it.id == n.id) it.copy(content = tg, summary = "", tags = listOf(editCat, if (editImp) "중요" else "일반")) else it }); editId = null; aiMsg = "🏷️ 해시태그 생성 및 저장 완료!" }) { Text("🏷️", fontSize = ui.subSp, color = CG) }; Row(horizontalArrangement = HS6) { TextButton(onClick = { if (dictMode == 3) { dictMode = 0; stopOneShotDictation() }; editId = null }) { Text("✕", fontSize = (ui.subSp.value + 1).sp, color = CM) }; Button(onClick = { val clE = cleanMemoText(editTxt); if (clE.isNotEmpty()) { val kept = if (clE.lines().size <= 2 && clE.length < 75) "" else n.summary; onSaveNotes(notes.map { if (it.id == n.id) it.copy(content = clE, summary = kept, tags = listOf(editCat, if (editImp) "중요" else "일반")) else it }); if (dictMode == 3) { dictMode = 0; stopOneShotDictation() }; editId = null; aiMsg = "✅ 메모 수정 완료!" } }) { Text("💾", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold) } } } } } else { Column(Modifier.padding(ui.cardPad)) { Row(FMW, SB, CV) { Row(verticalAlignment = CV, horizontalArrangement = HS6) { Surface(color = CS2, shape = RoundedCornerShape(6.dp)) { Text(cat, fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = CG, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)) }; Text(n.createdAt, fontSize = ui.subSp, color = CD); val chkTot = n.content.lines().count { val t = it.trimStart(); t.startsWith("☐") || t.startsWith("☑") }; if (chkTot > 0) { val chkDone = n.content.lines().count { it.trimStart().startsWith("☑") }; Text("☑ $chkDone/$chkTot", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (chkDone == chkTot) CG else CA) }; ScheduleBriefingManager.detectNoteScheduleLabel(n)?.let { slb -> Text("⏰ " + slb, fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = CA) } }; Text(if (imp) "★" else "☆", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (imp) CA else CD, modifier = Modifier.clickable { onSaveNotes(notes.map { if (it.id == n.id) SMC.toggleImportant(it) else it }) }.padding(4.dp)) }; Spacer(Modifier.height(4.dp)); n.content.lines().forEachIndexed { idx, ln -> val tr = ln.trimStart(); if (tr.startsWith("☐") || tr.startsWith("☑")) { val chk = tr.startsWith("☑"); Surface(color = if (chk) CS2.copy(alpha = 0.55f) else CS2, shape = RoundedCornerShape(8.dp), border = BorderStroke(0.7.dp, if (chk) CBDR else CG.copy(alpha = 0.45f)), modifier = FMW.padding(vertical = 2.dp).clickable { val nx = notes.map { if (it.id == n.id) SMC.toggleCheckLine(it, idx) else it }; onSaveNotes(nx); aiMsg = if (!chk) "✅ 체크 완료!" else "☐ 체크 해제됨" }) { Text(ln, fontSize = ui.bodySp, lineHeight = (ui.bodySp.value + 5).sp, color = if (chk) CD else CW, textDecoration = if (chk) TextDecoration.LineThrough else null, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) } } else Text(ln, fontSize = ui.bodySp, lineHeight = (ui.bodySp.value + 5).sp, color = CW) }; Row(FMW.padding(top = 4.dp), SB, CV) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) { Text("☑", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA, modifier = Modifier.clickable { val nx = notes.map { if (it.id == n.id) convertOrToggleNoteChecks(it) else it }; onSaveNotes(nx); aiMsg = "☑ 체크리스트 변환/전체체크 적용됨!" }.padding(4.dp)); Text("🏷️", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG, modifier = Modifier.clickable { onSaveNotes(notes.map { if (it.id == n.id) it.copy(content = makeHashtags(cleanMemoText(n.content), cat), summary = "") else it }); aiMsg = "🏷️ 메모 하단에 해시태그가 생성되었습니다!" }.padding(4.dp)) }; Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) { Text("🤖", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA, modifier = Modifier.clickable { copyMemoToAi(n.content); aiMsg = "🤖 AI 대화창에 메모+구분선 복사됨!" }.padding(horizontal = 5.dp, vertical = 6.dp)); Text("📋", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CW, modifier = Modifier.clickable { copyToClip(ctx, n.content); aiMsg = "📋 클립보드에 복사되었습니다." }.padding(horizontal = 5.dp, vertical = 6.dp)); Text("✏️", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG, modifier = Modifier.clickable { editId = n.id; setEditProg(n.content); editCat = cat; editImp = imp }.padding(horizontal = 5.dp, vertical = 6.dp)); Text("🗑️", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444), modifier = Modifier.clickable { onSaveNotes(notes.filterNot { it.id == n.id }) }.padding(horizontal = 5.dp, vertical = 6.dp)) } } } } } } } }
 Spacer(Modifier.height(6.dp))
-if (editId == null || isAiPage) Surface(color = Color(0xFF0F1624), shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Color(0xFF233047)), modifier = FMW) {
+if (editId == null || isAiPage) Surface(color = CS, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, CBDR), modifier = FMW) {
 Column(Modifier.padding(ui.cardPad), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-if (!isAiPage) Row(FMW.background(Color(0xFF0B0C10), RoundedCornerShape(10.dp)).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+if (!isAiPage) Row(FMW.background(CS2, RoundedCornerShape(10.dp)).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
 listOf("MEMO" to "📝", "SEARCH" to "🔎").forEach { (mk, lb) ->
 val act = mode == mk
 Surface(color = if (act) CG else Color.Transparent, shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f).clickable { mode = mk }) {
@@ -524,7 +524,7 @@ OutlinedTextField(value = sharedAiChatIn, onValueChange = { sharedAiChatIn = it 
 if (isThinking) {
 Button(onClick = { stopChat() }, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444), contentColor = Color.White)) { Text("⏹️", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false) }
 } else {
-Button(onClick = { sendChat(sharedAiChatIn) }, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = Color(0xFF062019))) { Text("↑", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false) }
+Button(onClick = { sendChat(sharedAiChatIn) }, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = CON_ACCENT)) { Text("↑", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false) }
 }
 }
 }

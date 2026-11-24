@@ -166,34 +166,18 @@ if (target == 1) cut else "• $cut"
 }
 }
 object ReaderVolumeKeyBridge {
-  var isReaderTabCurrent: Boolean = false
-var readerBookActive: Boolean = false
-  var volumeTurnEnabled: Boolean = true
-var onTurnPage: ((Int) -> Unit)? = null
-private var lastTurnMs: Long = 0L
-fun handleKeyEvent(event: android.view.KeyEvent): Boolean {
-val code = event.keyCode
-if (code != android.view.KeyEvent.KEYCODE_VOLUME_UP && code != android.view.KeyEvent.KEYCODE_VOLUME_DOWN) return false
-if (!isReaderTabCurrent || !readerBookActive || !volumeTurnEnabled) return false
-if (ReaderTtsRuntime.on || SupertonicTtsEngine.playing || isTtsBusyNow() || briefingSpeakingNow) return false
-val cb = onTurnPage ?: return false
-if (event.action == android.view.KeyEvent.ACTION_DOWN) {
-val now = android.os.SystemClock.uptimeMillis()
-if (event.repeatCount == 0 || now - lastTurnMs >= 260L) {
-lastTurnMs = now
-cb(if (code == android.view.KeyEvent.KEYCODE_VOLUME_UP) -1 else 1)
-}
-}
-return true
-}
+var isReaderTabCurrent: Boolean = false; var readerBookActive: Boolean = false; var volumeTurnEnabled: Boolean = true
+var isTabActiveCheck: (() -> Boolean)? = null; var isBookReadyCheck: (() -> Boolean)? = null; var onTurnPage: ((Int) -> Unit)? = null
+private var lastTurnMs: Long = 0L; private var consumedDownCode: Int = 0
+private fun shouldInterceptNow(): Boolean { val tabOk = isTabActiveCheck?.invoke() ?: isReaderTabCurrent; val bookOk = isBookReadyCheck?.invoke() ?: (readerBookActive && volumeTurnEnabled); val spk = ReaderTtsRuntime.on || SupertonicTtsEngine.playing || briefingSpeakingNow || runCatching { ttsEngine?.isSpeaking == true }.getOrDefault(false); return tabOk && bookOk && volumeTurnEnabled && !spk && onTurnPage != null }
+fun handleKeyEvent(event: android.view.KeyEvent): Boolean { val code = event.keyCode; if (code != android.view.KeyEvent.KEYCODE_VOLUME_UP && code != android.view.KeyEvent.KEYCODE_VOLUME_DOWN) return false; if (event.action == android.view.KeyEvent.ACTION_UP) { if (consumedDownCode == code) { consumedDownCode = 0; return true }; return shouldInterceptNow() }; if (!shouldInterceptNow()) { consumedDownCode = 0; return false }; if (event.action == android.view.KeyEvent.ACTION_DOWN) { consumedDownCode = code; val now = android.os.SystemClock.uptimeMillis(); if (now - lastTurnMs >= (if (event.repeatCount == 0) 35L else 220L)) { lastTurnMs = now; onTurnPage?.invoke(if (code == android.view.KeyEvent.KEYCODE_VOLUME_UP) -1 else 1) } }; return true }
 }
 var homeResumeTick by mutableStateOf(0)
 var homeNewIntentTick by mutableStateOf(0)
 class MainActivity : ComponentActivity() {
-override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
-if (ReaderVolumeKeyBridge.handleKeyEvent(event)) return true
-return super.dispatchKeyEvent(event)
-}
+override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean = if (ReaderVolumeKeyBridge.handleKeyEvent(event)) true else super.dispatchKeyEvent(event)
+override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean = if (event != null && ReaderVolumeKeyBridge.handleKeyEvent(event)) true else super.onKeyDown(keyCode, event)
+override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent?): Boolean = if (event != null && ReaderVolumeKeyBridge.handleKeyEvent(event)) true else super.onKeyUp(keyCode, event)
     override fun onResume() { super.onResume(); mainActRef = this; appInFg = true; homeResumeTick++; JarvisRuntime.onActivityResume() }
 override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if (intent.hasCategory(Intent.CATEGORY_HOME)) homeNewIntentTick++ }
 override fun onPause() { appInFg = false; super.onPause() }
@@ -266,9 +250,8 @@ books = SmartMemoClassifier.sanitizeBooks(repo.loadBooks(), repo)
 }
 }
 fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
-SideEffect {
-ReaderVolumeKeyBridge.isReaderTabCurrent = (pager.currentPage == 1 && !drawerOpen && !settingsOpen && interruptApp == null)
-}
+val isReaderTabNow = (pager.currentPage == 1 && !drawerOpen && !settingsOpen && interruptApp == null)
+ReaderVolumeKeyBridge.isReaderTabCurrent = isReaderTabNow; ReaderVolumeKeyBridge.isTabActiveCheck = { pager.currentPage == 1 && !drawerOpen && !settingsOpen && interruptApp == null }
     BackHandler(enabled = true) {
 when {
 interruptApp != null -> interruptApp = null

@@ -124,7 +124,7 @@ ai.askRag(q, notes, books, aiCfg.ragBooks)
 }
 @Composable
 fun SettingsTabBar(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit) {
-Surface(color = Color(0xFF090E18), shape = RoundedCornerShape(12.dp), border = BorderStroke(0.8.dp, Color(0xFF1F2C42)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS2, shape = RoundedCornerShape(12.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
 tabs.forEachIndexed { idx, label ->
 val sel = selected == idx
@@ -161,19 +161,19 @@ val chatExpPick = androidx.activity.compose.rememberLauncherForActivityResult(an
 val embExpPick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")) { u -> if (u != null) { testReport = "⏳ 임베딩젬마2 GGUF 백업 내보내는 중..."; pScope.launch { testReport = SupertonicTtsEngine.exportGgufToUri(ctx, u, true) } } }
 SideEffect { SupertonicTtsEngine.init(ctx) }
 val wrapMod = if (fixedTab >= 0) Modifier.fillMaxWidth() else Modifier.fillMaxWidth().heightIn(max = ui.panelMaxH)
-Surface(color = Color(0xFF0E1524), shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Color(0xFF25344E)), modifier = wrapMod) {
+Surface(color = CS, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, CBDR), modifier = wrapMod) {
 Column(Modifier.then(if (fixedTab >= 0) Modifier else Modifier.verticalScroll(rememberScrollState())).padding(ui.cardPad + 2.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
 if (fixedTab < 0) {
 SettingsTabBar(listOf("🔊 음성·TTS", "🦙 AI 모델", "🗂️ 프롬프트·RAG"), curTab) { subTab = it }
 }
 testReport?.let { rep ->
-Surface(color = Color(0xFF102220), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.6f)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CG.copy(alpha = 0.14f), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.6f)), modifier = Modifier.fillMaxWidth()) {
 Text(rep, fontSize = ui.subSp, color = CG, modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp))
 }
 }
 when (curTab) {
 0 -> {
-Surface(color = Color(0xFF0A101D), shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS2, shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Text("📦 Supertonic 3 모델 용량별 선택 & 자동 다운로드", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA)
 Text(SupertonicTtsEngine.statusText, fontSize = ui.subSp, color = CM)
@@ -196,10 +196,10 @@ ChipBtn("🗑️ 비우기", false, Color(0xFFF87171)) { testReport = Supertonic
 }
 }
 }
-Surface(color = Color(0xFF0A101D), shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS2, shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Box(Modifier.padding(12.dp)) { SupertonicControlSection(ctx, ui, compact = false) }
 }
-Surface(color = Color(0xFF0A101D), shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS2, shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
   var wakeDraft by remember(wakeWord) { mutableStateOf(wakeWord) }
 var sleepDraft by remember(sleepWord) { mutableStateOf(sleepWord) }
 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -227,7 +227,7 @@ testReport = "🔄 기본 명령어(깨우기: 자비스 · 쉬기: 쉬어)로 �
 }
 }
 1 -> {
-Surface(color = Color(0xFF0A101D), shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS2, shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Text("🦙 온디바이스 GGUF 채팅 & 임베딩젬마2 관리", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG)
 Text("• 채팅 LLM: " + AiResidentManager.gemmaName.take(24) + (if (AiResidentManager.gemmaMb > 0L) " (${AiResidentManager.gemmaMb}MB)" else ""), fontSize = ui.subSp, color = CW)
@@ -236,7 +236,7 @@ ChipBtn("⬇️ 채팅LLM 자동받기", AiResidentManager.gemmaMb > 0L, CG) { S
 ChipBtn("📂 GGUF 파일넣기", false, CG) { chatGPick.launch(arrayOf("*/*")) }
 ChipBtn("📤 GGUF 백업", false, CW) { chatExpPick.launch(findLocalGguf()?.name ?: "local_chat_llm_backup.gguf") }
 }
-Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1C2940)))
+Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
 Text("• 시맨틱 검색 임베딩: " + AiResidentManager.embedName.take(22) + (if (AiResidentManager.embedMb > 0L) " (${AiResidentManager.embedMb}MB)" else ""), fontSize = ui.subSp, color = CW)
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
 ChipBtn("⬇️ 임베딩젬마2 자동받기", AiResidentManager.embedMb > 0L, CA) { SupertonicTtsEngine.downloadGgufAuto(ctx, true) { testReport = it } }
@@ -246,7 +246,7 @@ ChipBtn("🗑️ 전체비우기", false, Color(0xFFF87171)) { testReport = AiRe
 }
 }
 }
-Surface(color = Color(0xFF0A101D), shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS2, shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Text("⚡ AI 연결 방식 및 호출 이름", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA)
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -264,7 +264,7 @@ OutlinedTextField(value = aiCfg.apiKey, onValueChange = { val u = aiCfg.copy(api
 }
 }
 else -> {
-Surface(color = Color(0xFF0A101D), shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS2, shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Row(Modifier.fillMaxWidth(), SB, CV) {
 Text("✍️ AI 역할 시스템 프롬프트", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA)
@@ -278,7 +278,7 @@ ChipBtn(label, aiCfg.sysPrompt == promptTxt, CA) { val u = aiCfg.copy(sysPrompt 
 OutlinedTextField(value = aiCfg.sysPrompt, onValueChange = { val u = aiCfg.copy(sysPrompt = it); onUpdate(u); saveAiCfg(ctx, u) }, label = { Text("시스템 프롬프트 직접 편집") }, singleLine = false, minLines = 2, maxLines = 4, modifier = Modifier.fillMaxWidth())
 }
 }
-Surface(color = Color(0xFF0A101D), shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
+Surface(color = CS2, shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 Row(Modifier.fillMaxWidth(), SB, CV) {
 Column(Modifier.weight(1f)) {

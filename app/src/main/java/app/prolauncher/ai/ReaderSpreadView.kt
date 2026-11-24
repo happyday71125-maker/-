@@ -210,9 +210,9 @@ fun buildWrappedHighlightedBookPage(
 @Composable
 fun ReaderPointBtn(label: String, active: Boolean, accent: Color = CG, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        color = if (active) accent.copy(alpha = 0.22f) else Color(0xFF141D2E),
+        color = if (active) accent.copy(alpha = 0.22f) else CS2,
         shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(if (active) 1.2.dp else 0.8.dp, if (active) accent else Color(0xFF283753)),
+        border = BorderStroke(if (active) 1.2.dp else 0.8.dp, if (active) accent else CBDR),
         modifier = modifier.clickable { onClick() }
     ) {
         Box(Modifier.padding(vertical = 7.dp, horizontal = 4.dp), contentAlignment = Alignment.Center) {
@@ -502,7 +502,7 @@ onClose = { searchOpen = false }
         if (topTtsVisible) {
             SideEffect { SupertonicTtsEngine.init(ctx) }
             val bNow = books.find { it.id == ReaderTtsRuntime.bookId }
-            Surface(color = Color(0xE60D1626), shape = RoundedCornerShape(50), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.7f)), modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+            Surface(color = CS, shape = RoundedCornerShape(50), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.7f)), modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                 Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), SB, CV) {
                     Text("🔊 ${bNow?.title?.take(10) ?: "도서"} ${ReaderTtsRuntime.pageIdx + 1}/${bNow?.pages?.size ?: 1} · ${String.format(java.util.Locale.US, "%.2fx", SupertonicTtsEngine.speed)} · 💎${SupertonicTtsEngine.steps}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CG, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
@@ -515,7 +515,7 @@ onClose = { searchOpen = false }
                 }
             }
         } else if (topStatusVisible) {
-            Surface(color = Color(0xFF0F1A2C), shape = RoundedCornerShape(8.dp), border = BorderStroke(0.8.dp, CA), modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+            Surface(color = CS, shape = RoundedCornerShape(8.dp), border = BorderStroke(0.8.dp, CA), modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                 Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), SB, CV) {
                     Text(ReaderTtsRuntime.status ?: "", fontSize = ui.subSp, color = CA, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Text("✕", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { ReaderTtsRuntime.status = null }.padding(start = 8.dp))
@@ -523,7 +523,7 @@ onClose = { searchOpen = false }
             }
         }
         if (bmOpen) {
-            Surface(color = Color(0xFF0F1624), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, CA), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).heightIn(max = ui.panelMaxH)) {
+            Surface(color = CS, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, CA), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).heightIn(max = ui.panelMaxH)) {
                 Column(Modifier.padding(ui.cardPad), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(Modifier.fillMaxWidth(), SB, CV) { Text("🔖 북마크 목록", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CA); Text("✕", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { bmOpen = false }) }
                     if (bms.isEmpty()) Text("저장된 북마크가 없습니다.", fontSize = ui.subSp, color = CM)
@@ -558,7 +558,7 @@ onClose = { searchOpen = false }
         if (cfgOpen) {
             SideEffect { SupertonicTtsEngine.init(ctx) }
             Surface(
-                color = Color(0xFF0E1524),
+                color = CS,
                 shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, CG.copy(alpha = 0.75f)),
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).heightIn(max = ui.panelMaxH + 110.dp)
@@ -571,7 +571,7 @@ onClose = { searchOpen = false }
                     SettingsTabBar(listOf("📖 화면·글꼴", "🔊 TTS 낭독", "📁 폴더·백업"), rCfgTab) { rCfgTab = it }
                     when (rCfgTab) {
                         0 -> {
-                            Surface(color = Color(0xFF09101C), shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
+                            Surface(color = CS2, shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("구글북 스타일 연속 페이지 조판 & 테마", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CA)
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
@@ -589,7 +589,7 @@ onClose = { searchOpen = false }
                                             ReaderPointBtn(l, cfg.readerTheme == k, CA, Modifier.weight(1f)) { onCfg(cfg.copy(readerTheme = k)) }
                                         }
                                     }
-                                    Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1C2940)))
+                                    Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
                                     Row(Modifier.fillMaxWidth(), SB, CV) {
                                         Text("🔤 글자 포인트: ${curPt}pt", fontSize = (ui.subSp.value + 1f).sp, fontWeight = FontWeight.Bold, color = CW, modifier = Modifier.weight(1f))
                                         Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = CV) { ChipBtn(if (smartReflowOn) "✨줄바꿈보정" else "📄원문줄바꿈", smartReflowOn, CA) { smartReflowOn = !smartReflowOn; readerPrefs.edit().putBoolean("reader_smart_reflow", smartReflowOn).apply() }; ChipBtn(if (cfg.readerUseSerif) "✒️ 명조체" else "🔤 고딕체", true, CG) { onCfg(cfg.copy(readerUseSerif = !cfg.readerUseSerif)) } }
@@ -652,7 +652,7 @@ onClose = { searchOpen = false }
                             }
                         }
                         1 -> {
-                            Surface(color = Color(0xFF09101C), shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
+                            Surface(color = CS2, shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("음성 엔진 & 초경량 모델 받기 (화면 꺼져도 연속 낭독 유지)", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CG)
                                     Text(SupertonicTtsEngine.statusText, fontSize = ui.subSp, color = CM)
@@ -663,13 +663,13 @@ onClose = { searchOpen = false }
                                         ChipBtn("⬇️⚡ FP16(195MB)", SupertonicTtsEngine.modelTier == "FP16", CA) { SupertonicTtsEngine.downloadSupertonicTier(ctx, "FP16") }
                                         ChipBtn("⬇️👑 FP32(398MB)", SupertonicTtsEngine.modelTier == "FP32", CW) { SupertonicTtsEngine.downloadSupertonicTier(ctx, "FP32") }
                                     }
-                                    Box(Modifier.fillMaxWidth().height(0.8.dp).background(Color(0xFF1C2940)))
+                                    Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
                                     SupertonicControlSection(ctx, ui, compact = false)
                                 }
                             }
                         }
                         else -> {
-                            Surface(color = Color(0xFF09101C), shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, Color(0xFF22314A)), modifier = Modifier.fillMaxWidth()) {
+                            Surface(color = CS2, shape = RoundedCornerShape(11.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Row(Modifier.fillMaxWidth(), SB, CV) {
                                         Text("📁 독서대 폴더 편집 및 도서 백업/복원", fontSize = ui.subSp, color = CA, fontWeight = FontWeight.Bold)
@@ -958,6 +958,10 @@ commitExcerptHook = ::commitDraftIfEditing
                     ReaderVolumeKeyBridge.isBookReadyCheck = { latestVolReady && latestVolTurnOn }
                     ReaderVolumeKeyBridge.onTurnPage = { dir -> latestVolTurnAction(dir) }
                 } 
+            LaunchedEffect(volumeKeyReady, readerVolumeTurnOn) {
+                ReaderVolumeKeyBridge.syncBaselineVolumes(ctx, prepareHeadroom = volumeKeyReady && readerVolumeTurnOn)
+                }
+
             fun handleReaderBodyTap(pageRender: RenderedBookPage, pageText: String, pageStartOff: Int, dispOff: Int) {
                 val rawOff = pageRender.rawOffsetOf(dispOff)
                 val tappedFn = pageRender.footnotes
@@ -1033,7 +1037,7 @@ commitExcerptHook = ::commitDraftIfEditing
              )
             }
             if (highlightMode) {
-             Surface(color = Color(0xFF101929), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.9.dp, CA.copy(alpha = 0.75f)), modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp)) {
+             Surface(color = CS2, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.9.dp, CA.copy(alpha = 0.75f)), modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp)) {
               Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                Text("🖍️ 문장 탭=밑줄/해제", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CA)
                ChipBtn("🟡노랑", hlColorIdx == 0, CA) { hlColorIdx = 0 }
@@ -1049,7 +1053,7 @@ commitExcerptHook = ::commitDraftIfEditing
              }
             }
 if (readerAiOpen && readerAiMode == 1) {
-Surface(color = Color(0xF50E1525), shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, if (hasSel) CA.copy(alpha = 0.75f) else CG.copy(alpha = 0.6f)), modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp).height(212.dp)) {
+Surface(color = CS, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, if (hasSel) CA.copy(alpha = 0.75f) else CG.copy(alpha = 0.6f)), modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp).height(212.dp)) {
 Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
 Text(if (hasSel) "🎯${activeExcerpt.length}자" else "📖$pgLabel", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = if (hasSel) CA else CG)
@@ -1076,7 +1080,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
 }
 }
             if (catBarOpen) {
-                Surface(color = Color(0xFF111927), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.5f)), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Surface(color = CS2, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.5f)), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                     Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = CV) {
                             (bCats + listOf("인문·철학", "소설", "에세이", "자기계발", "경제·경영", "기타")).distinct().forEach { c ->
@@ -1091,7 +1095,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                 }
             }
             if (selBannerVisible) {
-                Surface(color = Color(0xFF101929), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CA.copy(alpha = 0.65f)), modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                Surface(color = CS2, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CA.copy(alpha = 0.65f)), modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
                     Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), SB, CV) {
                         Text("✂️ 선택·편집 구절 대기 중 (${activeExcerpt.length}자) · 아래 버튼을 눌러 실행", fontSize = ui.subSp, color = CA, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
@@ -1134,7 +1138,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
 
                 if (selectMode) {
                     Surface(
-                        color = Color(0xFF0D1422),
+                        color = CS,
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, CA.copy(alpha = 0.7f)),
                         modifier = Modifier.fillMaxSize()
@@ -1177,7 +1181,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                 Text(sm, fontSize = ui.subSp, color = CG)
                             }
                             if (editExcerptOpen) {
-                                Surface(color = Color(0xFF090F1A), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.9.dp, CG.copy(alpha = 0.6f)), modifier = Modifier.fillMaxWidth()) {
+                                Surface(color = CS2, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.9.dp, CG.copy(alpha = 0.6f)), modifier = Modifier.fillMaxWidth()) {
                                     Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                         Text("✏️ 아래 내용을 자유롭게 다듬은 뒤 [✅ 수정 반영] 또는 실행 버튼을 눌러야 작동합니다.", fontSize = ui.subSp, color = CM)
                                         OutlinedTextField(
@@ -1197,7 +1201,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                                     scissorMsg = if (d.isNotEmpty()) "✅ 수정된 구절(${d.length}자)이 반영되었습니다. 아래 버튼을 눌러 실행하세요." else "⚠️ 입력된 구절이 없습니다."
                                                 },
                                                 modifier = Modifier.weight(1f),
-                                                colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = Color(0xFF062019))
+                                                colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = CON_ACCENT)
                                             ) {
                                                 Text("✅ 수정 반영", fontSize = ui.subSp, fontWeight = FontWeight.Bold)
                                             }
@@ -1233,9 +1237,9 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                 segments.forEachIndexed { sIdx, seg ->
                                     val isSel = sIdx in selSet
                                     Surface(
-                                        color = if (isSel) CG.copy(alpha = 0.16f) else Color(0xFF131C2E),
+                                        color = if (isSel) CG.copy(alpha = 0.16f) else CS2,
                                         shape = RoundedCornerShape(10.dp),
-                                        border = BorderStroke(if (isSel) 1.2.dp else 0.7.dp, if (isSel) CG else Color(0xFF25344E)),
+                                        border = BorderStroke(if (isSel) 1.2.dp else 0.7.dp, if (isSel) CG else CBDR),
                                         modifier = Modifier.fillMaxWidth().clickable {
                                             val nx = if (isSel) selSet - sIdx else selSet + sIdx
                                             selSet = nx
@@ -1455,7 +1459,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                 if (retOff != null && activeFootnotePopup == null && kotlin.math.abs(retOff - leftSlice.s) > 20) {
                     val retPg = vPages.indexOfLast { it.s <= retOff }.coerceAtLeast(0) + 1
                     Surface(
-                        color = Color(0xF0101A2D),
+                        color = CS,
                         shape = RoundedCornerShape(50),
                         border = BorderStroke(1.dp, CG),
                         shadowElevation = 6.dp,
@@ -1479,7 +1483,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                 activeFootnotePopup?.let { fnPop ->
                     val defPg = if (fnPop.defCharOffset >= 0) (vPages.indexOfLast { it.s <= fnPop.defCharOffset }.coerceAtLeast(0) + 1) else -1
                     Surface(
-                        color = Color(0xF70D1526),
+                        color = CS,
                         shape = RoundedCornerShape(14.dp),
                         border = BorderStroke(1.1.dp, Color(0xFF38BDF8)),
                         shadowElevation = 10.dp,
@@ -1552,7 +1556,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                 val tocListState = rememberLazyListState(initialFirstVisibleItemIndex = initScrollIdx)
                 AlertDialog(
                     onDismissRequest = { tocOpen = false },
-                    containerColor = Color(0xFF0C1322),
+                    containerColor = CS,
                     title = {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(Modifier.fillMaxWidth(), SB, CV) {
@@ -1575,7 +1579,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                     val nextOff = tocEntries.getOrNull(origIdx + 1)?.charOffset ?: reflowSrc.fullText.length
                                     val pgSpanCnt = ((vPages.indexOfLast { it.s < nextOff }.coerceAtLeast(entryPg - 1) + 1) - entryPg + 1).coerceAtLeast(1)
                                     val entryBookPct = (((entry.charOffset.coerceAtLeast(0).toLong() * 100L) / reflowSrc.fullText.length.coerceAtLeast(1).toLong()).toInt()).coerceIn(0, 100)
-                                    Surface(color = if (isCurChap) CG.copy(alpha = 0.17f) else Color(0xFF131C2E), shape = RoundedCornerShape(10.dp), border = BorderStroke(if (isCurChap) 1.3.dp else 0.8.dp, if (isCurChap) CG else Color(0xFF25344E)), modifier = Modifier.fillMaxWidth().padding(start = if (entry.level >= 2) 12.dp else 0.dp).clickable { if (abs(entry.charOffset - leftSlice.s) > 60) footnoteReturnOff = leftSlice.s; tocOpen = false; jumpToCharOffset(entry.charOffset) }) {
+                                    Surface(color = if (isCurChap) CG.copy(alpha = 0.17f) else CS2, shape = RoundedCornerShape(10.dp), border = BorderStroke(if (isCurChap) 1.3.dp else 0.8.dp, if (isCurChap) CG else CBDR), modifier = Modifier.fillMaxWidth().padding(start = if (entry.level >= 2) 12.dp else 0.dp).clickable { if (abs(entry.charOffset - leftSlice.s) > 60) footnoteReturnOff = leftSlice.s; tocOpen = false; jumpToCharOffset(entry.charOffset) }) {
                                         Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                             Row(Modifier.fillMaxWidth(), SB, CV) {
                                                 Text((if (entry.level >= 2) "└ " else "") + entry.title, fontSize = if (entry.level == 1) (ui.subSp.value + 1f).sp else ui.subSp, fontWeight = if (isCurChap || entry.level == 1) FontWeight.Bold else FontWeight.Medium, color = if (isCurChap) CG else if (isPassedChap) CW.copy(alpha = 0.72f) else CW, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
@@ -1586,7 +1590,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                             }
                                             if (isCurChap) {
                                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
-                                                    Box(Modifier.weight(1f).height(4.dp).background(Color(0xFF23324B), RoundedCornerShape(50))) { Box(Modifier.fillMaxWidth(curChapPct / 100f).fillMaxHeight().background(CG, RoundedCornerShape(50))) }
+                                                    Box(Modifier.weight(1f).height(4.dp).background(CBDR, RoundedCornerShape(50))) { Box(Modifier.fillMaxWidth(curChapPct / 100f).fillMaxHeight().background(CG, RoundedCornerShape(50))) }
                                                     Text("읽는 중 ${curChapPct}%", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CG)
                                                 }
                                             }
@@ -1599,9 +1603,9 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                     confirmButton = { TextButton(onClick = { tocOpen = false }) { Text("닫기", color = CG, fontWeight = FontWeight.Bold) } }
                 )
             }
-            if (hlListOpen) { val sortedHls = remember(bookHls) { bookHls.sortedBy { it.startOff } }; AlertDialog(onDismissRequest = { hlListOpen = false }, containerColor = Color(0xFF0E1525), title = { Row(Modifier.fillMaxWidth(), SB, CV) { Text("🖍️ 형광펜 모아보기 (${sortedHls.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = CA); if (sortedHls.isNotEmpty()) { ChipBtn("🗑️전체삭제", false, Color(0xFFF87171)) { val nx = allHighlights.filterNot { it.bookId == act.id }; allHighlights = nx; saveBookHighlights(ctx, nx); hlListOpen = false } } } }, text = { if (sortedHls.isEmpty()) { Text("이 책에 저장된 형광펜이 없습니다. 상단 🖍️ 버튼으로 문장을 탭해 밑줄을 칠 수 있어요.", fontSize = ui.subSp, color = CM) } else { LazyColumn(Modifier.fillMaxWidth().heightIn(max = 340.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { items(sortedHls, key = { it.id }) { hl -> val dot = when (hl.colorIdx) { 1 -> "🟢"; 2 -> "🩷"; else -> "🟡" }; val hlPg = vPages.indexOfLast { it.s <= hl.startOff }.coerceAtLeast(0) + 1; val sIdx = hl.startOff.coerceIn(0, reflowSrc.fullText.length); val eIdx = hl.endOff.coerceIn(sIdx, reflowSrc.fullText.length); val snippet = reflowSrc.fullText.substring(sIdx, eIdx).replace(10.toChar(), ' ').trim().ifEmpty { "(빈 구절)" }; Surface(color = Color(0xFF141D2E), shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, Color(0xFF283753)), modifier = Modifier.fillMaxWidth().clickable { hlListOpen = false; jumpToCharOffset(hl.startOff) }) { Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) { Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) { Text("$dot ${hlPg}쪽", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG); Text(snippet, fontSize = ui.subSp, color = CW, maxLines = 3, overflow = TextOverflow.Ellipsis) }; Text("🗑️", fontSize = 15.sp, modifier = Modifier.clickable { val nx = allHighlights.filterNot { it.id == hl.id }; allHighlights = nx; saveBookHighlights(ctx, nx) }.padding(4.dp)) } } } } } }, confirmButton = { TextButton(onClick = { hlListOpen = false }) { Text("닫기", color = CG, fontWeight = FontWeight.Bold) } }) }; if (sliderBarVisible) {
+            if (hlListOpen) { val sortedHls = remember(bookHls) { bookHls.sortedBy { it.startOff } }; AlertDialog(onDismissRequest = { hlListOpen = false }, containerColor = CS, title = { Row(Modifier.fillMaxWidth(), SB, CV) { Text("🖍️ 형광펜 모아보기 (${sortedHls.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = CA); if (sortedHls.isNotEmpty()) { ChipBtn("🗑️전체삭제", false, Color(0xFFF87171)) { val nx = allHighlights.filterNot { it.bookId == act.id }; allHighlights = nx; saveBookHighlights(ctx, nx); hlListOpen = false } } } }, text = { if (sortedHls.isEmpty()) { Text("이 책에 저장된 형광펜이 없습니다. 상단 🖍️ 버튼으로 문장을 탭해 밑줄을 칠 수 있어요.", fontSize = ui.subSp, color = CM) } else { LazyColumn(Modifier.fillMaxWidth().heightIn(max = 340.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { items(sortedHls, key = { it.id }) { hl -> val dot = when (hl.colorIdx) { 1 -> "🟢"; 2 -> "🩷"; else -> "🟡" }; val hlPg = vPages.indexOfLast { it.s <= hl.startOff }.coerceAtLeast(0) + 1; val sIdx = hl.startOff.coerceIn(0, reflowSrc.fullText.length); val eIdx = hl.endOff.coerceIn(sIdx, reflowSrc.fullText.length); val snippet = reflowSrc.fullText.substring(sIdx, eIdx).replace(10.toChar(), ' ').trim().ifEmpty { "(빈 구절)" }; Surface(color = CS2, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth().clickable { hlListOpen = false; jumpToCharOffset(hl.startOff) }) { Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) { Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) { Text("$dot ${hlPg}쪽", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG); Text(snippet, fontSize = ui.subSp, color = CW, maxLines = 3, overflow = TextOverflow.Ellipsis) }; Text("🗑️", fontSize = 15.sp, modifier = Modifier.clickable { val nx = allHighlights.filterNot { it.id == hl.id }; allHighlights = nx; saveBookHighlights(ctx, nx) }.padding(4.dp)) } } } } } }, confirmButton = { TextButton(onClick = { hlListOpen = false }) { Text("닫기", color = CG, fontWeight = FontWeight.Bold) } }) }; if (sliderBarVisible) {
                 Surface(
-                    color = Color(0xFF0E1626),
+                    color = CS,
                     shape = RoundedCornerShape(10.dp),
                     border = BorderStroke(0.9.dp, CG.copy(alpha = 0.65f)),
                     modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)

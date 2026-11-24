@@ -47,6 +47,15 @@ data class FootnoteLookupHit(
  val noteText: String,
  val charOffset: Int
 )
+data class BookTocEntry(
+ val title: String,
+ val level: Int,
+ val charOffset: Int
+)
+data class EpubExtractResult(
+ val cleanText: String,
+ val tocHints: List<Pair<String, Int>>
+)
 class WrappedPageMap(
  val display: String,
  val rawToDisp: IntArray,
@@ -816,7 +825,90 @@ object EbookTextReflower {
    .replace(markerL, STR_NL)
   return unwrapNaturalParagraphs(restored, preserveStanzas = false)
  }
- fun extractCleanEpub(context: Context, uri: Uri): String {
+ private val exactFrontBackTitles = setOf("머리말", "서문", "서언", "추천사", "추천의글", "여는글", "열며", "들어가며", "들어가는말", "들어가는글", "프롤로그", "prologue", "preface", "introduction", "길잡이", "일러두기", "헌사", "나가며", "나가는말", "나가는글", "맺음말", "맺는말", "마치며", "에필로그", "epilogue", "결론", "conclusion", "옮긴이의말", "옮긴이의글", "옮긴이해제", "옮긴이주", "역자서문", "역자후기", "저자후기", "후기", "해제", "해설", "작품해설", "연보", "작가연보", "부록", "appendix", "주", "주석", "미주", "각주", "notes", "endnotes", "참고문헌", "더읽을거리", "찾아보기", "색인")
+ private val endnoteHeaderCompact = setOf("주", "주석", "미주", "각주", "옮긴이주", "notes", "endnotes")
+ private val metadataNoiseTokens = listOf("초판", "발행", "인쇄", "지은이", "옮긴이:", "펴낸이", "펴낸곳", "출판사", "등록번호", "isbn", "copyright", "all rights", "ⓒ", "©", "무단 전재", "재배포", "디자인", "전자책 정가", "종이책 정가")
+ private fun normalizeTocTitleKey(raw: String): String = raw.trim().replace(Regex("[·.…\\-─_]{2,}\\s*\\d{1,4}$"), "").replace(Regex("\\s+\\d{1,4}$"), "").replace(Regex("^[#■◆▶●•*\\-\\[\\]【】《》〈〉()\\s]+"), "").replace(Regex("[\\]【】《》〈〉()\\s]+$"), "").replace(" ", "").lowercase()
+ private fun cleanDisplayTocTitle(raw: String): String = raw.trim().replace(Regex("^#{1,6}\\s*"), "").replace(Regex("[·.…\\-─]{3,}\\s*\\d{1,4}$"), "").replace(Regex("\\s{2,}"), " ").trim()
+ fun saveBookTocHints(ctx: Context, bookId: Long, hints: List<Pair<String, Int>>) { if (hints.isEmpty()) return; val arr = JSONArray(); hints.take(240).forEach { (t, lv) -> val cl = cleanDisplayTocTitle(t); if (cl.isNotEmpty()) arr.put(JSONObject().apply { put("t", cl); put("l", lv.coerceIn(1, 2)) }) }; ctx.getSharedPreferences("pl_ai_v2_prefs", Context.MODE_PRIVATE).edit().putString("book_toc_hints_v1_$bookId", arr.toString()).apply() }
+ fun loadBookTocHints(ctx: Context, bookId: Long): List<Pair<String, Int>> { val raw = ctx.getSharedPreferences("pl_ai_v2_prefs", Context.MODE_PRIVATE).getString("book_toc_hints_v1_$bookId", null) ?: return emptyList(); return runCatching { val arr = JSONArray(raw); buildList { for (i in 0 until arr.length()) { val o = arr.getJSONObject(i); val t = o.optString("t", "").trim(); if (t.isNotEmpty()) add(t to o.optInt("l", 1).coerceIn(1, 2)) } } }.getOrElse { emptyList() } }
+ fun extractBookTocEntries(ctx: Context, bookId: Long, fullText: String, isPoetry: Boolean = false): List<BookTocEntry> {
+  val n = fullText.length; if (n == 0) return emptyList()
+  data class ParaLine(val s: Int, val e: Int, val tx: String, val prevBlank: Boolean, val nextBlank: Boolean)
+  val lines = ArrayList<ParaLine>(256); var pos = 0; var sawBlankBefore = true
+  while (pos < n) {
+   val nl = fullText.indexOf(CH_NL, pos).let { if (it < 0) n else it }; val tr = fullText.substring(pos, nl).trim()
+   if (tr.isEmpty()) sawBlankBefore = true else {
+    val peek = nl + 1; var nextIsBlank = peek >= n
+    if (peek < n && fullText[peek] == CH_NL) nextIsBlank = true else if (peek < n) { val nl2 = fullText.indexOf(CH_NL, peek).let { if (it < 0) n else it }; if (fullText.substring(peek, nl2).isBlank()) nextIsBlank = true }
+    lines.add(ParaLine(pos, nl, tr, sawBlankBefore, nextIsBlank)); sawBlankBefore = false
+   }
+   pos = nl + 1
+  }
+  if (lines.isEmpty()) return emptyList()
+  val prefixSig = fullText.replace(Regex("\\s+"), "").take(240).hashCode().toLong()
+  val savedHints = loadBookTocHints(ctx, bookId).ifEmpty { loadBookTocHints(ctx, prefixSig) }
+  val knownTocKeys = HashMap<String, Int>(); savedHints.forEach { (ht, lv) -> val k = normalizeTocTitleKey(ht); if (k.length >= 2 && !knownTocKeys.containsKey(k)) knownTocKeys[k] = lv }
+  var tocZoneStartIdx = -1; var tocZoneEndIdx = -1; val frontLimitOff = minOf(n / 3, 18000)
+  for (idx in lines.indices) {
+   val ln = lines[idx]; if (ln.s > frontLimitOff) break
+   val compact = ln.tx.replace(Regex("[\\[\\]【】《》〈〉#\\s]"), "").lowercase()
+   if (compact == "차례" || compact == "목차" || compact == "contents" || compact == "tableofcontents") {
+    var endJ = idx; var shortCnt = 0
+    for (j in (idx + 1) until minOf(lines.size, idx + 140)) { val cand = lines[j]; if (cand.tx.length >= 78 && endsCompleteSentence(cand.tx)) break; if (cand.tx.length <= 58) { endJ = j; shortCnt++ } else break }
+    if (shortCnt >= 2) { tocZoneStartIdx = idx; tocZoneEndIdx = endJ; break }
+   }
+  }
+  if (tocZoneStartIdx >= 0) { for (j in (tocZoneStartIdx + 1)..tocZoneEndIdx) { val k = normalizeTocTitleKey(lines[j].tx); if (k.length in 2..38 && !knownTocKeys.containsKey(k)) { val isMajor = lines[j].tx.contains("부") || lines[j].tx.contains("장") || lines[j].tx.lowercase().contains("part") || lines[j].tx.lowercase().contains("chapter"); knownTocKeys[k] = if (isMajor) 1 else 2 } } }
+  val explicitHits = ArrayList<BookTocEntry>(48); val fallbackUnnumbered = ArrayList<BookTocEntry>(32)
+  if (tocZoneStartIdx >= 0) explicitHits.add(BookTocEntry("📑 차례", 1, lines[tocZoneStartIdx].s))
+  val korPartChapRx = Regex("^(?:제\\s*)?(?:\\d{1,3}|[일이삼사오육칠팔구십백]+)\\s*(?:부|편|장|강|화|권|막)(?:\\s|$|[:.·\\-—])")
+  val engPartChapRx = Regex("^(?:part|book|chapter|lecture|act)\\s+(?:\\d{1,3}|[ivxlcdm]+)\\b", RegexOption.IGNORE_CASE)
+  val korSecRx = Regex("^(?:제\\s*)?\\d{1,3}\\s*(?:절|항|과)(?:\\s|$|[:.·\\-—])")
+  val zeroPadSecRx = Regex("^0\\d\\s+\\S+.*$"); val romanSecRx = Regex("^(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]|I|II|III|IV|V|VI|VII|VIII|IX|X)[.·)\\s]\\s*\\S+.*$")
+  val numDotSecRx = Regex("^(\\d{1,2})\\.\\s+(\\S+.*)$")
+  val proseVerbTail = listOf("다.", "요.", "죠.", "네.", "군.", "음.", "함.", "됨.", "다!", "다?", "요?", "까?")
+  val unfinishedTail = listOf("은", "는", "이", "가", "을", "를", "의", "에", "에서", "으로", "로", "과", "와", "도", "만", "고", "며", "서", "면", "던", "한", "할", "된", "될", "있는", "없는", "하고", "하며", "해서", "지만", "는데")
+  var insideEndnotes = false
+  for (idx in lines.indices) {
+   if (idx in tocZoneStartIdx..tocZoneEndIdx && tocZoneStartIdx >= 0) continue
+   val ln = lines[idx]; val tx = ln.tx; if (tx.length > 56 || (!ln.prevBlank && !tx.startsWith("#"))) continue
+   val lowTx = tx.lowercase(); if (metadataNoiseTokens.any { lowTx.contains(it) }) continue
+   if (tx.startsWith("[") && tx.indexOf(']') in 1..5 && tx.substring(1, tx.indexOf(']')).all { it.isDigit() }) continue
+   if (tx.startsWith("〔") && tx.indexOf('〕') in 1..5) continue
+   if (unicodeSupChars.indexOf(tx[0]) >= 0) continue
+   var dCnt = 0; while (dCnt < tx.length && dCnt < 4 && tx[dCnt].isDigit()) dCnt++
+   if (dCnt in 1..3 && dCnt < tx.length && tx[dCnt] == ')') continue
+   if (isDialogueStart(tx) && !(tx.startsWith("『") && tx.endsWith("』") && tx.length <= 28)) continue
+   if (proseVerbTail.any { tx.endsWith(it) } || tx.endsWith(",")) continue
+   val compact = tx.replace(Regex("[\\[\\]【】《》〈〉#·:\\-—\\s]"), "").lowercase(); val normKey = normalizeTocTitleKey(tx); val cleanTitle = cleanDisplayTocTitle(tx)
+   if (cleanTitle.isEmpty()) continue
+   if (compact in endnoteHeaderCompact && ln.nextBlank) { insideEndnotes = true; explicitHits.add(BookTocEntry(cleanTitle, 1, ln.s)); continue }
+   var matchedLevel = 0
+   if (compact in exactFrontBackTitles && ln.nextBlank) { matchedLevel = 1; if (compact !in endnoteHeaderCompact) insideEndnotes = false }
+   else if (korPartChapRx.containsMatchIn(tx) || engPartChapRx.containsMatchIn(tx)) { matchedLevel = 1; insideEndnotes = false }
+   else if (tx.startsWith("# ") || tx.startsWith("## ") || ((tx.startsWith("【") && tx.contains("】")) || (tx.startsWith("《") && tx.contains("》"))) && tx.length <= 44) { matchedLevel = 1; insideEndnotes = false }
+   else if (!insideEndnotes && (korSecRx.containsMatchIn(tx) || zeroPadSecRx.matches(tx) || (romanSecRx.matches(tx) && ln.nextBlank && tx.length <= 42))) matchedLevel = 2
+   else if (!insideEndnotes && (tx.startsWith("### ") || ((tx.startsWith("■") || tx.startsWith("◆") || tx.startsWith("▶") || (tx.startsWith("〈") && tx.endsWith("〉"))) && ln.nextBlank && tx.length <= 40))) matchedLevel = 2
+   else if (!insideEndnotes && ln.nextBlank && tx.length in 3..38 && numDotSecRx.matchEntire(tx) != null && !tx.endsWith(".") && (lines.getOrNull(idx + 1)?.tx?.length ?: 0) >= 30) matchedLevel = 2
+   if (matchedLevel == 0 && normKey.length >= 2 && knownTocKeys.containsKey(normKey) && ln.nextBlank) matchedLevel = knownTocKeys[normKey] ?: 1
+   if (matchedLevel > 0) explicitHits.add(BookTocEntry(cleanTitle, matchedLevel, ln.s))
+   else if (!isPoetry && !insideEndnotes && ln.prevBlank && ln.nextBlank && cleanTitle.length in 2..26) {
+    val endsBad = cleanTitle.endsWith(".") || cleanTitle.endsWith(";") || cleanTitle.last() in charArrayOf('다', '요', '죠', '네', '군', '음', '함', '됨') || unfinishedTail.any { cleanTitle.endsWith(" $it") || (cleanTitle.length >= 4 && cleanTitle.endsWith(it)) }
+    val followedByProse = (lines.getOrNull(idx + 1)?.tx?.length ?: 0) >= 48; val prevP = lines.getOrNull(idx - 1); val precededOk = prevP == null || prevP.tx.length >= 42 || ln.s < 2500
+    if (!endsBad && followedByProse && precededOk) fallbackUnnumbered.add(BookTocEntry(cleanTitle, 1, ln.s))
+   }
+  }
+  val mergedRaw = if (explicitHits.size >= 4) explicitHits else (explicitHits + fallbackUnnumbered).sortedBy { it.charOffset }
+  val deduped = ArrayList<BookTocEntry>(mergedRaw.size)
+  for (item in mergedRaw) { val prev = deduped.lastOrNull(); if (prev != null && ((normalizeTocTitleKey(prev.title) == normalizeTocTitleKey(item.title) && (item.charOffset - prev.charOffset) < 600) || ((item.charOffset - prev.charOffset) < 28 && prev.level <= item.level))) continue; deduped.add(item) }
+  if (deduped.isNotEmpty()) { if (deduped.first().charOffset > 1200) deduped.add(0, BookTocEntry("📖 시작 (표지·도입)", 1, 0)); return deduped.take(180) }
+  val fallbackSections = ArrayList<BookTocEntry>()
+  if (n < 2200) fallbackSections.add(BookTocEntry("📖 본문 시작", 1, 0)) else { val parts = (n / 6000).coerceIn(4, 12); for (p in 0 until parts) { val target = (n.toLong() * p / parts).toInt(); val snap = if (p == 0) 0 else fullText.indexOf(STR_PARA, target).let { if (it in 0 until (target + 800)) it + 2 else target }; val snip = fullText.substring(snap, minOf(n, snap + 26)).replace(CH_NL, ' ').trim().take(16); fallbackSections.add(BookTocEntry("구간 ${p + 1} · $snip…", 1, snap.coerceIn(0, n - 1))) } }
+  return fallbackSections
+ }
+ fun extractCleanEpub(context: Context, uri: Uri): String = extractCleanEpubWithToc(context, uri).cleanText
+ fun extractCleanEpubWithToc(context: Context, uri: Uri): EpubExtractResult {
   val entries = LinkedHashMap<String, ByteArray>()
   context.contentResolver.openInputStream(uri)?.use { raw ->
    ZipInputStream(BufferedInputStream(raw)).use { zis ->
@@ -833,7 +925,7 @@ object EbookTextReflower {
     }
    }
   }
-  if (entries.isEmpty()) return ""
+  if (entries.isEmpty()) return EpubExtractResult("", emptyList())
   fun extractXmlAttr(tag: String, attrName: String): String? {
    val lowTag = tag.lowercase()
    val target = attrName.lowercase()
@@ -898,16 +990,25 @@ object EbookTextReflower {
      !low.contains("toc") && !low.contains("nav")
    }
   }
+  val tocHints = ArrayList<Pair<String, Int>>(48)
+  runCatching {
+   val ncxXml = entries.entries.firstOrNull { it.key.lowercase().endsWith(".ncx") }?.value?.toString(Charsets.UTF_8)
+   if (ncxXml != null) Regex("(?is)<navLabel[^>]*>\\s*<text[^>]*>(.*?)</text>\\s*</navLabel>").findAll(ncxXml).forEach { m -> val rawLbl = Html.fromHtml(m.groupValues[1], Html.FROM_HTML_MODE_LEGACY).toString().trim(); if (rawLbl.length in 1..54) tocHints.add(rawLbl to 1) }
+   if (tocHints.isEmpty()) { val navHtml = entries.entries.firstOrNull { val k = it.key.lowercase(); k.contains("nav") || k.contains("toc") }?.value?.toString(Charsets.UTF_8); if (navHtml != null) Regex("(?is)<a[^>]*>(.*?)</a>").findAll(navHtml).forEach { m -> val rawLbl = Html.fromHtml(m.groupValues[1].replace(Regex("<[^>]+>"), ""), Html.FROM_HTML_MODE_LEGACY).toString().trim(); if (rawLbl.length in 1..54) tocHints.add(rawLbl to 1) } }
+  }
   val sb = StringBuilder()
   for (k in chapterKeys) {
    val html = entries[k]?.toString(Charsets.UTF_8) ?: continue
+   Regex("(?is)<h([1-3])[^>]*>(.*?)</h\\1>").findAll(html).forEach { hm -> val lv = hm.groupValues[1].toIntOrNull()?.coerceIn(1, 2) ?: 1; val hTxt = Html.fromHtml(hm.groupValues[2].replace(Regex("<[^>]+>"), " "), Html.FROM_HTML_MODE_LEGACY).toString().replace(Regex("\\s+"), " ").trim(); if (hTxt.length in 1..54) tocHints.add(hTxt to lv) }
    val cleanChapter = htmlToNaturalParagraphs(html)
    if (cleanChapter.length >= 12) {
     if (sb.isNotEmpty()) sb.append(STR_PARA)
     sb.append(cleanChapter)
    }
   }
-  return sb.toString().trim()
+  val finalTxt = sb.toString().trim()
+  if (tocHints.isNotEmpty() && finalTxt.isNotEmpty()) { val sig = finalTxt.replace(Regex("\\s+"), "").take(240).hashCode().toLong(); saveBookTocHints(context, sig, tocHints) }
+  return EpubExtractResult(finalTxt, tocHints)
  }
  private fun normalizeZipPath(path: String): String {
   val parts = ArrayList<String>()

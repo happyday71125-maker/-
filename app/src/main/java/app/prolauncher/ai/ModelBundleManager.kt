@@ -180,12 +180,12 @@ on = false; keepAw(appC, false); break
 }
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun DrawerSheet(apps: List<AppEntry>, onClose: () -> Unit, onLaunch: (AppEntry) -> Unit, onFav: (AppEntry) -> Unit, onInt: (AppEntry) -> Unit) {
+fun DrawerSheet(apps: List<AppEntry>, onClose: () -> Unit, onLaunch: (AppEntry) -> Unit, onFav: (AppEntry) -> Unit, onInt: (AppEntry) -> Unit, onRefresh: () -> Unit = {}) {
 val ctx = LocalContext.current
 val repo = remember { LauncherRepository(ctx) }
   val ui = rememberUi(loadAiCfg(ctx).uiScale)
 var q by remember { mutableStateOf("") }
-var appFolders by remember(LauncherBackupManager.backupRev) { mutableStateOf(FolderRegistry.loadAppFolders(ctx, apps)) }
+var appFolders by remember(LauncherBackupManager.backupRev, apps.size) { mutableStateOf(FolderRegistry.loadAppFolders(ctx, apps)) }
 var selFolderId by remember { mutableStateOf(-1L) }
 var folderMgrOpen by remember { mutableStateOf(false) }
   var pullDown by remember { mutableStateOf(0f) }
@@ -237,7 +237,7 @@ if (pullDown > 75f) { pullDown = 0f; onClose() }
 Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
 Box(Modifier.width(44.dp).height(4.dp).background(CBDR, RoundedCornerShape(50)))
 }
-Row(Modifier.fillMaxWidth(), SB, CV) { Text("▼ 앱 서랍 (아래로 내려 닫기)", fontSize = ui.titleSp, fontWeight = FontWeight.Bold, color = CW); TextButton(onClick = onClose) { Text("✕", color = CM) } }
+Row(Modifier.fillMaxWidth(), SB, CV) { Text("▼ 앱 서랍 (아래로 내려 닫기)", fontSize = ui.titleSp, fontWeight = FontWeight.Bold, color = CW); Row(verticalAlignment = CV) { TextButton(onClick = onRefresh) { Text("🔄", color = CG) }; TextButton(onClick = onClose) { Text("✕", color = CM) } } }
 OutlinedTextField(value = q, onValueChange = { q = it }, placeholder = { Text("초성 검색 (예: ㅋㅋㅇㅌ)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 Spacer(Modifier.height(8.dp))
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {

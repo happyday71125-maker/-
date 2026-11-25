@@ -171,89 +171,16 @@ if (target == 1) cut else "• $cut"
 }
 }
 }
-object ReaderVolumeKeyBridge {
-var isReaderTabCurrent: Boolean = false; var readerBookActive: Boolean = false; var volumeTurnEnabled: Boolean = true
-var isTabActiveCheck: (() -> Boolean)? = null; var isBookReadyCheck: (() -> Boolean)? = null; var onTurnPage: ((Int) -> Unit)? = null
-private var lastTurnMs: Long = 0L; private var lastHwKeyMs: Long = 0L; private var lastSoftTurnMs: Long = 0L
-private var ignoreSelfVolUntilMs: Long = 0L; private var consumedDownCode: Int = 0; private var restoredZeroNeeded: Boolean = false
-private val lastStreamVol = android.util.SparseIntArray()
-private fun isAudioSpeakingNow(): Boolean = ReaderTtsRuntime.on || SupertonicTtsEngine.playing || briefingSpeakingNow || runCatching { ttsEngine?.isSpeaking == true }.getOrDefault(false)
-fun shouldInterceptNow(): Boolean { val tabOk = isTabActiveCheck?.invoke() ?: isReaderTabCurrent; val bookOk = isBookReadyCheck?.invoke() ?: (readerBookActive && volumeTurnEnabled); return tabOk && bookOk && volumeTurnEnabled && !isAudioSpeakingNow() && onTurnPage != null }
-fun syncBaselineVolumes(ctx: Context, prepareHeadroom: Boolean = false) = runCatching {
-val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return@runCatching
-intArrayOf(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.STREAM_RING, android.media.AudioManager.STREAM_SYSTEM, android.media.AudioManager.STREAM_NOTIFICATION).forEach { st -> lastStreamVol.put(st, am.getStreamVolume(st)) }
-if (prepareHeadroom && shouldInterceptNow()) {
-val maxM = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC); val curM = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-if (curM <= 0 && !am.isMusicActive && maxM >= 2) { ignoreSelfVolUntilMs = android.os.SystemClock.uptimeMillis() + 300L; restoredZeroNeeded = true; am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 1, 0); lastStreamVol.put(android.media.AudioManager.STREAM_MUSIC, 1) }
-else if (curM >= maxM && maxM >= 2) { ignoreSelfVolUntilMs = android.os.SystemClock.uptimeMillis() + 300L; am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, maxM - 1, 0); lastStreamVol.put(android.media.AudioManager.STREAM_MUSIC, maxM - 1) }
-} else if (!prepareHeadroom && restoredZeroNeeded) {
-restoredZeroNeeded = false
-if (!am.isMusicActive) { ignoreSelfVolUntilMs = android.os.SystemClock.uptimeMillis() + 300L; am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0); lastStreamVol.put(android.media.AudioManager.STREAM_MUSIC, 0) }
-}
-}
-fun onSoftwareVolumeChanged(ctx: Context, streamType: Int, newVol: Int, prevVolExtra: Int) {
-if (streamType !in intArrayOf(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.STREAM_RING, android.media.AudioManager.STREAM_SYSTEM, android.media.AudioManager.STREAM_NOTIFICATION)) return
-val now = android.os.SystemClock.uptimeMillis()
-if (now < ignoreSelfVolUntilMs) { if (newVol >= 0) lastStreamVol.put(streamType, newVol); return }
-val prevKnown = lastStreamVol.get(streamType, -1)
-val oldVol = if (prevKnown >= 0) prevKnown else if (prevVolExtra >= 0) prevVolExtra else newVol
-if (newVol >= 0) lastStreamVol.put(streamType, newVol)
-if (streamType == android.media.AudioManager.STREAM_MUSIC && newVol > 1) restoredZeroNeeded = false
-if (!shouldInterceptNow() || now - lastHwKeyMs < 180L) return
-val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
-val maxV = runCatching { am?.getStreamMaxVolume(streamType) ?: 15 }.getOrDefault(15).coerceAtLeast(1)
-val diff = newVol - oldVol
-val dir = when { diff > 0 -> -1; diff < 0 -> 1; newVol <= 0 && prevVolExtra == 0 -> 1; newVol >= maxV && prevVolExtra == maxV -> -1; else -> 0 }
-if (dir != 0 && now - lastSoftTurnMs >= 105L) { lastSoftTurnMs = now; uiP(0L) { onTurnPage?.invoke(dir) } }
-if (am != null && streamType == android.media.AudioManager.STREAM_MUSIC && maxV >= 2) {
-if (newVol <= 0 && !am.isMusicActive) uiP(95L) { runCatching { ignoreSelfVolUntilMs = android.os.SystemClock.uptimeMillis() + 260L; am.setStreamVolume(streamType, 1, 0); lastStreamVol.put(streamType, 1) } }
-else if (newVol >= maxV) uiP(95L) { runCatching { ignoreSelfVolUntilMs = android.os.SystemClock.uptimeMillis() + 260L; am.setStreamVolume(streamType, maxV - 1, 0); lastStreamVol.put(streamType, maxV - 1) } }
-}
-}
-fun pollSystemVolumeObserver(ctx: Context) = runCatching {
-val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return@runCatching
-val curM = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC); val prevM = lastStreamVol.get(android.media.AudioManager.STREAM_MUSIC, curM)
-if (curM != prevM) onSoftwareVolumeChanged(ctx, android.media.AudioManager.STREAM_MUSIC, curM, prevM)
-}
-fun handleKeyEvent(event: android.view.KeyEvent): Boolean {
-val code = event.keyCode; if (code != android.view.KeyEvent.KEYCODE_VOLUME_UP && code != android.view.KeyEvent.KEYCODE_VOLUME_DOWN) return false
-if (event.action == android.view.KeyEvent.ACTION_UP) { if (consumedDownCode == code) { consumedDownCode = 0; lastHwKeyMs = android.os.SystemClock.uptimeMillis(); return true }; return shouldInterceptNow() }
-if (!shouldInterceptNow()) { consumedDownCode = 0; return false }
-lastHwKeyMs = android.os.SystemClock.uptimeMillis()
-if (event.action == android.view.KeyEvent.ACTION_DOWN) { consumedDownCode = code; if (lastHwKeyMs - lastTurnMs >= (if (event.repeatCount == 0) 35L else 220L)) { lastTurnMs = lastHwKeyMs; onTurnPage?.invoke(if (code == android.view.KeyEvent.KEYCODE_VOLUME_UP) -1 else 1) } }
-return true
-}
-}
+var readerSwipePagerLock by mutableStateOf(false)
+var packageChangeTick by mutableStateOf(0)
 var homeResumeTick by mutableStateOf(0)
 var homeNewIntentTick by mutableStateOf(0)
 class MainActivity : ComponentActivity() {
-private var softVolRegistered = false
-private val softVolReceiver = object : BroadcastReceiver() {
-override fun onReceive(context: Context?, intent: Intent?) {
-if (intent?.action == "android.media.VOLUME_CHANGED_ACTION" && context != null) {
-ReaderVolumeKeyBridge.onSoftwareVolumeChanged(context, intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1), intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1), intent.getIntExtra("android.media.EXTRA_PREV_VOLUME_STREAM_VALUE", -1))
-}
-}
-}
-private val softVolObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
-override fun onChange(selfChange: Boolean) { ReaderVolumeKeyBridge.pollSystemVolumeObserver(this@MainActivity) }
-}
-override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean = if (ReaderVolumeKeyBridge.handleKeyEvent(event)) true else super.dispatchKeyEvent(event)
-override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean = if (event != null && ReaderVolumeKeyBridge.handleKeyEvent(event)) true else super.onKeyDown(keyCode, event)
-override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent?): Boolean = if (event != null && ReaderVolumeKeyBridge.handleKeyEvent(event)) true else super.onKeyUp(keyCode, event)
-override fun onStart() {
-super.onStart(); ReaderVolumeKeyBridge.syncBaselineVolumes(this, false)
-if (!softVolRegistered) runCatching { val flt = IntentFilter("android.media.VOLUME_CHANGED_ACTION"); if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(softVolReceiver, flt, Context.RECEIVER_EXPORTED) else registerReceiver(softVolReceiver, flt); contentResolver.registerContentObserver(android.provider.Settings.System.CONTENT_URI, true, softVolObserver); softVolRegistered = true }
-}
-override fun onStop() {
-if (softVolRegistered) { softVolRegistered = false; runCatching { unregisterReceiver(softVolReceiver) }; runCatching { contentResolver.unregisterContentObserver(softVolObserver) } }
-ReaderVolumeKeyBridge.syncBaselineVolumes(this, false); super.onStop()
-}
 override fun onResume() { super.onResume(); mainActRef = this; appInFg = true; homeResumeTick++; JarvisRuntime.onActivityResume() }
 override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if (intent.hasCategory(Intent.CATEGORY_HOME)) homeNewIntentTick++ }
 override fun onPause() { appInFg = false; super.onPause() }
 override fun onCreate(savedInstanceState: Bundle?) {
-super.onCreate(savedInstanceState); mainActRef = this; appCtxRef = applicationContext; appInFg = true; volumeControlStream = android.media.AudioManager.STREAM_MUSIC; loadAiCfg(this); val prevEh = Thread.getDefaultUncaughtExceptionHandler(); Thread.setDefaultUncaughtExceptionHandler { th, ex -> if (th.name != "main") { ex.printStackTrace() } else { prevEh?.uncaughtException(th, ex) } }
+super.onCreate(savedInstanceState); mainActRef = this; appCtxRef = applicationContext; appInFg = true; loadAiCfg(this); val prevEh = Thread.getDefaultUncaughtExceptionHandler(); Thread.setDefaultUncaughtExceptionHandler { th, ex -> if (th.name != "main") { ex.printStackTrace() } else { prevEh?.uncaughtException(th, ex) } }
 val repo = LauncherRepository(this); activeAppTheme = repo.loadConfig().themeName; val ai = LocalAiNoteEngine(this)
 setContent {
 val scheme = if (isLightAppTheme) lightColorScheme(background = CBG, surface = CS, onBackground = CW, onSurface = CW, primary = CG, onPrimary = Color.White, secondary = CA, surfaceVariant = CS2, outline = CBDR) else darkColorScheme(background = CBG, surface = CS, onBackground = CW, onSurface = CW, primary = CG, secondary = CA, surfaceVariant = CS2, outline = CBDR)
@@ -296,7 +223,17 @@ var isDefHome by remember { mutableStateOf(repo.isDefaultHomeApp()) }
 var drawerOpen by remember { mutableStateOf(false) }
 var settingsOpen by remember { mutableStateOf(false) }
 var interruptApp by remember { mutableStateOf<AppEntry?>(null) }
-LaunchedEffect(homeResumeTick) { isDefHome = repo.isDefaultHomeApp() }
+suspend fun refreshAppsAsync() { val fresh = withContext(Dispatchers.IO) { repo.loadInstalledApps() }; apps = fresh }
+DisposableEffect(rootCtx) {
+val pkgRec = object : BroadcastReceiver() { override fun onReceive(context: Context?, intent: Intent?) { packageChangeTick++ } }
+val pkgFlt = IntentFilter().apply { addAction(Intent.ACTION_PACKAGE_ADDED); addAction(Intent.ACTION_PACKAGE_REMOVED); addAction(Intent.ACTION_PACKAGE_REPLACED); addAction(Intent.ACTION_PACKAGE_CHANGED); addDataScheme("package") }
+val extFlt = IntentFilter().apply { addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE); addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE) }
+runCatching { if (android.os.Build.VERSION.SDK_INT >= 33) { rootCtx.registerReceiver(pkgRec, pkgFlt, Context.RECEIVER_EXPORTED); rootCtx.registerReceiver(pkgRec, extFlt, Context.RECEIVER_EXPORTED) } else { rootCtx.registerReceiver(pkgRec, pkgFlt); rootCtx.registerReceiver(pkgRec, extFlt) } }
+onDispose { runCatching { rootCtx.unregisterReceiver(pkgRec) } }
+}
+LaunchedEffect(homeResumeTick, homeNewIntentTick) { isDefHome = repo.isDefaultHomeApp(); refreshAppsAsync() }
+LaunchedEffect(packageChangeTick) { if (packageChangeTick > 0) { refreshAppsAsync(); delay(700L); refreshAppsAsync() } }
+LaunchedEffect(drawerOpen) { while (drawerOpen) { refreshAppsAsync(); delay(2500L) } }
 LaunchedEffect(homeNewIntentTick) {
 if (homeNewIntentTick > 0) {
 interruptApp = null
@@ -321,9 +258,6 @@ books = SmartMemoClassifier.sanitizeBooks(repo.loadBooks(), repo)
 }
 fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
 activeAppTheme = cfg.themeName
-val isReaderTabNow = (pager.currentPage == 1 && !drawerOpen && !settingsOpen && interruptApp == null)
-ReaderVolumeKeyBridge.isReaderTabCurrent = isReaderTabNow; ReaderVolumeKeyBridge.isTabActiveCheck = { pager.currentPage == 1 && !drawerOpen && !settingsOpen && interruptApp == null }
-LaunchedEffect(isReaderTabNow) { ReaderVolumeKeyBridge.syncBaselineVolumes(rootCtx, prepareHeadroom = isReaderTabNow) }
     BackHandler(enabled = true) {
 when {
 interruptApp != null -> interruptApp = null
@@ -335,7 +269,8 @@ pager.currentPage != 2 -> scope.launch { pager.animateScrollToPage(2) }
 SideEffect { JarvisRuntime.bindCallbacks(rootCtx, { pg -> scope.launch { pager.scrollToPage(pg.coerceIn(0, 4)) } }, { raw0 -> val isVm = raw0.startsWith("__VOICEMEMO__"); val raw = if (isVm) raw0.removePrefix("__VOICEMEMO__").trim() else raw0.trim(); val mc0 = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = if (isVm) { if (!mc0.contains("음성메모")) SmartMemoClassifier.saveMemoCats(rootCtx, listOf("음성메모") + mc0); "음성메모" } else SmartMemoClassifier.guessCategory(raw, mc0); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "🎙️ [$c0] 탭 저장 + ⏰알림 ${sc}건 예약됨" else if (isVm) "🎙️ [음성메모] 탭에 즉시 저장되었습니다!" else "✅ [$c0] 메모 즉시 저장됨" }, { books }, { notes }) }
 val bgCol = CBG
 Box(Modifier.fillMaxSize().background(bgCol).systemBarsPadding().imePadding()) {
-HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
+val lockPagerForReaderSwipe = pager.currentPage == 1 && readerSwipePagerLock && !drawerOpen && !settingsOpen && interruptApp == null
+HorizontalPager(state = pager, userScrollEnabled = !lockPagerForReaderSwipe, modifier = Modifier.fillMaxSize()) { page ->
 when (page) {
 0 -> MarkdownWriterView(
 onGoReader = { scope.launch { pager.animateScrollToPage(1) } },
@@ -371,7 +306,8 @@ onLeftWriter = { scope.launch { pager.animateScrollToPage(0) } }, allApps = apps
 AnimatedVisibility(visible = drawerOpen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
 DrawerSheet(apps, onClose = { drawerOpen = false }, onLaunch = ::launchOrInterrupt,
 onFav = { repo.toggleFavorite(it.packageName, it.label); apps = repo.loadInstalledApps() },
-onInt = { repo.toggleInterrupt(it.packageName, it.label); apps = repo.loadInstalledApps() })
+onInt = { repo.toggleInterrupt(it.packageName, it.label); apps = repo.loadInstalledApps() },
+onRefresh = { scope.launch { refreshAppsAsync() } })
 }
 AnimatedVisibility(visible = settingsOpen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
 SettingsSheet(cfg, isDefHome, onAskHome = ::askDefaultHome, onSysHome = { repo.openSystemDefaultAppsSettings() },

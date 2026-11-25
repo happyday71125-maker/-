@@ -3,6 +3,7 @@ import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextLayoutResult
@@ -14,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -272,14 +274,8 @@ fun ReaderView(
     var smartReflowOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_smart_reflow", true)) }
     var readerJustifyOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_justify_on", true)) }
     var readerParaIndentOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_para_indent_on", true)) }
-    var readerVolumeTurnOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_volume_turn_on", true)) }
-    DisposableEffect(Unit) {
-        onDispose {
-            ReaderVolumeKeyBridge.readerBookActive = false
-            ReaderVolumeKeyBridge.isBookReadyCheck = null
-            ReaderVolumeKeyBridge.onTurnPage = null
-        }
-    }
+var readerSwipeTurnOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_swipe_turn_on", true)) }
+DisposableEffect(Unit) { onDispose { readerSwipePagerLock = false } }
     var bCats by remember { mutableStateOf(SmartMemoClassifier.loadBookCats(ctx)) }
     var selCat by remember { mutableStateOf("전체") }
     var catBarOpen by remember { mutableStateOf(false) }
@@ -467,10 +463,10 @@ Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
 horizontalArrangement = Arrangement.spacedBy(4.dp),
 verticalAlignment = CV
 ) {
-                    TextButton(onClick = { shelf = !shelf; bmOpen = false }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) { Text(if (shelf) "📖" else "📚${books.size}", fontSize = ui.bodySp, color = fg, fontWeight = FontWeight.Bold, softWrap = false) }
-                    OutlinedButton(onClick = { bmOpen = !bmOpen; if (bmOpen) shelf = false }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text("🔖${bms.size}", fontSize = ui.subSp, color = if (bmOpen) CA else fg, softWrap = false) }
-                    OutlinedButton(onClick = { twoPageMode = !twoPageMode; readerPrefs.edit().putBoolean("reader_two_page", twoPageMode).apply() }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)) { Text(if (twoPageMode) "📖" else "📄", fontSize = ui.subSp, color = if (twoPageMode) CG else fg, softWrap = false) }
-                    centerSlot()
+                    TextButton(onClick = { shelf = !shelf; bmOpen = false }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp), modifier = Modifier.defaultMinSize(minWidth = 32.dp, minHeight = 32.dp)) { Text(if (shelf) "📖" else "📚${books.size}", fontSize = ui.bodySp, color = fg, fontWeight = FontWeight.Bold, softWrap = false) }
+                       OutlinedButton(onClick = { bmOpen = !bmOpen; if (bmOpen) shelf = false }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 3.dp), modifier = Modifier.defaultMinSize(minWidth = 36.dp, minHeight = 32.dp)) { Text("🔖${bms.size}", fontSize = ui.subSp, color = if (bmOpen) CA else fg, softWrap = false) }
+                    OutlinedButton(onClick = { twoPageMode = !twoPageMode; readerPrefs.edit().putBoolean("reader_two_page", twoPageMode).apply() }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 3.dp), modifier = Modifier.defaultMinSize(minWidth = 34.dp, minHeight = 32.dp)) { Text(if (twoPageMode) "📖" else "📄", fontSize = ui.subSp, color = if (twoPageMode) CG else fg, softWrap = false) }
+                    centerSlot())
                     OutlinedButton(
                         onClick = {
                             if (!searchOpen) searchAllBooks = shelf || act == null
@@ -630,15 +626,7 @@ onClose = { searchOpen = false }
                                             readerParaIndentOn = !readerParaIndentOn
                                             readerPrefs.edit().putBoolean("reader_para_indent_on", readerParaIndentOn).apply()
                                         }
-                                        ReaderPointBtn(
-                                            if (readerVolumeTurnOn) "🔉 볼륨키 넘김 ON" else "🔇 볼륨키 넘김 OFF",
-                                            readerVolumeTurnOn,
-                                            CA,
-                                            Modifier.weight(1f)
-                                        ) {
-                                            readerVolumeTurnOn = !readerVolumeTurnOn
-                                            readerPrefs.edit().putBoolean("reader_volume_turn_on", readerVolumeTurnOn).apply()
-                                        }
+                                        ReaderPointBtn(if (readerSwipeTurnOn) "👆 스와이프 넘김 ON" else "👆 스와이프 넘김 OFF", readerSwipeTurnOn, CG, Modifier.weight(1f)) { readerSwipeTurnOn = !readerSwipeTurnOn; readerPrefs.edit().putBoolean("reader_swipe_turn_on", readerSwipeTurnOn).apply() }
                                     }
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                                         listOf(0 to "줄간격 좁게", 1 to "줄간격 보통", 2 to "줄간격 넓게").forEach { (idx, lbl) ->
@@ -697,9 +685,7 @@ onClose = { searchOpen = false }
         }
         if (shelf || act == null) {
             SideEffect {
-                ReaderVolumeKeyBridge.readerBookActive = false
-                ReaderVolumeKeyBridge.isBookReadyCheck = { false }
-                ReaderVolumeKeyBridge.onTurnPage = null
+                readerSwipePagerLock = false
             }
             ReaderShelfSection(
                 ctx = ctx, ui = ui, books = books, bCats = bCats, allCats = allCats,
@@ -948,20 +934,8 @@ commitExcerptHook = ::commitDraftIfEditing
             LaunchedEffect(vIdx, act.id) {
                 activeFootnotePopup = null
             }
-            val volumeKeyReady = !shelf && readerVolumeTurnOn && !tocOpen && !hlListOpen && !folderDialogOpen && !isKeyboardOpen
-                val latestVolReady by rememberUpdatedState(volumeKeyReady)
-                val latestVolTurnOn by rememberUpdatedState(readerVolumeTurnOn)
-                val latestVolTurnAction by rememberUpdatedState<(Int) -> Unit> { dir -> val curBase = liveVIdxHolder[0]; goToVPage(curBase + dir * stepPg, curBase) }
-                SideEffect {
-                    ReaderVolumeKeyBridge.volumeTurnEnabled = latestVolTurnOn
-                    ReaderVolumeKeyBridge.readerBookActive = latestVolReady
-                    ReaderVolumeKeyBridge.isBookReadyCheck = { latestVolReady && latestVolTurnOn }
-                    ReaderVolumeKeyBridge.onTurnPage = { dir -> latestVolTurnAction(dir) }
-                } 
-            LaunchedEffect(volumeKeyReady, readerVolumeTurnOn) {
-                ReaderVolumeKeyBridge.syncBaselineVolumes(ctx, prepareHeadroom = volumeKeyReady && readerVolumeTurnOn)
-                }
-
+            val swipeTurnActive = !shelf && readerSwipeTurnOn && !selectMode && !tocOpen && !hlListOpen && !folderDialogOpen
+            SideEffect { readerSwipePagerLock = swipeTurnActive }
             fun handleReaderBodyTap(pageRender: RenderedBookPage, pageText: String, pageStartOff: Int, dispOff: Int) {
                 val rawOff = pageRender.rawOffsetOf(dispOff)
                 val tappedFn = pageRender.footnotes
@@ -1003,7 +977,8 @@ commitExcerptHook = ::commitDraftIfEditing
              Surface(color = CG.copy(alpha = 0.18f), shape = RoundedCornerShape(6.dp), border = BorderStroke(0.8.dp, CG.copy(alpha = 0.65f)), modifier = Modifier.clickable { catBarOpen = !catBarOpen }) {
               Text("${act.category.ifBlank { "전자책" }}▾", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CG, maxLines = 1, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
              }
-             Text(act.title, fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, softWrap = false, modifier = Modifier.clickable { tocFilterQuery = ""; tocOpen = true })
+                        Surface(color = if (readerSwipeTurnOn) CG.copy(alpha = 0.22f) else CS2, shape = RoundedCornerShape(8.dp), border = BorderStroke(if (readerSwipeTurnOn) 1.2.dp else 0.8.dp, if (readerSwipeTurnOn) CG else CBDR), modifier = Modifier.clickable { readerSwipeTurnOn = !readerSwipeTurnOn; readerPrefs.edit().putBoolean("reader_swipe_turn_on", readerSwipeTurnOn).apply() }) { Text(if (readerSwipeTurnOn) "👆스와이프 ON" else "👆스와이프 OFF", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (readerSwipeTurnOn) CG else CM, maxLines = 1, softWrap = false, modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)) }
+                Text(act.title, fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, softWrap = false, modifier = Modifier.clickable { tocFilterQuery = ""; tocOpen = true })
                 ChipBtn("☰", tocOpen, CG) { tocFilterQuery = ""; tocOpen = !tocOpen }
              ChipBtn(if (readerAiMode == 2) "🪟" else "🦙", readerAiOpen, CG) { commitDraftIfEditing(); aiFloatMin = false; readerAiOpen = !readerAiOpen }
              ChipBtn("🖍️", highlightMode, CA) { highlightMode = !highlightMode; if (highlightMode) selectMode = false }
@@ -1258,11 +1233,15 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                         }
                     }
                 } else {
+                                    var swipeDragPx by remember(act.id) { mutableStateOf(0f) }
+                                    val latestSwipeTurn by rememberUpdatedState<(Int) -> Unit> { dir -> val curBase = liveVIdxHolder[0]; goToVPage(curBase + dir * stepPg, curBase) }
+                    val latestCanPrev by rememberUpdatedState(vIdx > 0); val latestCanNext by rememberUpdatedState(if (twoPageMode) (vIdx + 2 < vPages.size) else (vIdx + 1 < vPages.size)); val swipeThresholdPx = with(density) { 42.dp.toPx() }; val maxVisualShiftPx = with(density) { 26.dp.toPx() }
+                    val bookSwipeMod = if (readerSwipeTurnOn) { Modifier.pointerInput(act.id, readerSwipeTurnOn, swipeThresholdPx) { var totalDx = 0f; detectHorizontalDragGestures(onDragStart = { totalDx = 0f; swipeDragPx = 0f }, onHorizontalDrag = { change, dragAmount -> change.consume(); totalDx += dragAmount; val edgeDamp = if ((totalDx > 0f && !latestCanPrev) || (totalDx < 0f && !latestCanNext)) 0.18f else 0.45f; swipeDragPx = (totalDx * edgeDamp).coerceIn(-maxVisualShiftPx, maxVisualShiftPx) }, onDragEnd = { val dx = totalDx; totalDx = 0f; swipeDragPx = 0f; if (dx <= -swipeThresholdPx) latestSwipeTurn(1) else if (dx >= swipeThresholdPx) latestSwipeTurn(-1) }, onDragCancel = { totalDx = 0f; swipeDragPx = 0f }) }.graphicsLayer { translationX = swipeDragPx } } else Modifier
                     Surface(
                         color = pageSurf,
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(0.8.dp, mut.copy(alpha = 0.28f)),
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize().then(bookSwipeMod)
                     ) {
                         val splitScrollMod = if (shouldScrollPage) Modifier.verticalScroll(ovScroll) else Modifier
                         if (twoPageMode) {

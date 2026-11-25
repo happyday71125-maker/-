@@ -466,7 +466,7 @@ verticalAlignment = CV
                     TextButton(onClick = { shelf = !shelf; bmOpen = false }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp), modifier = Modifier.defaultMinSize(minWidth = 32.dp, minHeight = 32.dp)) { Text(if (shelf) "📖" else "📚${books.size}", fontSize = ui.bodySp, color = fg, fontWeight = FontWeight.Bold, softWrap = false) }
                        OutlinedButton(onClick = { bmOpen = !bmOpen; if (bmOpen) shelf = false }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 3.dp), modifier = Modifier.defaultMinSize(minWidth = 36.dp, minHeight = 32.dp)) { Text("🔖${bms.size}", fontSize = ui.subSp, color = if (bmOpen) CA else fg, softWrap = false) }
                     OutlinedButton(onClick = { twoPageMode = !twoPageMode; readerPrefs.edit().putBoolean("reader_two_page", twoPageMode).apply() }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 3.dp), modifier = Modifier.defaultMinSize(minWidth = 34.dp, minHeight = 32.dp)) { Text(if (twoPageMode) "📖" else "📄", fontSize = ui.subSp, color = if (twoPageMode) CG else fg, softWrap = false) }
-                    centerSlot())
+                    centerSlot()
                     OutlinedButton(
                         onClick = {
                             if (!searchOpen) searchAllBooks = shelf || act == null

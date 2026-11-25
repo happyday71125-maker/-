@@ -128,23 +128,41 @@ context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTI
 
 fun loadInstalledApps(): List<AppEntry> {
 val pm = context.packageManager
-val mainIntent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
-val rawList = pm.queryIntentActivities(mainIntent, 0)
 val favSet = getFavoritePackages()
 val intSet = getInterruptPackages()
-return rawList.mapNotNull { ri ->
+val discovered = LinkedHashMap<String, String>()
+runCatching {
+val la = context.getSystemService(android.content.pm.LauncherApps::class.java)
+val um = context.getSystemService(android.os.UserManager::class.java)
+val profiles = um?.userProfiles?.ifEmpty { listOf(android.os.Process.myUserHandle()) } ?: listOf(android.os.Process.myUserHandle())
+profiles.forEach { uh ->
+la?.getActivityList(null, uh)?.forEach { info ->
+val pkg = info.applicationInfo.packageName
+if (pkg != context.packageName && !discovered.containsKey(pkg)) {
+val lbl = info.label?.toString()?.trim().orEmpty()
+if (lbl.isNotEmpty()) discovered[pkg] = lbl
+}
+}
+}
+}
+runCatching {
+val mainIntent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
+pm.queryIntentActivities(mainIntent, 0).forEach { ri ->
 val pkg = ri.activityInfo.packageName
-if (pkg == context.packageName) null
-else {
-val label = ri.loadLabel(pm).toString()
+if (pkg != context.packageName && !discovered.containsKey(pkg)) {
+val lbl = ri.loadLabel(pm).toString().trim()
+if (lbl.isNotEmpty()) discovered[pkg] = lbl
+}
+}
+}
+return discovered.map { (pkg, label) ->
 AppEntry(
 label = label,
 packageName = pkg,
 isFavorite = favSet.contains(pkg) || favSet.contains(label),
 isInterruptEnabled = intSet.contains(pkg) || intSet.contains(label)
 )
-}
-}.distinctBy { it.packageName }.sortedBy { it.label.lowercase() }
+}.sortedBy { it.label.lowercase() }
 }
 
 fun launchApp(packageName: String) {
@@ -152,6 +170,12 @@ val intent = context.packageManager.getLaunchIntentForPackage(packageName)
 if (intent != null) {
 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 context.startActivity(intent)
+return
+}
+runCatching {
+val la = context.getSystemService(android.content.pm.LauncherApps::class.java)
+val act = la?.getActivityList(packageName, android.os.Process.myUserHandle())?.firstOrNull()
+if (act != null) la.startMainActivity(act.componentName, act.user, null, null)
 }
 }
 

@@ -221,6 +221,7 @@ var books by remember { mutableStateOf(SmartMemoClassifier.sanitizeBooks(repo.lo
 var cfg by remember { mutableStateOf(repo.loadConfig()) }
 var isDefHome by remember { mutableStateOf(repo.isDefaultHomeApp()) }
 var drawerOpen by remember { mutableStateOf(false) }
+var webStudioOpen by remember { mutableStateOf(false) }
 var settingsOpen by remember { mutableStateOf(false) }
 var interruptApp by remember { mutableStateOf<AppEntry?>(null) }
 suspend fun refreshAppsAsync() { val fresh = withContext(Dispatchers.IO) { repo.loadInstalledApps() }; apps = fresh }
@@ -239,6 +240,7 @@ if (homeNewIntentTick > 0) {
 interruptApp = null
 settingsOpen = false
 drawerOpen = false
+webStudioOpen = false
 }
 }
 val homeRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { isDefHome = repo.isDefaultHomeApp() }
@@ -262,6 +264,7 @@ activeAppTheme = cfg.themeName
 when {
 interruptApp != null -> interruptApp = null
 settingsOpen -> settingsOpen = false
+webStudioOpen -> webStudioOpen = false
 drawerOpen -> drawerOpen = false
 pager.currentPage != 2 -> scope.launch { pager.animateScrollToPage(2) }
 }
@@ -269,7 +272,7 @@ pager.currentPage != 2 -> scope.launch { pager.animateScrollToPage(2) }
 SideEffect { JarvisRuntime.bindCallbacks(rootCtx, { pg -> scope.launch { pager.scrollToPage(pg.coerceIn(0, 4)) } }, { raw0 -> val isVm = raw0.startsWith("__VOICEMEMO__"); val raw = if (isVm) raw0.removePrefix("__VOICEMEMO__").trim() else raw0.trim(); val mc0 = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = if (isVm) { if (!mc0.contains("음성메모")) SmartMemoClassifier.saveMemoCats(rootCtx, listOf("음성메모") + mc0); "음성메모" } else SmartMemoClassifier.guessCategory(raw, mc0); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "🎙️ [$c0] 탭 저장 + ⏰알림 ${sc}건 예약됨" else if (isVm) "🎙️ [음성메모] 탭에 즉시 저장되었습니다!" else "✅ [$c0] 메모 즉시 저장됨" }, { books }, { notes }) }
 val bgCol = CBG
 Box(Modifier.fillMaxSize().background(bgCol).systemBarsPadding().imePadding()) {
-val lockPagerForReaderSwipe = pager.currentPage == 1 && readerSwipePagerLock && !drawerOpen && !settingsOpen && interruptApp == null
+val lockPagerForReaderSwipe = (pager.currentPage == 1 && readerSwipePagerLock && !drawerOpen && !settingsOpen && interruptApp == null) || webStudioOpen
 HorizontalPager(state = pager, userScrollEnabled = !lockPagerForReaderSwipe, modifier = Modifier.fillMaxSize()) { page ->
 when (page) {
 0 -> MarkdownWriterView(
@@ -297,7 +300,8 @@ onQuickMemo = { raw0 -> val isVm = raw0.startsWith("__VOICEMEMO__"); val raw = i
 allNotes = notes,
 onNavTab = { pg -> scope.launch { pager.animateScrollToPage(pg.coerceIn(0, 4)) } },
 onToggleCheck = { nid, lIdx -> val nx = notes.map { if (it.id == nid) SmartMemoClassifier.toggleCheckLine(it, lIdx) else it }; notes = nx; repo.saveNotes(nx) },
-onLeftWriter = { scope.launch { pager.animateScrollToPage(0) } }, allApps = apps
+onLeftWriter = { scope.launch { pager.animateScrollToPage(0) } }, allApps = apps,
+onSwipeDown = { webStudioOpen = true }
 )
 3 -> NotesRagView(notes, books, cfg, ai, onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = false)
 4 -> NotesRagView(notes, books, cfg, ai, onSaveNotes = { notes = it; repo.saveNotes(it) }, isAiPage = true)
@@ -308,6 +312,9 @@ DrawerSheet(apps, onClose = { drawerOpen = false }, onLaunch = ::launchOrInterru
 onFav = { repo.toggleFavorite(it.packageName, it.label); apps = repo.loadInstalledApps() },
 onInt = { repo.toggleInterrupt(it.packageName, it.label); apps = repo.loadInstalledApps() },
 onRefresh = { scope.launch { refreshAppsAsync() } })
+}
+AnimatedVisibility(visible = webStudioOpen, enter = slideInVertically { -it }, exit = slideOutVertically { -it }) {
+WebAppStudioView(onClose = { webStudioOpen = false }, onSaveToMemo = { raw -> val nx = listOf(NoteItem(nextId(), makeHashtags(raw, "문서"), "", listOf("문서", "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx) })
 }
 AnimatedVisibility(visible = settingsOpen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
 SettingsSheet(cfg, isDefHome, onAskHome = ::askDefaultHome, onSysHome = { repo.openSystemDefaultAppsSettings() },
@@ -339,7 +346,7 @@ fun HomeView(
 favs: List<AppEntry>, importantNotes: List<NoteItem>, isDefHome: Boolean, cfg: LauncherConfig,
 onAskHome: () -> Unit, onLaunch: (AppEntry) -> Unit, onSwipeUp: () -> Unit,
 onLeftReader: () -> Unit, onRightNotes: () -> Unit, onSettings: () -> Unit,
-onRightAi: () -> Unit = {}, onQuickMemo: (String) -> String = { "" }, onQuickAi: (String) -> Unit = {}, allNotes: List<NoteItem> = emptyList(), onNavTab: (Int) -> Unit = {}, onToggleCheck: (Long, Int) -> Unit = { _, _ -> }, onLeftWriter: () -> Unit = {}, allApps: List<AppEntry> = emptyList()
+onRightAi: () -> Unit = {}, onQuickMemo: (String) -> String = { "" }, onQuickAi: (String) -> Unit = {}, allNotes: List<NoteItem> = emptyList(), onNavTab: (Int) -> Unit = {}, onToggleCheck: (Long, Int) -> Unit = { _, _ -> }, onLeftWriter: () -> Unit = {}, allApps: List<AppEntry> = emptyList(), onSwipeDown: () -> Unit = {}
 ) {
 val homeCtx = androidx.compose.ui.platform.LocalContext.current; val ctx = homeCtx; val aiCfg = remember { loadAiCfg(homeCtx) }; val ui = rememberUi(aiCfg.uiScale); val memoCats = remember { SmartMemoClassifier.loadMemoCats(homeCtx) }; var now by remember { mutableStateOf(Date()) }; var dragY by remember { mutableStateOf(0f) }; var aiFolded by remember { mutableStateOf(false) }
 var appColMode by remember { mutableStateOf(homeCtx.getSharedPreferences("pl_ai_v2_prefs", 0).getInt("home_app_col_mode", 1)) }
@@ -364,13 +371,12 @@ val hFallbackLauncher = rememberLauncherForActivityResult(ActivityResultContract
 val hMicP = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) JarvisRuntime.start(homeCtx) { runCatching { hFallbackLauncher.launch(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")) } } else JarvisRuntime.status = "⚠️ 마이크 권한을 허용해 주세요." }
 val upNested = remember {
 object : NestedScrollConnection {
-var pullUp = 0f
+var pullUp = 0f; var pullDown = 0f
 override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
 if (source == NestedScrollSource.Drag) {
-if (available.y < 0f) {
-pullUp += -available.y
-if (pullUp > 105f) { pullUp = 0f; onSwipeUp() }
-} else if (consumed.y > 0f) pullUp = 0f
+if (available.y < 0f) { pullUp += -available.y; pullDown = 0f; if (pullUp > 105f) { pullUp = 0f; onSwipeUp() } }
+else if (available.y > 0f) { pullDown += available.y; pullUp = 0f; if (pullDown > 95f) { pullDown = 0f; onSwipeDown() } }
+else { if (consumed.y > 0f) pullUp = 0f; if (consumed.y < 0f) pullDown = 0f }
 }
 return Offset.Zero
 }
@@ -386,7 +392,7 @@ val favMaxH = (homeMaxH * 0.36f).coerceIn(96.dp, 256.dp)
 Column(
 Modifier
 .fillMaxSize()
-.then(if (isKeyboardOpen) Modifier else Modifier.nestedScroll(upNested).pointerInput(Unit) { detectVerticalDragGestures(onDragStart = { dragY = 0f }, onVerticalDrag = { _, d -> dragY += d; if (dragY < -75f) { dragY = 0f; onSwipeUp() } }) })
+.then(if (isKeyboardOpen) Modifier else Modifier.nestedScroll(upNested).pointerInput(Unit) { detectVerticalDragGestures(onDragStart = { dragY = 0f }, onVerticalDrag = { _, d -> dragY += d; if (dragY < -75f) { dragY = 0f; onSwipeUp() } else if (dragY > 75f) { dragY = 0f; onSwipeDown() } }) })
 .padding(horizontal = ui.hPad + 6.dp, vertical = ui.vPad + 2.dp),
 verticalArrangement = Arrangement.spacedBy(6.dp)
 ) {
@@ -826,7 +832,7 @@ rightApps.forEach { a -> HomeAppTileItem(a, appGapMode, ui.subSp, appColMode == 
 }
 }
 }
-Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Surface(color = CS, shape = RoundedCornerShape(50), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = CV) { Text("✍️", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CW, modifier = Modifier.clickable { onLeftWriter() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📖", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onLeftReader() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🔼앱서랍", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CW, modifier = Modifier.clickable { onSwipeUp() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📝", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CG, modifier = Modifier.clickable { onRightNotes() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🦙", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CA, modifier = Modifier.clickable { onRightAi() }.padding(horizontal = 8.dp, vertical = 4.dp)) } } }
+Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Surface(color = CS, shape = RoundedCornerShape(50), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = CV) { Text("✍️", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CW, modifier = Modifier.clickable { onLeftWriter() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("📖", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CM, modifier = Modifier.clickable { onLeftReader() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🔼앱서랍", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CW, modifier = Modifier.clickable { onSwipeUp() }.padding(horizontal = 6.dp, vertical = 4.dp)); Text("🔽웹앱", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = CG, modifier = Modifier.clickable { onSwipeDown() }.padding(horizontal = 6.dp, vertical = 4.dp)); Text("📝", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CG, modifier = Modifier.clickable { onRightNotes() }.padding(horizontal = 8.dp, vertical = 4.dp)); Text("🦙", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CA, modifier = Modifier.clickable { onRightAi() }.padding(horizontal = 8.dp, vertical = 4.dp)) } } }
 }
 }
  

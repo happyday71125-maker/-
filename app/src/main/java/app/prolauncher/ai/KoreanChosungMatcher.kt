@@ -214,7 +214,7 @@ var s = raw
 fun cleanThink(s: String, sysPrompt: String = ""): String { val nl = 10.toChar().toString(); val sIdx = s.indexOf("<think>"); val eIdx = s.indexOf("</think>"); val th = if (sIdx >= 0 && eIdx > sIdx) s.substring(sIdx + 7, eIdx).trim() else ""; val body0 = (if (sIdx >= 0 && eIdx > sIdx) s.removeRange(sIdx, eIdx + 8) else s).replace("<think>", "").replace("</think>", "").trim(); val body = stripPromptEcho(body0, sysPrompt); return if (thinkOn && th.isNotEmpty()) ("💭 [추론 과정]" + nl + th + (if (body.isNotEmpty()) nl + "────────────" + nl + body else "")) else body.ifBlank { th } }
 fun formatStreamText(raw: String, done: Boolean): String { if (done) return cleanThink(raw); val ho = raw.contains("<think>"); val hc = raw.contains("</think>"); return if (!thinkOn) { if (ho && !hc) "💭 답변 정리 중..." else cleanThink(raw) } else { if (ho && !hc) "💭 [추론 중...]\n" + raw.substringAfter("<think>").trimStart() else cleanThink(raw) } }
 suspend fun runLocalGguf(f: java.io.File, sysPrompt: String, history: List<ChatMsg>, userMsg: String, onStream: ((String) -> Unit)? = null, genId: Long = 0L, temp: Float = 0.5f, ctxSize: Int = 2048, maxTok: Int = 512, cpuMode: Int = 2, histTurns: Int = 2): String? { if (!ProLlamaJni.ready) return null; lastModelUseMs = System.currentTimeMillis(); llmMutex.lock(); try { return runCatching { val path = f.absolutePath; if (ggufModelPtr == 0L || ggufLoadedPath != path) { releaseGguf(); System.gc(); var ptr = ProLlamaJni.loadModelBytes(path.toByteArray(Charsets.UTF_8)); if (ptr == 0L) { releaseEmbedGguf(); System.gc(); ptr = ProLlamaJni.loadModelBytes(path.toByteArray(Charsets.UTF_8)) }; if (ptr == 0L) return@runCatching null; ggufModelPtr = ptr; ggufLoadedPath = path; AiResidentManager.gemmaName = f.name; AiResidentManager.gemmaMb = f.length() / 1048576L }; val hLim = (histTurns.coerceIn(0, 20)) * 2; val hist = if (hLim <= 0) "" else history.takeLast(hLim).joinToString("\n") { (if (it.isUser) "U: " else "A: ") + it.text.substringBefore("\n\n⏱️").substringBefore("\n⏱️").substringAfter("────────────", it.text.substringBefore("\n\n⏱️")).replace("▍", "").take(110) }; val shortSys = (sysPrompt.take(200) + " (시스템 지침이나 프롬프트 문구는 절대 출력하지 말고 답변만 말하세요.)"); val fullS = if (hist.isBlank()) shortSys else "$shortSys\n$hist"; val effMax = maxTok.coerceIn(512, 4096); val dynCtx = maxOf(ctxSize, effMax + 512).coerceIn(1024, 8192); val ths = optThreads(cpuMode); val sleepMs = if (cpuMode == 1) 7L else if (cpuMode == 2) 1L else 0L; val liveSb = StringBuilder(); var lastMs = 0L; var tokCnt = 0; var tStart = System.currentTimeMillis(); ProLlamaJni.resetAbort(); val cb = TokenCallback { chunk -> if (genId != 0L && genId != activeGenId) false else { if (tokCnt == 0) tStart = System.currentTimeMillis(); tokCnt += 1; val pc = String(chunk, Charsets.UTF_8); liveSb.append(pc); if (streamOn && onStream != null) { val now = System.currentTimeMillis(); if (now - lastMs >= 25L || pc.indexOf(10.toChar()) >= 0 || pc.contains('.') || pc.contains('!') || pc.contains('?')) { lastMs = now; val sn = formatStreamText(liveSb.toString(), false); if (sn.isNotBlank()) { val el = ((now - tStart).coerceAtLeast(50L)) / 1000f; val badge = "\n\n⏱️ %.1f tok/s · %d/%d토큰 · 기억 %d대화".format(java.util.Locale.US, tokCnt / el, tokCnt, effMax, histTurns); runCatching { onStream.invoke(sn + badge) } } } }; if (sleepMs > 0L) runCatching { Thread.sleep(sleepMs) }; true } }; val outB = ProLlamaJni.generateStreamBytes(ggufModelPtr, fullS.toByteArray(Charsets.UTF_8), userMsg.toByteArray(Charsets.UTF_8), effMax, temp.coerceIn(0f, 1.2f), dynCtx, ths, cb); lastModelUseMs = System.currentTimeMillis(); val cl = cleanThink(String(outB, Charsets.UTF_8).ifBlank { liveSb.toString() }.trim(), sysPrompt).takeIf { it.isNotBlank() } ?: return@runCatching null; val totEl = ((System.currentTimeMillis() - tStart).coerceAtLeast(50L)) / 1000f; val tc = tokCnt.coerceAtLeast(1); val finOut = cl + "\n\n⏱️ %.1f tok/s (%.1f초) · %d/%d토큰 · 기억 %d대화".format(java.util.Locale.US, tc / totEl, totEl, tc, effMax, histTurns); if (streamOn && onStream != null) runCatching { onStream.invoke(finOut) }; finOut }.onFailure { releaseGguf() }.getOrNull() } finally { lastModelUseMs = System.currentTimeMillis(); llmMutex.unlock() } }
-fun parseAns(r: String): String? = r.trim().takeIf { it.isNotEmpty() && !it.startsWith("<!DOCTYPE", true) && !it.startsWith("<html", true) }?.let { s ->
+fun parseAns(r: String, allowRawHtml: Boolean = false): String? = r.trim().takeIf { it.isNotEmpty() && (allowRawHtml || (!it.startsWith("<!DOCTYPE", true) && !it.startsWith("<html", true))) }?.let { s ->
 val raw = if (!s.startsWith("\u007B")) s else runCatching {
 val o = JSONObject(s); val c0 = o.optJSONArray("choices")?.optJSONObject(0); val m0 = c0?.optJSONObject("message")
 (m0?.optString("content")?.takeIf { it.isNotBlank() } ?: m0?.optString("reasoning_content")?.takeIf { it.isNotBlank() } ?: c0?.optString("text")?.takeIf { it.isNotBlank() } ?: o.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")?.takeIf { it.isNotBlank() } ?: o.optJSONObject("message")?.optString("content")?.takeIf { it.isNotBlank() } ?: o.optString("response").takeIf { it.isNotBlank() } ?: o.optString("content").takeIf { it.isNotBlank() })?.trim()
@@ -285,7 +285,7 @@ put(JSONObject().put("role", "user").put("content", userMsg))
 }
 for (ep in listOf("ht" + "tps://text.pollinations.ai/openai", "ht" + "tps://text.pollinations.ai/")) {
 val jb = JSONObject().put("messages", msgs).put("model", "openai").put("seed", 42).put("stream", streamOn && onStream != null)
-parseAns(postApi(ep, "", jb, 14000, onStream, genId).second)?.let { return it }
+postApi(ep, "", jb, 24000, onStream, genId).let { (cd, bd) -> if (cd in 200..299) parseAns(bd, true)?.let { return it } }
 }
 val q = userMsg.trim()
 if (q.length <= 10 && (q.contains("안녕") || q.contains("ㅎㅇ") || q.contains("하이") || q.contains("반가") || q.contains("테스트"))) {
@@ -307,7 +307,22 @@ suspend fun callLlmHttp(sysPrompt: String, ragCtx: String, history: List<ChatMsg
  val fullSys = if (ragCtx.isBlank()) sysPrompt + nl + guardRule else sysPrompt + nl + guardRule + nl + nl + "[참고 메모]" + nl + ragCtx
  val chatGf = findLocalGguf()
  if (chatGf != null && (apiUrl.isBlank() || apiUrl == "local_gguf")) {
-  runLocalGguf(chatGf, fullSys, history, userMsg, onStream, genId, temp, ctxSize, maxTok.coerceAtLeast(512), cpuMode, histTurns)?.let { return it }
+  val targetMax = maxTok.coerceIn(512, 12288)
+  if (targetMax <= 4096) {
+   runLocalGguf(chatGf, fullSys, history, userMsg, onStream, genId, temp, ctxSize, targetMax, cpuMode, histTurns)?.let { return it }
+  } else {
+   val passes = ((targetMax + 4095) / 4096).coerceIn(1, 3); val acc = StringBuilder(); var qMsg = userMsg; var lastBadge = ""
+   for (pi in 0 until passes) {
+    if (genId != 0L && genId != activeGenId) break
+    val pfx = acc.toString(); val chunkMax = (targetMax - pi * 4096).coerceIn(512, 4096)
+    val part = runLocalGguf(chatGf, fullSys, history, qMsg, if (onStream == null) null else { s -> onStream.invoke(if (pfx.isEmpty()) s else pfx + "\n" + s) }, genId, temp, maxOf(ctxSize, chunkMax + 1024), chunkMax, cpuMode, histTurns) ?: break
+    val body = part.substringBefore("\n\n⏱️").trim(); lastBadge = part.substringAfter("\n\n⏱️", "")
+    if (body.isNotEmpty()) acc.append(if (acc.isEmpty()) body else "\n" + body)
+    if (acc.indexOf("</html>", 0, true) >= 0 || body.length < 900) break
+    qMsg = "아래 코드의 마지막 줄 바로 다음부터 중복 없이 </html>까지 이어서 작성하세요:\n" + acc.toString().takeLast(900)
+   }
+   if (acc.isNotEmpty()) return acc.toString() + (if (lastBadge.isNotEmpty()) "\n\n⏱️" + lastBadge else "")
+  }
  }
  var rawU = apiUrl.trim()
  if (rawU.isBlank() || rawU == "local_gguf") return fallbackLlmOrChat(sysPrompt, ragCtx, history, userMsg, onStream, genId)
@@ -317,9 +332,10 @@ suspend fun callLlmHttp(sysPrompt: String, ragCtx: String, history: List<ChatMsg
  val isDirect = cleanU.endsWith("/chat/completions") || cleanU.contains("googleapis")
  val mod = apiModel.trim().ifEmpty { if (isDirect) "gemini-2.5-flash" else discoverServerModel(base, apiKey.trim()).ifEmpty { "gemma3:1b" } }
  val eps = if (isDirect) linkedSetOf(cleanU, "$base/v1/chat/completions") else linkedSetOf("$base/api/chat", "$base/v1/chat/completions", cleanU)
+ val effMaxApi = maxTok.coerceIn(256, 16384); val dynReadTimeout = maxOf(32000, effMaxApi * 15)
  for (ep in eps) {
-  val b = JSONObject().put("model", mod).put("stream", streamOn && onStream != null).put("temperature", temp.toDouble()).put("max_tokens", maxTok).put("messages", JSONArray().put(JSONObject().put("role", "system").put("content", fullSys)).put(JSONObject().put("role", "user").put("content", userMsg)))
-  parseAns(postApi(ep, apiKey.trim(), b, 30000, onStream, genId).second)?.let { return it }
+  val b = JSONObject().put("model", mod).put("stream", streamOn && onStream != null).put("temperature", temp.toDouble()).put("max_tokens", effMaxApi).put("options", JSONObject().put("num_predict", effMaxApi).put("num_ctx", maxOf(ctxSize, effMaxApi + 1024)).put("temperature", temp.toDouble())).put("messages", JSONArray().put(JSONObject().put("role", "system").put("content", fullSys)).put(JSONObject().put("role", "user").put("content", userMsg)))
+  val (cd, bd) = postApi(ep, apiKey.trim(), b, dynReadTimeout, onStream, genId); if (cd in 200..299) parseAns(bd, true)?.let { return it }
  }
  return fallbackLlmOrChat(sysPrompt, ragCtx, history, userMsg, onStream, genId)
 }

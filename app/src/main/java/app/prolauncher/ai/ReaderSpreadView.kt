@@ -13,8 +13,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -275,6 +283,7 @@ fun ReaderView(
     var readerJustifyOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_justify_on", true)) }
     var readerParaIndentOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_para_indent_on", true)) }
 var readerSwipeTurnOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_swipe_turn_on", true)) }
+    var paperCurlEffectOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_paper_curl_on", true)) }
 DisposableEffect(Unit) { onDispose { readerSwipePagerLock = false } }
     var bCats by remember { mutableStateOf(SmartMemoClassifier.loadBookCats(ctx)) }
     var selCat by remember { mutableStateOf("전체") }
@@ -629,6 +638,9 @@ onClose = { searchOpen = false }
                                         ReaderPointBtn(if (readerSwipeTurnOn) "👆 스와이프 넘김 ON" else "👆 스와이프 넘김 OFF", readerSwipeTurnOn, CG, Modifier.weight(1f)) { readerSwipeTurnOn = !readerSwipeTurnOn; readerPrefs.edit().putBoolean("reader_swipe_turn_on", readerSwipeTurnOn).apply() }
                                     }
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                                        ReaderPointBtn(if (paperCurlEffectOn) "📖 종이책 넘김효과 ON" else "⚡ 즉시 페이지 전환", paperCurlEffectOn, CA, Modifier.weight(1f)) { paperCurlEffectOn = !paperCurlEffectOn; readerPrefs.edit().putBoolean("reader_paper_curl_on", paperCurlEffectOn).apply() }
+                                    }
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                                         listOf(0 to "줄간격 좁게", 1 to "줄간격 보통", 2 to "줄간격 넓게").forEach { (idx, lbl) ->
                                             ReaderPointBtn(lbl, lineHeightIdx == idx, CA, Modifier.weight(1f)) {
                                                 lineHeightIdx = idx
@@ -902,6 +914,21 @@ commitExcerptHook = ::commitDraftIfEditing
                 if (ttsHere) {
                     val remRaw = reflowSrc.fullText.substring(newOff.coerceIn(0, reflowSrc.fullText.length), reflowSrc.rawEndOf(newRaw).coerceIn(0, reflowSrc.fullText.length)).trim()
                     ReaderTtsRuntime.jumpToPage(ctx, newRaw, remRaw)
+                }
+            }
+            val pageTurnAnim = remember(act.id) { Animatable(0f) }
+            fun triggerPaperTurn(dir: Int, fromDragVal: Float = 0f) {
+                val curBase = liveVIdxHolder[0]; val targetIdx = curBase + dir * stepPg
+                val maxStart = if (twoPageMode) ((vPages.size - 1).coerceAtLeast(0) / 2) * 2 else (vPages.size - 1).coerceAtLeast(0)
+                val clampedTarget = (if (twoPageMode) (targetIdx / 2) * 2 else targetIdx).coerceIn(0, maxStart)
+                if (clampedTarget == curBase || !paperCurlEffectOn) { scope.launch { pageTurnAnim.snapTo(0f) }; goToVPage(targetIdx, curBase); return }
+                scope.launch {
+                    val startV = if (kotlin.math.abs(fromDragVal) > 0.02f) fromDragVal else (if (dir > 0) -0.06f else 0.06f)
+                    pageTurnAnim.snapTo(startV)
+                    pageTurnAnim.animateTo(if (dir > 0) -0.94f else 0.94f, tween(durationMillis = 190, easing = FastOutSlowInEasing))
+                    goToVPage(targetIdx, curBase)
+                    pageTurnAnim.snapTo(if (dir > 0) 0.22f else -0.22f)
+                    pageTurnAnim.animateTo(0f, tween(durationMillis = 145, easing = FastOutSlowInEasing))
                 }
             }
             fun jumpToCharOffset(targetOff: Int) {
@@ -1232,16 +1259,67 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                             }
                         }
                     }
-                } else {
-                                    var swipeDragPx by remember(act.id) { mutableStateOf(0f) }
-                                    val latestSwipeTurn by rememberUpdatedState<(Int) -> Unit> { dir -> val curBase = liveVIdxHolder[0]; goToVPage(curBase + dir * stepPg, curBase) }
-                    val latestCanPrev by rememberUpdatedState(vIdx > 0); val latestCanNext by rememberUpdatedState(if (twoPageMode) (vIdx + 2 < vPages.size) else (vIdx + 1 < vPages.size)); val swipeThresholdPx = with(density) { 42.dp.toPx() }; val maxVisualShiftPx = with(density) { 26.dp.toPx() }
-                    val bookSwipeMod = if (readerSwipeTurnOn) { Modifier.pointerInput(act.id, readerSwipeTurnOn, swipeThresholdPx) { var totalDx = 0f; detectHorizontalDragGestures(onDragStart = { totalDx = 0f; swipeDragPx = 0f }, onHorizontalDrag = { change, dragAmount -> change.consume(); totalDx += dragAmount; val edgeDamp = if ((totalDx > 0f && !latestCanPrev) || (totalDx < 0f && !latestCanNext)) 0.18f else 0.45f; swipeDragPx = (totalDx * edgeDamp).coerceIn(-maxVisualShiftPx, maxVisualShiftPx) }, onDragEnd = { val dx = totalDx; totalDx = 0f; swipeDragPx = 0f; if (dx <= -swipeThresholdPx) latestSwipeTurn(1) else if (dx >= swipeThresholdPx) latestSwipeTurn(-1) }, onDragCancel = { totalDx = 0f; swipeDragPx = 0f }) }.graphicsLayer { translationX = swipeDragPx } } else Modifier
+               } else {
+                    val latestCanPrev by rememberUpdatedState(vIdx > 0)
+                    val latestCanNext by rememberUpdatedState(if (twoPageMode) (vIdx + 2 < vPages.size) else (vIdx + 1 < vPages.size))
+                    val latestTriggerTurn by rememberUpdatedState<(Int, Float) -> Unit> { d, fv -> triggerPaperTurn(d, fv) }
+                    val swipeThresholdPx = with(density) { 38.dp.toPx() }
+                    val cardRefWPx = with(density) { availW.toPx() }.coerceAtLeast(180f)
+                    val paperBackTint = when (cfg.readerTheme) { "SEPIA" -> Color(0xFFEDE1C4); "PAPER" -> Color(0xFFF1EFEA); else -> Color(0xFF161E2E) }
+                    val gestureMod = if (readerSwipeTurnOn) {
+                        Modifier.pointerInput(act.id, readerSwipeTurnOn, swipeThresholdPx, cardRefWPx, paperCurlEffectOn) {
+                            var totalDx = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { totalDx = 0f; scope.launch { pageTurnAnim.stop() } },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    change.consume(); totalDx += dragAmount
+                                    val blocked = (totalDx > 0f && !latestCanPrev) || (totalDx < 0f && !latestCanNext)
+                                    val rawP = totalDx / (cardRefWPx * 0.72f)
+                                    val effP = if (blocked) (rawP * 0.16f).coerceIn(-0.14f, 0.14f) else rawP.coerceIn(-0.92f, 0.92f)
+                                    scope.launch { pageTurnAnim.snapTo(effP) }
+                                },
+                                onDragEnd = {
+                                    val dx = totalDx; val curAnim = pageTurnAnim.value; totalDx = 0f
+                                    if (dx <= -swipeThresholdPx && latestCanNext) latestTriggerTurn(1, curAnim)
+                                    else if (dx >= swipeThresholdPx && latestCanPrev) latestTriggerTurn(-1, curAnim)
+                                    else scope.launch { pageTurnAnim.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 520f)) }
+                                },
+                                onDragCancel = { totalDx = 0f; scope.launch { pageTurnAnim.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 520f)) } }
+                            )
+                        }
+                    } else Modifier
+                    val animVal = pageTurnAnim.value; val absAnim = kotlin.math.abs(animVal)
+                    val paperFxMod = if (paperCurlEffectOn) {
+                        Modifier.graphicsLayer {
+                            transformOrigin = TransformOrigin(0f, 0.5f); cameraDistance = 18f
+                            rotationY = if (animVal < 0f) (animVal * 56f) else (animVal * 26f)
+                            translationX = if (animVal > 0f) (animVal * size.width * 0.14f) else 0f
+                            scaleY = 1f - (absAnim * 0.025f)
+                        }.drawWithContent {
+                            drawContent()
+                            val w = size.width; val h = size.height
+                            val spinePx = 18.dp.toPx().coerceIn(2f, (w * 0.08f).coerceAtLeast(3f))
+                            drawRect(brush = Brush.horizontalGradient(listOf(spineBase.copy(alpha = if (isNightTheme) 0.34f else 0.10f), spineBase.copy(alpha = if (isNightTheme) 0.10f else 0.03f), Color.Transparent), startX = 0f, endX = spinePx), topLeft = Offset.Zero, size = Size(spinePx, h))
+                            val e1 = (w - 3.dp.toPx()).coerceAtLeast(0f); val e2 = (w - 1.5.dp.toPx()).coerceAtLeast(0f)
+                            drawLine(mut.copy(alpha = 0.18f), Offset(e1, 6.dp.toPx()), Offset(e1, (h - 6.dp.toPx()).coerceAtLeast(6.dp.toPx())), strokeWidth = 1f)
+                            drawLine(mut.copy(alpha = 0.26f), Offset(e2, 4.dp.toPx()), Offset(e2, (h - 4.dp.toPx()).coerceAtLeast(4.dp.toPx())), strokeWidth = 1f)
+                            if (absAnim > 0.008f && w > 24f) {
+                                val curlX = if (animVal < 0f) (w * (1f - absAnim * 0.86f)).coerceIn(2f, w - 2f) else (w * (absAnim * 0.86f)).coerceIn(2f, w - 2f)
+                                val foldW = (32.dp.toPx() * (0.55f + 0.45f * kotlin.math.sin(absAnim * 3.14159f))).coerceIn(10f, w * 0.28f)
+                                val shadowW = (44.dp.toPx() * (0.5f + 0.5f * (1f - absAnim * 0.4f))).coerceIn(12f, w * 0.32f)
+                                val foldL = (curlX - foldW * 0.65f).coerceIn(0f, w - 2f); val foldR = (curlX + foldW * 0.35f).coerceIn(foldL + 1.5f, w)
+                                drawRect(brush = Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.12f * absAnim), paperBackTint.copy(alpha = (0.86f * kotlin.math.min(1f, absAnim * 1.6f)).coerceIn(0f, 0.92f)), Color.White.copy(alpha = if (isNightTheme) 0.10f * absAnim else 0.42f * absAnim), paperBackTint.copy(alpha = 0.55f * absAnim)), startX = foldL, endX = foldR), topLeft = Offset(foldL, 0f), size = Size(foldR - foldL, h))
+                                val shEnd = (foldR + shadowW).coerceAtMost(w)
+                                if (shEnd > foldR + 1.5f) drawRect(brush = Brush.horizontalGradient(listOf(Color.Black.copy(alpha = (0.28f * (1f - absAnim * 0.35f)).coerceIn(0f, 0.32f)), Color.Black.copy(alpha = 0.08f * (1f - absAnim * 0.4f)), Color.Transparent), startX = foldR, endX = shEnd), topLeft = Offset(foldR, 0f), size = Size(shEnd - foldR, h))
+                            }
+                        }
+                    } else Modifier.graphicsLayer { translationX = animVal * 28.dp.toPx() }
                     Surface(
                         color = pageSurf,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp, topEnd = 12.dp, bottomEnd = 12.dp),
+                        shadowElevation = if (absAnim > 0.01f) 8.dp else 2.dp,
                         border = BorderStroke(0.8.dp, mut.copy(alpha = 0.28f)),
-                        modifier = Modifier.fillMaxSize().then(bookSwipeMod)
+                        modifier = Modifier.fillMaxSize().then(gestureMod).then(paperFxMod)
                     ) {
                         val splitScrollMod = if (shouldScrollPage) Modifier.verticalScroll(ovScroll) else Modifier
                         if (twoPageMode) {
@@ -1616,7 +1694,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                 verticalAlignment = CV
             ) {
                 OutlinedButton(
-                    onClick = { goToVPage(vIdx - stepPg) },
+                    onClick = { triggerPaperTurn(-1) },
                     enabled = canPrev,
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.1.dp, if (canPrev) fg.copy(alpha = 0.45f) else mut.copy(alpha = 0.2f)),
@@ -1638,7 +1716,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                     sliderOpen = !sliderOpen
                 }
                 OutlinedButton(
-                    onClick = { goToVPage(vIdx + stepPg) },
+                    onClick = { triggerPaperTurn(1) },
                     enabled = canNext,
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.1.dp, if (canNext) fg.copy(alpha = 0.45f) else mut.copy(alpha = 0.2f)),

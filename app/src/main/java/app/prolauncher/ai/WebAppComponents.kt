@@ -7,6 +7,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -77,25 +79,69 @@ fun WebAppShelfPanel(projects: List<WebAppProject>, folders: List<String>, curAp
 }
 
 @Composable
-fun WebAppAiPane(ui: ResponsiveUi, maxTok: Int, tokenOpen: Boolean, onToggleTok: () -> Unit, aiPromptIn: String, onPrompt: (String) -> Unit, aiAns: String, aiBusy: Boolean, hasEndHtml: Boolean, onLaunch: (String, String) -> Unit, onStop: () -> Unit, onApplyRun: () -> Unit) {
+fun WebAppAiPane(
+ ui: ResponsiveUi, maxTok: Int, tokenOpen: Boolean, onToggleTok: () -> Unit,
+ reqMode: String, onSetReqMode: (String) -> Unit,
+ aiPromptIn: String, onPrompt: (String) -> Unit,
+ aiAns: String, aiBusy: Boolean, hasEndHtml: Boolean,
+ hasPendingCode: Boolean, canUndoCode: Boolean,
+ onLaunch: (String, String) -> Unit, onStop: () -> Unit,
+ onApplyRun: () -> Unit, onDiscardPending: () -> Unit, onUndoCode: () -> Unit, onEmptyWarn: (String) -> Unit
+) {
+ val focusReq = remember { FocusRequester() }
  Column(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
   WebHBar {
+   ChipBtn("🔧현재코드 수정모드", reqMode == "MODIFY", CG) { onSetReqMode("MODIFY"); runCatching { focusReq.requestFocus() } }
+   ChipBtn("✨새 웹앱 제작모드", reqMode == "NEW", CA) { onSetReqMode("NEW"); runCatching { focusReq.requestFocus() } }
    ChipBtn("🪙토큰:${maxTok}", tokenOpen, CA) { onToggleTok() }
-   ChipBtn("✨새 웹앱", false, CG) { val q = aiPromptIn.trim().ifEmpty { "모바일 할일 체크리스트 + 달성률 웹앱 만들어줘" }; onPrompt(""); onLaunch("NEW", q) }
-   ChipBtn("🔧현재코드 수정", false, CW) { val q = aiPromptIn.trim().ifEmpty { "모바일 터치 버튼을 더 크고 보기 좋게 다듬어줘" }; onPrompt(""); onLaunch("MODIFY", q) }
-   ChipBtn("➕끊긴코드 이어쓰기", false, CA) { onLaunch("CONTINUE", "") }
-   if (aiAns.contains("<") && !aiBusy) ChipBtn("⚡저장&실행", true, CG) { onApplyRun() }
+   if (aiAns.contains("<") && !aiBusy && !hasEndHtml) ChipBtn("➕끊긴코드 이어쓰기", false, CW) { onLaunch("CONTINUE", "") }
+   if (canUndoCode && !aiBusy) ChipBtn("↩️이전코드 복원", false, CA) { onUndoCode() }
+  }
+  if (hasPendingCode && !aiBusy) {
+   Surface(color = CG.copy(alpha = 0.15f), shape = RoundedCornerShape(9.dp), border = BorderStroke(1.dp, CG), modifier = Modifier.fillMaxWidth()) {
+    Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), SB, CV) {
+     Text("✅ 요청하신 코드가 준비됨 · 확인 후 반영하세요", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+      ChipBtn("✅ 코드 반영&실행", true, CG) { onApplyRun() }
+      ChipBtn("취소", false, CM) { onDiscardPending() }
+     }
+    }
+   }
   }
   Surface(color = CS2, shape = RoundedCornerShape(9.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.weight(1f).fillMaxWidth()) {
    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp)) {
     val w = if (!aiBusy && aiAns.contains("<html", true) && !hasEndHtml) "⚠️ 코드가 </html> 전에 멈췄습니다. [➕끊긴코드 이어쓰기] 또는 토큰 상향을 이용해 보세요.\n\n" else ""
-    Text(w + aiAns.ifBlank { "🦙 소형 AI 웹앱 빌더 (최대 ${maxTok} 토큰)\n• 만들 앱 입력 후 [↑] 또는 [✨새 웹앱] / 개선은 [🔧현재코드 수정]" }, fontSize = 11.5.sp, lineHeight = 16.sp, fontFamily = FontFamily.Monospace, color = CW)
+    val guide = if (reqMode == "MODIFY") {
+     "🔧 [현재 코드 수정 모드] (최대 ${maxTok} 토큰)\n• 임의로 코드를 바꾸지 않습니다. 바꾸고 싶은 기능·디자인·버그 수정 사항을 아래 입력창에 직접 적고 [수정요청 ↑]을 눌러주세요.\n• 완료 후 [✅ 코드 반영&실행]을 눌러야 실제 코드에 적용됩니다."
+    } else {
+     "✨ [새 웹앱 제작 모드] (최대 ${maxTok} 토큰)\n• 새로 만들고 싶은 웹앱의 기능을 아래 입력창에 적고 [제작요청 ↑]을 눌러주세요."
+    }
+    Text(w + aiAns.ifBlank { guide }, fontSize = 11.5.sp, lineHeight = 16.sp, fontFamily = FontFamily.Monospace, color = CW)
    }
   }
   Row(Modifier.fillMaxWidth(), verticalAlignment = CV, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-   OutlinedTextField(value = aiPromptIn, onValueChange = onPrompt, placeholder = { Text("만들거나 수정할 웹앱 설명 입력...", fontSize = ui.subSp) }, singleLine = true, modifier = Modifier.weight(1f))
+   OutlinedTextField(
+    value = aiPromptIn,
+    onValueChange = onPrompt,
+    placeholder = { Text(if (reqMode == "MODIFY") "수정할 내용을 구체적으로 입력 후 [수정요청 ↑]..." else "새로 만들 웹앱 설명 입력 후 [제작요청 ↑]...", fontSize = ui.subSp) },
+    singleLine = true,
+    modifier = Modifier.weight(1f).focusRequester(focusReq)
+   )
    if (aiBusy) Button(onClick = onStop, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))) { Text("⏹️", fontSize = 12.sp) }
-   else Button(onClick = { val q = aiPromptIn.trim(); if (q.isNotEmpty()) { onPrompt(""); onLaunch("NEW", q) } }, colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = CON_ACCENT)) { Text("↑", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+   else Button(
+    onClick = {
+     val q = aiPromptIn.trim()
+     if (q.isEmpty()) {
+      onEmptyWarn(if (reqMode == "MODIFY") "⚠️ 먼저 어떤 부분을 어떻게 수정할지 입력창에 적어주세요!" else "⚠️ 먼저 새로 만들 웹앱의 기능을 입력창에 적어주세요!")
+      runCatching { focusReq.requestFocus() }
+     } else {
+      onPrompt("")
+      onLaunch(reqMode, q)
+     }
+    },
+    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+    colors = ButtonDefaults.buttonColors(containerColor = if (reqMode == "MODIFY") CG else CA, contentColor = CON_ACCENT)
+   ) { Text(if (reqMode == "MODIFY") "수정요청 ↑" else "제작요청 ↑", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
   }
  }
 }

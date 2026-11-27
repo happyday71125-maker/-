@@ -285,6 +285,8 @@ fun ReaderView(
     var readerParaIndentOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_para_indent_on", true)) }
 var readerSwipeTurnOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_swipe_turn_on", true)) }
     var paperCurlEffectOn by remember { mutableStateOf(readerPrefs.getBoolean("reader_paper_curl_on", true)) }
+    var turnSpeedIdx by remember { mutableStateOf(readerPrefs.getInt("reader_turn_speed_idx", 1).coerceIn(0, 2)) }
+    var curlDepthIdx by remember { mutableStateOf(readerPrefs.getInt("reader_curl_depth_idx", 1).coerceIn(0, 2)) }
 DisposableEffect(Unit) { onDispose { readerSwipePagerLock = false } }
     var bCats by remember { mutableStateOf(SmartMemoClassifier.loadBookCats(ctx)) }
     var selCat by remember { mutableStateOf("전체") }
@@ -641,6 +643,24 @@ onClose = { searchOpen = false }
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                                         ReaderPointBtn(if (paperCurlEffectOn) "📖 종이책 넘김효과 ON" else "⚡ 즉시 페이지 전환", paperCurlEffectOn, CA, Modifier.weight(1f)) { paperCurlEffectOn = !paperCurlEffectOn; readerPrefs.edit().putBoolean("reader_paper_curl_on", paperCurlEffectOn).apply() }
                                     }
+                                    if (paperCurlEffectOn) {
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                                            listOf(0 to "⚡ 넘김 빠름", 1 to "📖 넘김 보통", 2 to "🌿 넘김 여유").forEach { (idx, lbl) ->
+                                                ReaderPointBtn(lbl, turnSpeedIdx == idx, CG, Modifier.weight(1f)) {
+                                                    turnSpeedIdx = idx
+                                                    readerPrefs.edit().putInt("reader_turn_speed_idx", idx).apply()
+                                                }
+                                            }
+                                        }
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+                                            listOf(0 to "🪶 곡률 슬림", 1 to "📐 곡률 표준", 2 to "🌊 곡률 깊게").forEach { (idx, lbl) ->
+                                                ReaderPointBtn(lbl, curlDepthIdx == idx, CA, Modifier.weight(1f)) {
+                                                    curlDepthIdx = idx
+                                                    readerPrefs.edit().putInt("reader_curl_depth_idx", idx).apply()
+                                                }
+                                            }
+                                        }
+                                    }
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
                                         listOf(0 to "줄간격 좁게", 1 to "줄간격 보통", 2 to "줄간격 넓게").forEach { (idx, lbl) ->
                                             ReaderPointBtn(lbl, lineHeightIdx == idx, CA, Modifier.weight(1f)) {
@@ -946,7 +966,12 @@ commitExcerptHook = ::commitDraftIfEditing
                 scope.launch {
                     val sP = fromProgress.coerceIn(0.01f, 0.985f)
                     pageTurnAnim.snapTo(sP)
-                    val dur = ((1f - sP) * (if (twoPageMode) 330f else 285f)).roundToInt().coerceIn(90, 330)
+                    val baseDur = when (turnSpeedIdx) {
+                        0 -> if (twoPageMode) 225f else 195f
+                        2 -> if (twoPageMode) 460f else 410f
+                        else -> if (twoPageMode) 330f else 285f
+                    }
+                    val dur = ((1f - sP) * baseDur).roundToInt().coerceIn(75, 480)
                     pageTurnAnim.animateTo(1f, tween(durationMillis = dur, easing = FastOutSlowInEasing))
                     goToVPage(clampedTarget, curBase)
                     turnDir = 0
@@ -1285,7 +1310,11 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                     val latestCanPrev by rememberUpdatedState(vIdx > 0)
                     val latestCanNext by rememberUpdatedState(if (twoPageMode) (vIdx + 2 < vPages.size) else (vIdx + 1 < vPages.size))
                     val latestTriggerTurn by rememberUpdatedState<(Int, Float) -> Unit> { d, fp -> triggerPaperTurn(d, fp) }
-                    val swipeThresholdPx = with(density) { 36.dp.toPx() }
+                    val swipeThresholdPx = with(density) { (when (curlDepthIdx) { 0 -> 26.dp; 2 -> 46.dp; else -> 36.dp }).toPx() }
+                    val dragSpanRatio = when (curlDepthIdx) { 0 -> 0.62f; 2 -> 0.90f; else -> 0.78f }
+                    val curlFlapRatio = when (curlDepthIdx) { 0 -> 0.085f; 2 -> 0.205f; else -> 0.135f }
+                    val curlShadowPeak = when (curlDepthIdx) { 0 -> 0.16f; 2 -> 0.34f; else -> 0.24f }
+                    val spineFlipCamDist = when (curlDepthIdx) { 0 -> 32f; 2 -> 16f; else -> 24f }
                     val cardRefWPx = with(density) { availW.toPx() }.coerceAtLeast(180f)
                     val paperBackTint = when (cfg.readerTheme) { "SEPIA" -> Color(0xFFEDE0C4); "PAPER" -> Color(0xFFF1EEE7); else -> Color(0xFF161E2E) }
                     val paperBackHi = when (cfg.readerTheme) { "SEPIA" -> Color(0xFFFBF5E6); "PAPER" -> Color(0xFFFFFFFF); else -> Color(0xFF233048) }
@@ -1317,7 +1346,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                     }
 
                     val gestureMod = if (readerSwipeTurnOn) {
-                        Modifier.pointerInput(act.id, twoPageMode, readerSwipeTurnOn, swipeThresholdPx, cardRefWPx, paperCurlEffectOn) {
+                        Modifier.pointerInput(act.id, twoPageMode, readerSwipeTurnOn, swipeThresholdPx, dragSpanRatio, cardRefWPx, paperCurlEffectOn, turnSpeedIdx, curlDepthIdx) {
                             var totalDx = 0f
                             detectHorizontalDragGestures(
                                 onDragStart = {
@@ -1337,7 +1366,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                     if (totalDx < -2f) {
                                         if (latestCanNext && paperCurlEffectOn) {
                                             turnDir = 1; dragRubberPx = 0f
-                                            val p = (-totalDx / (cardRefWPx * 0.78f)).coerceIn(0.004f, 0.985f)
+                                            val p = (-totalDx / (cardRefWPx * dragSpanRatio)).coerceIn(0.004f, 0.985f)
                                             scope.launch { pageTurnAnim.snapTo(p) }
                                         } else {
                                             turnDir = 0; scope.launch { pageTurnAnim.snapTo(0f) }
@@ -1346,7 +1375,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                     } else if (totalDx > 2f) {
                                         if (latestCanPrev && paperCurlEffectOn) {
                                             turnDir = -1; dragRubberPx = 0f
-                                            val p = (totalDx / (cardRefWPx * 0.78f)).coerceIn(0.004f, 0.985f)
+                                            val p = (totalDx / (cardRefWPx * dragSpanRatio)).coerceIn(0.004f, 0.985f)
                                             scope.launch { pageTurnAnim.snapTo(p) }
                                         } else {
                                             turnDir = 0; scope.launch { pageTurnAnim.snapTo(0f) }
@@ -1551,7 +1580,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                                 val w = size.width; val h = size.height
                                                 val foldX = (w * (1f - curlP)).coerceIn(0f, w)
                                                 val sinCurve = kotlin.math.sin(curlP * 3.1415927f).coerceIn(0f, 1f)
-                                                val flapW = (w * 0.135f * sinCurve).coerceIn(0f, w * 0.18f)
+                                                val flapW = (w * curlFlapRatio * sinCurve).coerceIn(0f, w * 0.25f)
                                                 val flapL = (foldX - flapW).coerceIn(0f, w)
                                                 if (flapL > 0.5f) {
                                                     clipRect(left = 0f, top = 0f, right = flapL, bottom = h) {
@@ -1566,12 +1595,12 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                                         )
                                                     }
                                                 }
-                                                val dropW = (34.dp.toPx() * (0.35f + 0.65f * sinCurve)).coerceIn(0f, (w - foldX).coerceAtLeast(0f))
+                                                val dropW = ((if (curlDepthIdx == 2) 46.dp else if (curlDepthIdx == 0) 24.dp else 34.dp).toPx() * (0.35f + 0.65f * sinCurve)).coerceIn(0f, (w - foldX).coerceAtLeast(0f))
                                                 if (dropW > 1f) {
                                                     drawRect(
                                                         brush = Brush.horizontalGradient(
                                                             listOf(
-                                                                Color.Black.copy(alpha = (0.24f * (1f - curlP * 0.35f)).coerceIn(0f, 0.26f)),
+                                                                Color.Black.copy(alpha = (curlShadowPeak * (1f - curlP * 0.35f)).coerceIn(0f, 0.36f)),
                                                                 Color.Black.copy(alpha = 0.08f * sinCurve),
                                                                 Color.Transparent
                                                             ),
@@ -1661,7 +1690,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                                 .fillMaxHeight()
                                                 .graphicsLayer {
                                                     transformOrigin = TransformOrigin(0f, 0.5f)
-                                                    cameraDistance = 24f
+                                                    cameraDistance = spineFlipCamDist
                                                     rotationY = deg
                                                 }
                                                 .background(pageSurf)
@@ -1684,7 +1713,7 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                                 .fillMaxHeight()
                                                 .graphicsLayer {
                                                     transformOrigin = TransformOrigin(1f, 0.5f)
-                                                    cameraDistance = 24f
+                                                    cameraDistance = spineFlipCamDist
                                                     rotationY = deg
                                                 }
                                                 .background(pageSurf)

@@ -37,6 +37,9 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
  var viewMode by remember { mutableStateOf(sp.getInt("webapp_view_mode_v1", 1).coerceIn(0, 2)) }
  var shelfOpen by remember { mutableStateOf(false) }; var guideOpen by remember { mutableStateOf(false) }; var tokenOpen by remember { mutableStateOf(false) }
  var maxTok by remember { mutableStateOf(sp.getInt("webapp_ai_max_tokens_v1", 3072).coerceIn(512, 16384)) }
+ var syncGlobalCtx by remember { mutableStateOf(sp.getBoolean("webapp_sync_global_ctx_v1", false)) }
+ var webCtx by remember { mutableStateOf(if (syncGlobalCtx) aiCfg.ctxSize.coerceIn(1024, 32768) else sp.getInt("webapp_ai_ctx_size_v1", 8192).coerceIn(1024, 32768)) }
+ var pinnedIds by remember { mutableStateOf(projects.filter { isWebAppPinnedHome(ctx, it.id) }.map { it.id }.toSet()) }
  var codeFontSp by remember { mutableStateOf(sp.getInt("webapp_code_font_v1", 13).coerceIn(10, 22)) }; var reloadTick by remember { mutableStateOf(0) }
  var aiMode by remember { mutableStateOf(0) }; var aiReqMode by remember { mutableStateOf("MODIFY") }; var splitHoriz by remember { mutableStateOf(false) }; var floatMin by remember { mutableStateOf(false) }
  var floatX by remember { mutableStateOf(16f) }; var floatY by remember { mutableStateOf(100f) }
@@ -48,6 +51,8 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
 
  fun setModeP(m: Int) { viewMode = m.coerceIn(0, 2); sp.edit().putInt("webapp_view_mode_v1", viewMode).apply() }
  fun setTokP(tk: Int) { val c = tk.coerceIn(512, 16384); maxTok = c; sp.edit().putInt("webapp_ai_max_tokens_v1", c).apply(); statusMsg = "🪙 최대 출력 토큰: ${c} 설정됨" }
+ fun setCtxP(cv: Int) { val c = cv.coerceIn(1024, 32768); webCtx = c; sp.edit().putInt("webapp_ai_ctx_size_v1", c).apply(); if (syncGlobalCtx) { val u = loadAiCfg(ctx).copy(ctxSize = c); saveAiCfg(ctx, u) }; statusMsg = "🧠 웹앱 컨텍스트 윈도우: ${c} 토큰 설정됨" }
+ fun toggleSyncGlobal(on: Boolean) { syncGlobalCtx = on; sp.edit().putBoolean("webapp_sync_global_ctx_v1", on).apply(); if (on) { val g = loadAiCfg(ctx).ctxSize.coerceIn(1024, 32768); webCtx = g; statusMsg = "🔗 전역 AI 컨텍스트(${g})와 동기화됨" } else statusMsg = "✋ 웹앱 스튜디오 독립 수동 컨텍스트 모드" }
  fun setCode(s: String) { codeTfv = TextFieldValue(s, TextRange(s.length)); sp.edit().putString("webapp_active_code_v1", s).apply() }
  fun saveApp() {
   val t = titleTfv.text.trim().ifEmpty { Regex("<title>(.*?)</title>", RegexOption.IGNORE_CASE).find(codeTfv.text)?.groupValues?.getOrNull(1)?.trim()?.take(26)?.ifEmpty { "내 웹앱" } ?: "내 웹앱" }
@@ -94,16 +99,18 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
   if (mode != "CONTINUE") lastGenMode = mode
   val cfg = loadAiCfg(ctx)
   val sysP = "모바일 단일파일 HTML5 웹앱 전문 개발자입니다. 설명 없이 <!DOCTYPE html>로 시작해 </html>로 끝나는 완전한 인라인 CSS/JS 코드만 출력하세요."
+  val effCtx = maxOf(if (syncGlobalCtx) cfg.ctxSize else webCtx, maxTok + 512).coerceIn(1024, 32768)
+  val maxModChars = ((effCtx - maxTok - 384).coerceAtLeast(1024) * 3).coerceIn(4000, 64000)
   val seed = extractCleanHtmlFromAi(aiAns).takeIf { mode == "CONTINUE" && it.contains("<") } ?: codeTfv.text
   val uP = when (mode) {
-   "MODIFY" -> "[현재 HTML]\n${codeTfv.text.take(6500)}\n\n[수정 요청]\n$req\n전체 <!DOCTYPE html>...</html> 코드를 출력하세요."
+   "MODIFY" -> "[현재 HTML]\n${codeTfv.text.take(maxModChars)}\n\n[수정 요청]\n$req\n전체 <!DOCTYPE html>...</html> 코드를 출력하세요."
    "CONTINUE" -> "아래 끊긴 HTML의 마지막 부분 바로 뒤부터 중복 없이 </html>까지 이어서 완성하세요:\n\n${seed.takeLast(1400)}"
    else -> "다음 기능의 모바일 단일 파일 HTML5 웹앱(localStorage 활용)을 <!DOCTYPE html>부터 </html>까지 생략 없이 작성하세요: $req"
   }
   val pfx = if (mode == "CONTINUE") seed else ""
   aiAns = "⚡ 웹앱 생성 중 (최대 ${maxTok} 토큰)... ▍"
   aiJob = scope.launch {
-   val ans = withContext(Dispatchers.IO) { callLlmHttp(sysP, "", emptyList(), uP, cfg.apiUrl, cfg.apiModel, cfg.apiKey, { pt -> if (g == activeGenId && pt.isNotBlank()) uiP { aiAns = (if (pfx.isNotEmpty()) pfx + "\n" + pt else pt) + " ▍" } }, g, cfg.temp.coerceIn(0.1f, 0.7f), maxOf(cfg.ctxSize, maxTok + 1024).coerceIn(2048, 16384), maxTok, cfg.cpuMode, 0) }
+   val ans = withContext(Dispatchers.IO) { callLlmHttp(sysP, "", emptyList(), uP, cfg.apiUrl, cfg.apiModel, cfg.apiKey, { pt -> if (g == activeGenId && pt.isNotBlank()) uiP { aiAns = (if (pfx.isNotEmpty()) pfx + "\n" + pt else pt) + " ▍" } }, g, cfg.temp.coerceIn(0.1f, 0.7f), effCtx, maxTok, cfg.cpuMode, 0) }
    if (g == activeGenId) {
     aiAns = (if (pfx.isNotEmpty() && !ans.isNullOrBlank()) pfx + "\n" + extractCleanHtmlFromAi(ans) else (ans ?: "").ifBlank { aiAns.removeSuffix(" ▍") }).ifBlank { "⚠️ 생성 실패: AI 세팅이나 토큰을 확인하세요." }
     aiBusy = false; val ex = extractCleanHtmlFromAi(aiAns)
@@ -124,7 +131,7 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
  val hasEndHtml = remember(aiAns) { extractCleanHtmlFromAi(aiAns).isNotBlank() && aiAns.lowercase().contains("/html>") }
  val aiBody: @Composable () -> Unit = {
   WebAppAiPane(
-   ui = ui, maxTok = maxTok, tokenOpen = tokenOpen, onToggleTok = { tokenOpen = !tokenOpen },
+   ui = ui, maxTok = maxTok, webCtx = webCtx, tokenOpen = tokenOpen, onToggleTok = { tokenOpen = !tokenOpen },
    reqMode = aiReqMode, onSetReqMode = { aiReqMode = it },
    aiPromptIn = aiPromptIn, onPrompt = { aiPromptIn = it },
    aiAns = aiAns, aiBusy = aiBusy, hasEndHtml = hasEndHtml,
@@ -149,7 +156,7 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
      Text(statusMsg, fontSize = ui.subSp, color = CG, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = CV) {
-     ChipBtn("🪙${maxTok}", tokenOpen, CA) { tokenOpen = !tokenOpen }
+     ChipBtn("🪙${maxTok}·🧠${webCtx}", tokenOpen, CA) { tokenOpen = !tokenOpen }
      TextButton(onClick = { guideOpen = !guideOpen }, contentPadding = PaddingValues(horizontal = 5.dp)) { Text("❓", fontSize = ui.subSp, color = CA) }
      TextButton(onClick = { stopAi(); onClose() }, contentPadding = PaddingValues(horizontal = 5.dp)) { Text("✕ 홈으로", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CM) }
     }
@@ -157,12 +164,19 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
    if (guideOpen) Surface(color = CS, shape = RoundedCornerShape(11.dp), border = BorderStroke(1.dp, CG.copy(alpha = 0.7f)), modifier = Modifier.fillMaxWidth()) {
     Text("💡 추천 소형 AI: 로컬 GGUF는 Qwen2.5-Coder-1.5B/3B·Gemma-3-4B, 추천 토큰은 미니 1,536 / 표준 ⭐3,072(기본) / 복합 4,096~8,192 (4,096 초과 시 자동 이어쓰기)", fontSize = 11.sp, lineHeight = 16.sp, color = CW, modifier = Modifier.padding(10.dp))
    }
-   if (tokenOpen) WebAppTokenCard(maxTok, ui, ::setTokP) { tokenOpen = false }
+   if (tokenOpen) WebAppTokenCard(maxTok, webCtx, syncGlobalCtx, ui, ::setTokP, ::setCtxP, ::toggleSyncGlobal) { tokenOpen = false }
+   val curPinned = curAppId in pinnedIds
    WebHBar {
     ChipBtn("▶️ 앱사용", viewMode == 1, CG) { setModeP(1) }
     ChipBtn("💻 코드편집", viewMode == 0, CW) { setModeP(0) }
     ChipBtn("◫ 동시보기", viewMode == 2, CA) { setModeP(2) }
     ChipBtn("🔧 AI 수정요청", aiMode != 0 && aiReqMode == "MODIFY", CG) { aiReqMode = "MODIFY"; if (aiMode == 0) aiMode = 1; floatMin = false; statusMsg = "🔧 아래 AI 입력창에 원하는 코드 수정사항을 적어주세요." }
+    ChipBtn(if (curPinned) "📌 홈고정됨" else "📌 홈고정", curPinned, if (curPinned) CG else CA) {
+     saveApp()
+     val nowPin = toggleWebAppPinnedHome(ctx, curAppId, titleTfv.text.trim().ifEmpty { "내 웹앱" })
+     pinnedIds = projects.filter { isWebAppPinnedHome(ctx, it.id) }.map { it.id }.toSet() + (if (nowPin) setOf(curAppId) else emptySet())
+     statusMsg = if (nowPin) "📌 홈 화면 바로가기에 고정됨! 홈에서 탭하면 즉시 실행됩니다." else "📌 홈 화면 바로가기 고정이 해제되었습니다."
+    }
     ChipBtn("📂 보관함(${projects.size})", shelfOpen, CA) { shelfOpen = !shelfOpen }
     ChipBtn("💾 저장", false, CG) { saveApp() }
     if (prevCodeBackup != null) ChipBtn("↩️ 되돌리기", false, CA) { undoAiCode() }
@@ -183,7 +197,7 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
      ChipBtn("🔤${codeFontSp}", false, CW) { codeFontSp = if (codeFontSp >= 20) 12 else codeFontSp + 2; sp.edit().putInt("webapp_code_font_v1", codeFontSp).apply() }
     }
    }
-   if (shelfOpen) WebAppShelfPanel(projects, folders, curAppId, ui, { nf -> if (!folders.contains(nf)) { folders = folders + nf; saveWebAppFolders(ctx, folders); curFolder = nf } }, ::openApp) { did -> projects = projects.filterNot { it.id == did }.also { saveWebApps(ctx, it) }; if (curAppId == did) projects.firstOrNull()?.let { openApp(it, true) } }
+   if (shelfOpen) WebAppShelfPanel(projects, folders, curAppId, pinnedIds, ui, { nf -> if (!folders.contains(nf)) { folders = folders + nf; saveWebAppFolders(ctx, folders); curFolder = nf } }, ::openApp, { p -> val np = toggleWebAppPinnedHome(ctx, p.id, p.title); pinnedIds = if (np) pinnedIds + p.id else pinnedIds - p.id; statusMsg = if (np) "📌 『${p.title}』 홈 화면 고정 완료!" else "📌 『${p.title}』 홈 고정 해제됨" }) { did -> if (isWebAppPinnedHome(ctx, did)) toggleWebAppPinnedHome(ctx, did, ""); pinnedIds = pinnedIds - did; projects = projects.filterNot { it.id == did }.also { saveWebApps(ctx, it) }; packageChangeTick++; if (curAppId == did) projects.firstOrNull()?.let { openApp(it, true) } }
    val codeField: @Composable (Modifier) -> Unit = { m -> Surface(color = CS, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CBDR), modifier = m) { OutlinedTextField(value = codeTfv, onValueChange = { codeTfv = it; sp.edit().putString("webapp_active_code_v1", it.text).apply() }, textStyle = TextStyle(fontSize = codeFontSp.sp, lineHeight = (codeFontSp * 1.4f).sp, fontFamily = FontFamily.Monospace, color = CW), modifier = Modifier.fillMaxSize()) } }
    val webField: @Composable (Modifier) -> Unit = { m -> Surface(color = CS, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.9.dp, CG.copy(alpha = 0.6f)), modifier = m) { LiveWebAppRunner(codeTfv.text, reloadTick, Modifier.fillMaxSize()) } }
    val renderWorkspace: @Composable (Modifier) -> Unit = { mod ->

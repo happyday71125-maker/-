@@ -22,18 +22,24 @@ fun WebHBar(content: @Composable RowScope.() -> Unit) {
  Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = CV, content = content)
 }
 
+
 @Composable
-fun WebAppTokenCard(maxTok: Int, ui: ResponsiveUi, onSetTok: (Int) -> Unit, onClose: () -> Unit) {
+fun WebAppTokenCard(
+ maxTok: Int, webCtx: Int, syncGlobalCtx: Boolean, ui: ResponsiveUi,
+ onSetTok: (Int) -> Unit, onSetCtx: (Int) -> Unit, onToggleSyncGlobal: (Boolean) -> Unit, onClose: () -> Unit
+) {
  var tokDraft by remember(maxTok) { mutableStateOf(maxTok.toString()) }
+ var ctxDraft by remember(webCtx) { mutableStateOf(webCtx.toString()) }
+ val estKvMb = ((webCtx / 1024f) * 34f).roundToInt()
  Surface(color = CS, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, CA.copy(alpha = 0.75f)), modifier = Modifier.fillMaxWidth()) {
   Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
    Row(Modifier.fillMaxWidth(), SB, CV) {
-    Text("🎛️ 웹앱 AI 최대 출력 토큰 수동 설정: ${maxTok} 토큰", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CA)
+    Text("🎛️ 웹앱 출력 토큰(${maxTok}) & 수동 컨텍스트(${webCtx})", fontSize = ui.subSp, fontWeight = FontWeight.Bold, color = CA)
     Text("✕", fontSize = ui.subSp, color = CM, modifier = Modifier.clickable { onClose() })
    }
-   Text("• 소형 로컬 AI(1.5B~4B GGUF) 추천값: ⭐3,072 토큰 / 4,096 초과 시 자동 이어쓰기로 완성", fontSize = 10.sp, color = CM)
+   Text("① 최대 출력 토큰 (Gemma 4 E2B 추천: ⭐3,072~4,096 / 초과 시 자동 이어쓰기)", fontSize = 10.sp, color = CM)
    WebHBar {
-    listOf(1536 to "⚡1,536(미니·1B)", 3072 to "⭐3,072(표준·소형AI추천)", 4096 to "🚀4,096(복합앱)", 8192 to "👑8,192(대형·이어쓰기)", 12288 to "🔥12,288(풀스택)").forEach { (tk, lb) ->
+    listOf(1536 to "⚡1,536(미니)", 3072 to "⭐3,072(표준추천)", 4096 to "🚀4,096(복합앱)", 8192 to "👑8,192(대형)", 12288 to "🔥12,288(풀스택)").forEach { (tk, lb) ->
      ChipBtn(lb, maxTok == tk, if (tk == 3072) CG else CA) { onSetTok(tk) }
     }
    }
@@ -42,19 +48,40 @@ fun WebAppTokenCard(maxTok: Int, ui: ResponsiveUi, onSetTok: (Int) -> Unit, onCl
     ChipBtn("+512", false, CG) { onSetTok(maxTok + 512) }
     ChipBtn("+1024", false, CA) { onSetTok(maxTok + 1024) }
     OutlinedTextField(value = tokDraft, onValueChange = { tokDraft = it.filter { c -> c.isDigit() }.take(5) }, singleLine = true, textStyle = TextStyle(fontSize = 12.sp, color = CW), modifier = Modifier.weight(1f))
-    Button(onClick = { tokDraft.toIntOrNull()?.let { onSetTok(it) } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp), colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = CON_ACCENT)) { Text("적용", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+    Button(onClick = { tokDraft.toIntOrNull()?.let { onSetTok(it) } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp), colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = CON_ACCENT)) { Text("토큰적용", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
    }
-   Slider(value = maxTok.coerceIn(512, 12288).toFloat(), onValueChange = { onSetTok(((it / 256f).roundToInt() * 256).coerceIn(512, 12288)) }, valueRange = 512f..12288f, steps = 45, modifier = Modifier.fillMaxWidth().height(22.dp))
+   Slider(value = maxTok.coerceIn(512, 12288).toFloat(), onValueChange = { onSetTok(((it / 256f).roundToInt() * 256).coerceIn(512, 12288)) }, valueRange = 512f..12288f, steps = 45, modifier = Modifier.fillMaxWidth().height(20.dp))
+   Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
+   Row(Modifier.fillMaxWidth(), SB, CV) {
+    Text("② 수동 컨텍스트 윈도우: ${webCtx} (KV 약 +${estKvMb}MB)", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = CG)
+    ChipBtn(if (syncGlobalCtx) "🔗전역AI연동 ON" else "✋웹앱독립 수동", syncGlobalCtx, CG) { onToggleSyncGlobal(!syncGlobalCtx) }
+   }
+   WebHBar {
+    listOf(2048 to "🪶2,048(절약)", 4096 to "4,096(기본)", 8192 to "⭐8,192(웹앱추천)", 16384 to "🚀16,384(대형수정)", 32768 to "👑32,768(풀코드)").forEach { (cv, lb) ->
+     ChipBtn(lb, webCtx == cv, if (cv == 8192) CG else CA) { onSetCtx(cv) }
+    }
+   }
+   Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+    ChipBtn("-1024", false, CW) { onSetCtx(webCtx - 1024) }
+    ChipBtn("+1024", false, CG) { onSetCtx(webCtx + 1024) }
+    ChipBtn("+2048", false, CA) { onSetCtx(webCtx + 2048) }
+    OutlinedTextField(value = ctxDraft, onValueChange = { ctxDraft = it.filter { c -> c.isDigit() }.take(5) }, singleLine = true, textStyle = TextStyle(fontSize = 12.sp, color = CW), modifier = Modifier.weight(1f))
+    Button(onClick = { ctxDraft.toIntOrNull()?.let { onSetCtx(it) } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp), colors = ButtonDefaults.buttonColors(containerColor = CA, contentColor = CON_ACCENT)) { Text("컨텍스트적용", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+   }
+   Slider(value = webCtx.coerceIn(1024, 32768).toFloat(), onValueChange = { onSetCtx(((it / 512f).roundToInt() * 512).coerceIn(1024, 32768)) }, valueRange = 1024f..32768f, steps = 61, modifier = Modifier.fillMaxWidth().height(20.dp))
   }
  }
 }
 
 @Composable
-fun WebAppShelfPanel(projects: List<WebAppProject>, folders: List<String>, curAppId: Long, ui: ResponsiveUi, onAddFolder: (String) -> Unit, onOpen: (WebAppProject, Boolean) -> Unit, onDelete: (Long) -> Unit) {
+fun WebAppShelfPanel(
+ projects: List<WebAppProject>, folders: List<String>, curAppId: Long, pinnedIds: Set<Long>, ui: ResponsiveUi,
+ onAddFolder: (String) -> Unit, onOpen: (WebAppProject, Boolean) -> Unit, onTogglePin: (WebAppProject) -> Unit, onDelete: (Long) -> Unit
+) {
  var shelfFilter by remember { mutableStateOf("전체") }
  var newFolderIn by remember { mutableStateOf("") }
  val flt = remember(projects, shelfFilter) { if (shelfFilter == "전체") projects else projects.filter { it.folder == shelfFilter } }
- Surface(color = CS, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, CA.copy(alpha = 0.7f)), modifier = Modifier.fillMaxWidth().heightIn(max = 230.dp)) {
+ Surface(color = CS, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, CA.copy(alpha = 0.7f)), modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
   Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
    WebHBar { (listOf("전체") + folders).distinct().forEach { f -> ChipBtn(if (f == "전체") "📁전체(${projects.size})" else "📁$f", shelfFilter == f, CG) { shelfFilter = f } } }
    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
@@ -63,10 +90,12 @@ fun WebAppShelfPanel(projects: List<WebAppProject>, folders: List<String>, curAp
    }
    LazyColumn(verticalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.weight(1f, fill = false)) {
     items(flt, key = { it.id }) { p ->
+     val isPin = p.id in pinnedIds
      Surface(color = if (p.id == curAppId) CG.copy(alpha = 0.16f) else CS2, shape = RoundedCornerShape(8.dp), border = BorderStroke(0.7.dp, if (p.id == curAppId) CG else CBDR), modifier = Modifier.fillMaxWidth().clickable { onOpen(p, true) }) {
       Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), SB, CV) {
-       Column(Modifier.weight(1f)) { Text("🌐 ${p.title}", fontSize = ui.bodySp, fontWeight = FontWeight.SemiBold, color = CW, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("📁${p.folder} · ${p.updatedAt} · ${p.htmlCode.length}자", fontSize = 10.sp, color = CM) }
+       Column(Modifier.weight(1f)) { Text("🌐 ${p.title}" + (if (isPin) " 📌" else ""), fontSize = ui.bodySp, fontWeight = FontWeight.SemiBold, color = CW, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("📁${p.folder} · ${p.updatedAt} · ${p.htmlCode.length}자", fontSize = 10.sp, color = CM) }
        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
+        Text(if (isPin) "📌해제" else "📌홈고정", fontSize = 11.sp, color = if (isPin) CG else CW, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onTogglePin(p) })
         Text("💻편집", fontSize = 11.sp, color = CA, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onOpen(p, false) })
         if (projects.size > 1) Text("🗑️", fontSize = 13.sp, color = Color(0xFFEF4444), modifier = Modifier.clickable { onDelete(p.id) })
        }
@@ -80,7 +109,7 @@ fun WebAppShelfPanel(projects: List<WebAppProject>, folders: List<String>, curAp
 
 @Composable
 fun WebAppAiPane(
- ui: ResponsiveUi, maxTok: Int, tokenOpen: Boolean, onToggleTok: () -> Unit,
+ ui: ResponsiveUi, maxTok: Int, webCtx: Int, tokenOpen: Boolean, onToggleTok: () -> Unit,
  reqMode: String, onSetReqMode: (String) -> Unit,
  aiPromptIn: String, onPrompt: (String) -> Unit,
  aiAns: String, aiBusy: Boolean, hasEndHtml: Boolean,
@@ -93,7 +122,7 @@ fun WebAppAiPane(
   WebHBar {
    ChipBtn("🔧현재코드 수정모드", reqMode == "MODIFY", CG) { onSetReqMode("MODIFY"); runCatching { focusReq.requestFocus() } }
    ChipBtn("✨새 웹앱 제작모드", reqMode == "NEW", CA) { onSetReqMode("NEW"); runCatching { focusReq.requestFocus() } }
-   ChipBtn("🪙토큰:${maxTok}", tokenOpen, CA) { onToggleTok() }
+   ChipBtn("🪙${maxTok}·🧠${webCtx}", tokenOpen, CA) { onToggleTok() }
    if (aiAns.contains("<") && !aiBusy && !hasEndHtml) ChipBtn("➕끊긴코드 이어쓰기", false, CW) { onLaunch("CONTINUE", "") }
    if (canUndoCode && !aiBusy) ChipBtn("↩️이전코드 복원", false, CA) { onUndoCode() }
   }

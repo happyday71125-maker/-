@@ -38,9 +38,12 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
  var shelfOpen by remember { mutableStateOf(false) }; var guideOpen by remember { mutableStateOf(false) }; var tokenOpen by remember { mutableStateOf(false) }
  var maxTok by remember { mutableStateOf(sp.getInt("webapp_ai_max_tokens_v1", 3072).coerceIn(512, 16384)) }
  var codeFontSp by remember { mutableStateOf(sp.getInt("webapp_code_font_v1", 13).coerceIn(10, 22)) }; var reloadTick by remember { mutableStateOf(0) }
- var aiMode by remember { mutableStateOf(0) }; var splitHoriz by remember { mutableStateOf(false) }; var floatMin by remember { mutableStateOf(false) }
+ var aiMode by remember { mutableStateOf(0) }; var aiReqMode by remember { mutableStateOf("MODIFY") }; var splitHoriz by remember { mutableStateOf(false) }; var floatMin by remember { mutableStateOf(false) }
  var floatX by remember { mutableStateOf(16f) }; var floatY by remember { mutableStateOf(100f) }
  var aiPromptIn by remember { mutableStateOf("") }; var aiAns by remember { mutableStateOf("") }; var aiBusy by remember { mutableStateOf(false) }; var aiJob by remember { mutableStateOf<Job?>(null) }
+ var pendingAiHtml by remember { mutableStateOf<String?>(null) }
+ var prevCodeBackup by remember { mutableStateOf<String?>(null) }
+ var lastGenMode by remember { mutableStateOf("MODIFY") }
  var statusMsg by remember { mutableStateOf("🌐 상단 드롭다운 웹앱 스튜디오 · 실행 & 소형 AI 개발") }
 
  fun setModeP(m: Int) { viewMode = m.coerceIn(0, 2); sp.edit().putInt("webapp_view_mode_v1", viewMode).apply() }
@@ -58,14 +61,38 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
  }
  fun openApp(p: WebAppProject, runNow: Boolean = true) {
   curAppId = p.id; curFolder = p.folder; titleTfv = TextFieldValue(p.title, TextRange(p.title.length)); setCode(p.htmlCode)
+  pendingAiHtml = null; prevCodeBackup = null; aiReqMode = "MODIFY"
   sp.edit().putLong("webapp_active_id_v1", p.id).putString("webapp_active_title_v1", p.title).apply()
   shelfOpen = false; reloadTick++; setModeP(if (runNow) 1 else 0); statusMsg = "▶️ 『${p.title}』 준비 완료"
+ }
+ fun applyPendingAiCode() {
+  val ex = pendingAiHtml ?: extractCleanHtmlFromAi(aiAns).takeIf { it.contains("<") } ?: return
+  prevCodeBackup = codeTfv.text
+  setCode(ex)
+  if (lastGenMode == "NEW" || titleTfv.text == "새 웹앱") {
+   Regex("<title>(.*?)</title>", RegexOption.IGNORE_CASE).find(ex)?.groupValues?.getOrNull(1)?.trim()?.take(24)?.takeIf { it.isNotEmpty() }?.let { titleTfv = TextFieldValue(it, TextRange(it.length)) }
+  }
+  pendingAiHtml = null
+  saveApp()
+  setModeP(1)
+  statusMsg = "✅ 요청하신 코드 반영 및 실행 완료! ([↩️이전코드 복원] 가능)"
+ }
+ fun undoAiCode() {
+  val bk = prevCodeBackup ?: return
+  setCode(bk); prevCodeBackup = null; reloadTick++
+  statusMsg = "↩️ 수정 전 코드로 복원되었습니다."
  }
  val htmlExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/html")) { u -> if (u != null) runCatching { ctx.contentResolver.openOutputStream(u)?.use { it.write(codeTfv.text.toByteArray()) }; saveApp(); statusMsg = "⬇️ .html 저장 완료!" } }
  val htmlImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) runCatching { val tx = ctx.contentResolver.openInputStream(u)?.bufferedReader()?.use { it.readText() } ?: ""; val g = Regex("<title>(.*?)</title>", RegexOption.IGNORE_CASE).find(tx)?.groupValues?.getOrNull(1)?.trim()?.take(26)?.ifEmpty { "불러온 웹앱" } ?: "불러온 웹앱"; curAppId = System.currentTimeMillis(); titleTfv = TextFieldValue(g, TextRange(g.length)); setCode(tx); saveApp(); setModeP(1) } }
  fun stopAi() { activeGenId++; if (ProLlamaJni.ready) runCatching { ProLlamaJni.abortGeneration() }; aiJob?.cancel(); aiBusy = false; aiAns = aiAns.removeSuffix(" ▍") }
  fun launchAi(mode: String, req: String) {
-  stopAi(); val g = ++activeGenId; aiBusy = true; val cfg = loadAiCfg(ctx)
+  if (mode != "CONTINUE" && req.isBlank()) {
+   statusMsg = "⚠️ 수정하거나 만들 내용을 입력창에 먼저 적어주세요!"
+   return
+  }
+  stopAi(); val g = ++activeGenId; aiBusy = true; pendingAiHtml = null
+  if (mode != "CONTINUE") lastGenMode = mode
+  val cfg = loadAiCfg(ctx)
   val sysP = "모바일 단일파일 HTML5 웹앱 전문 개발자입니다. 설명 없이 <!DOCTYPE html>로 시작해 </html>로 끝나는 완전한 인라인 CSS/JS 코드만 출력하세요."
   val seed = extractCleanHtmlFromAi(aiAns).takeIf { mode == "CONTINUE" && it.contains("<") } ?: codeTfv.text
   val uP = when (mode) {
@@ -80,15 +107,33 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
    if (g == activeGenId) {
     aiAns = (if (pfx.isNotEmpty() && !ans.isNullOrBlank()) pfx + "\n" + extractCleanHtmlFromAi(ans) else (ans ?: "").ifBlank { aiAns.removeSuffix(" ▍") }).ifBlank { "⚠️ 생성 실패: AI 세팅이나 토큰을 확인하세요." }
     aiBusy = false; val ex = extractCleanHtmlFromAi(aiAns)
-    if (ex.contains("<html", true) || ex.contains("<!DOCTYPE", true)) {
-     setCode(ex); Regex("<title>(.*?)</title>", RegexOption.IGNORE_CASE).find(ex)?.groupValues?.getOrNull(1)?.trim()?.take(24)?.takeIf { it.isNotEmpty() && (titleTfv.text == "새 웹앱" || mode == "NEW") }?.let { titleTfv = TextFieldValue(it, TextRange(it.length)) }
-     reloadTick++; if (viewMode == 0) setModeP(2); statusMsg = "✅ AI 웹앱 반영 완료 (${ex.length}자)"
+    if (ex.contains("<html", true) || ex.contains("<!DOC" + "TYPE", true)) {
+     val isStarterBlank = codeTfv.text.trim() == STARTER_HTML.trim() && lastGenMode == "NEW"
+     if (isStarterBlank) {
+      prevCodeBackup = codeTfv.text; setCode(ex)
+      Regex("<title>(.*?)</title>", RegexOption.IGNORE_CASE).find(ex)?.groupValues?.getOrNull(1)?.trim()?.take(24)?.takeIf { it.isNotEmpty() }?.let { titleTfv = TextFieldValue(it, TextRange(it.length)) }
+      reloadTick++; if (viewMode == 0) setModeP(2); statusMsg = "✅ 새 웹앱 초안 반영 완료 (${ex.length}자)"
+     } else {
+      pendingAiHtml = ex
+      statusMsg = "✅ 요청하신 코드가 준비되었습니다! [✅ 코드 반영&실행]을 눌러 적용하세요."
+     }
     }
    }
   }
  }
- val hasEndHtml = remember(aiAns) { extractCleanHtmlFromAi(aiAns).contains("</html>", true) }
- val aiBody: @Composable () -> Unit = { WebAppAiPane(ui, maxTok, tokenOpen, { tokenOpen = !tokenOpen }, aiPromptIn, { aiPromptIn = it }, aiAns, aiBusy, hasEndHtml, ::launchAi, ::stopAi) { val ex = extractCleanHtmlFromAi(aiAns); if (ex.isNotBlank()) { setCode(ex); saveApp(); setModeP(1) } } }
+ val hasEndHtml = remember(aiAns) { extractCleanHtmlFromAi(aiAns).isNotBlank() && aiAns.lowercase().contains("/html>") }
+ val aiBody: @Composable () -> Unit = {
+  WebAppAiPane(
+   ui = ui, maxTok = maxTok, tokenOpen = tokenOpen, onToggleTok = { tokenOpen = !tokenOpen },
+   reqMode = aiReqMode, onSetReqMode = { aiReqMode = it },
+   aiPromptIn = aiPromptIn, onPrompt = { aiPromptIn = it },
+   aiAns = aiAns, aiBusy = aiBusy, hasEndHtml = hasEndHtml,
+   hasPendingCode = pendingAiHtml != null, canUndoCode = prevCodeBackup != null,
+   onLaunch = ::launchAi, onStop = ::stopAi,
+   onApplyRun = ::applyPendingAiCode, onDiscardPending = { pendingAiHtml = null; statusMsg = "코드 반영을 취소했습니다." },
+   onUndoCode = ::undoAiCode, onEmptyWarn = { statusMsg = it }
+  )
+ }
 
  BoxWithConstraints(Modifier.fillMaxSize().background(CBG)) {
   val boxW = this.maxWidth; val boxH = this.maxHeight; val density = LocalDensity.current
@@ -117,12 +162,14 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
     ChipBtn("▶️ 앱사용", viewMode == 1, CG) { setModeP(1) }
     ChipBtn("💻 코드편집", viewMode == 0, CW) { setModeP(0) }
     ChipBtn("◫ 동시보기", viewMode == 2, CA) { setModeP(2) }
+    ChipBtn("🔧 AI 수정요청", aiMode != 0 && aiReqMode == "MODIFY", CG) { aiReqMode = "MODIFY"; if (aiMode == 0) aiMode = 1; floatMin = false; statusMsg = "🔧 아래 AI 입력창에 원하는 코드 수정사항을 적어주세요." }
     ChipBtn("📂 보관함(${projects.size})", shelfOpen, CA) { shelfOpen = !shelfOpen }
     ChipBtn("💾 저장", false, CG) { saveApp() }
+    if (prevCodeBackup != null) ChipBtn("↩️ 되돌리기", false, CA) { undoAiCode() }
     ChipBtn("🔄 새로고침", false, CW) { reloadTick++ }
     ChipBtn("◫ 분할AI", aiMode == 1, CG) { aiMode = if (aiMode == 1) 0 else 1 }
     ChipBtn("🪟 플로팅AI", aiMode == 2, CA) { aiMode = if (aiMode == 2) 0 else 2; floatMin = false }
-    ChipBtn("➕ 새웹앱", false, CW) { saveApp(); curAppId = System.currentTimeMillis(); titleTfv = TextFieldValue("새 웹앱", TextRange(4)); setCode(STARTER_HTML); reloadTick++; setModeP(2); if (aiMode == 0) aiMode = 1 }
+    ChipBtn("➕ 새웹앱", false, CW) { saveApp(); curAppId = System.currentTimeMillis(); titleTfv = TextFieldValue("새 웹앱", TextRange(4)); setCode(STARTER_HTML); pendingAiHtml = null; prevCodeBackup = null; aiReqMode = "NEW"; reloadTick++; setModeP(2); if (aiMode == 0) aiMode = 1; statusMsg = "✨ 새로 만들 웹앱 설명을 입력창에 적고 [제작요청 ↑]을 눌러주세요." }
     ChipBtn("📥 .html열기", false, CW) { htmlImport.launch(arrayOf("text/html", "text/*", "*/*")) }
     ChipBtn("⬇️ .html저장", false, CG) { htmlExport.launch((titleTfv.text.trim().ifEmpty { "webapp" }) + ".html") }
     ChipBtn("📤 메모보관", false, CM) { onSaveToMemo("🌐 [웹앱: ${titleTfv.text.trim()}]\n```html\n${codeTfv.text.take(1500)}\n```"); statusMsg = "✅ 메모 탭에 저장됨" }
@@ -153,7 +200,7 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
     Surface(color = CS, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, CG.copy(alpha = 0.7f)), modifier = m) {
      Column(Modifier.fillMaxSize()) {
       Row(Modifier.fillMaxWidth().background(CS2).padding(horizontal = 10.dp, vertical = 6.dp), SB, CV) {
-       Text("🦙 웹앱 AI (${maxTok}t)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG)
+       Text("🦙 웹앱 AI (${if (aiReqMode == "NEW") "새제작" else "수정"} · ${maxTok}t)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG)
        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
         Text(if (splitHoriz) "↕상하" else "↔좌우", fontSize = 10.sp, color = CA, modifier = Modifier.clickable { splitHoriz = !splitHoriz })
         Text("🪟플로팅", fontSize = 10.sp, color = CW, modifier = Modifier.clickable { aiMode = 2; floatMin = false })
@@ -174,7 +221,7 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
    Surface(color = CS, shape = RoundedCornerShape(14.dp), shadowElevation = 12.dp, border = BorderStroke(1.2.dp, CA), modifier = Modifier.offset { IntOffset(cx.roundToInt(), cy.roundToInt()) }.width(floatW).height(floatH)) {
     Column(Modifier.fillMaxSize()) {
      Row(Modifier.fillMaxWidth().background(CS2).pointerInput(maxWPx, maxHPx, floatWPx, floatHPx) { detectDragGestures { ch, d -> ch.consume(); floatX = (floatX + d.x).coerceIn(4f, (maxWPx - floatWPx - 4f).coerceAtLeast(4f)); floatY = (floatY + d.y).coerceIn(8f, (maxHPx - floatHPx - 8f).coerceAtLeast(8f)) } }.padding(horizontal = 10.dp, vertical = 8.dp), SB, CV) {
-      Text("✥ 드래그 · 🦙 웹앱 AI (${maxTok}t)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CA)
+      Text("✥ 드래그 · 🦙 웹앱 AI (${if (aiReqMode == "NEW") "새제작" else "수정"} · ${maxTok}t)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CA)
       Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = CV) {
        Text("◫분할", fontSize = 10.sp, color = CG, modifier = Modifier.clickable { aiMode = 1 })
        Text(if (floatMin) "🔼펼침" else "🔽접기", fontSize = 10.sp, color = CW, modifier = Modifier.clickable { floatMin = !floatMin })

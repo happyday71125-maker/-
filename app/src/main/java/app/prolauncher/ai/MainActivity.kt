@@ -222,6 +222,7 @@ var cfg by remember { mutableStateOf(repo.loadConfig()) }
 var isDefHome by remember { mutableStateOf(repo.isDefaultHomeApp()) }
 var drawerOpen by remember { mutableStateOf(false) }
 var webStudioOpen by remember { mutableStateOf(false) }
+var runningWebAppId by remember { mutableStateOf<Long?>(null) }
 var settingsOpen by remember { mutableStateOf(false) }
 var interruptApp by remember { mutableStateOf<AppEntry?>(null) }
 suspend fun refreshAppsAsync() { val fresh = withContext(Dispatchers.IO) { repo.loadInstalledApps() }; apps = fresh }
@@ -241,6 +242,7 @@ interruptApp = null
 settingsOpen = false
 drawerOpen = false
 webStudioOpen = false
+runningWebAppId = null
 }
 }
 val homeRoleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { isDefHome = repo.isDefaultHomeApp() }
@@ -258,12 +260,17 @@ notes = SmartMemoClassifier.sanitizeNotes(repo.loadNotes(), repo)
 books = SmartMemoClassifier.sanitizeBooks(repo.loadBooks(), repo)
 }
 }
-fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else repo.launchApp(app.packageName) }
+fun openAppDirect(pkg: String) {
+if (pkg.startsWith("webapp://")) runningWebAppId = pkg.removePrefix("webapp://").toLongOrNull()
+else repo.launchApp(pkg)
+}
+fun launchOrInterrupt(app: AppEntry) { drawerOpen = false; if (app.isInterruptEnabled) interruptApp = app else openAppDirect(app.packageName) }
 activeAppTheme = cfg.themeName
     BackHandler(enabled = true) {
 when {
 interruptApp != null -> interruptApp = null
 settingsOpen -> settingsOpen = false
+runningWebAppId != null -> runningWebAppId = null
 webStudioOpen -> webStudioOpen = false
 drawerOpen -> drawerOpen = false
 pager.currentPage != 2 -> scope.launch { pager.animateScrollToPage(2) }
@@ -272,7 +279,7 @@ pager.currentPage != 2 -> scope.launch { pager.animateScrollToPage(2) }
 SideEffect { JarvisRuntime.bindCallbacks(rootCtx, { pg -> scope.launch { pager.scrollToPage(pg.coerceIn(0, 4)) } }, { raw0 -> val isVm = raw0.startsWith("__VOICEMEMO__"); val raw = if (isVm) raw0.removePrefix("__VOICEMEMO__").trim() else raw0.trim(); val mc0 = SmartMemoClassifier.loadMemoCats(rootCtx); val c0 = if (isVm) { if (!mc0.contains("음성메모")) SmartMemoClassifier.saveMemoCats(rootCtx, listOf("음성메모") + mc0); "음성메모" } else SmartMemoClassifier.guessCategory(raw, mc0); val nx = listOf(NoteItem(nextId(), makeHashtags(raw, c0), "", listOf(c0, if (raw.contains("중요")) "중요" else "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx); val sc = ScheduleBriefingManager.syncNoteAlarms(rootCtx, nx); if (sc > 0) "🎙️ [$c0] 탭 저장 + ⏰알림 ${sc}건 예약됨" else if (isVm) "🎙️ [음성메모] 탭에 즉시 저장되었습니다!" else "✅ [$c0] 메모 즉시 저장됨" }, { books }, { notes }) }
 val bgCol = CBG
 Box(Modifier.fillMaxSize().background(bgCol).systemBarsPadding().imePadding()) {
-val lockPagerForReaderSwipe = (pager.currentPage == 1 && readerSwipePagerLock && !drawerOpen && !settingsOpen && interruptApp == null) || webStudioOpen
+val lockPagerForReaderSwipe = (pager.currentPage == 1 && readerSwipePagerLock && !drawerOpen && !settingsOpen && interruptApp == null) || webStudioOpen || runningWebAppId != null
 HorizontalPager(state = pager, userScrollEnabled = !lockPagerForReaderSwipe, modifier = Modifier.fillMaxSize()) { page ->
 when (page) {
 0 -> MarkdownWriterView(
@@ -290,7 +297,7 @@ notes = notes,
 onUpdateNotes = { notes = it; repo.saveNotes(it) }
 )
 2 -> HomeView(
-apps.filter { it.isFavorite }.take(12), notes.filter { SmartMemoClassifier.isImportant(it) }.take(3), isDefHome, cfg,
+apps.filter { it.isFavorite }.take(20), notes.filter { SmartMemoClassifier.isImportant(it) }.take(3), isDefHome, cfg,
 onAskHome = ::askDefaultHome, onLaunch = ::launchOrInterrupt, onSwipeUp = { drawerOpen = true },
 onLeftReader = { scope.launch { pager.animateScrollToPage(1) } },
 onRightNotes = { scope.launch { pager.animateScrollToPage(3) } },
@@ -314,14 +321,17 @@ onInt = { repo.toggleInterrupt(it.packageName, it.label); apps = repo.loadInstal
 onRefresh = { scope.launch { refreshAppsAsync() } })
 }
 AnimatedVisibility(visible = webStudioOpen, enter = slideInVertically { -it }, exit = slideOutVertically { -it }) {
-WebAppStudioView(onClose = { webStudioOpen = false }, onSaveToMemo = { raw -> val nx = listOf(NoteItem(nextId(), makeHashtags(raw, "문서"), "", listOf("문서", "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx) })
+WebAppStudioView(onClose = { webStudioOpen = false; scope.launch { refreshAppsAsync() } }, onSaveToMemo = { raw -> val nx = listOf(NoteItem(nextId(), makeHashtags(raw, "문서"), "", listOf("문서", "일반"), SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), "LocalAI")) + notes; notes = nx; repo.saveNotes(nx) })
+}
+runningWebAppId?.let { wid ->
+PinnedWebAppRunnerOverlay(appId = wid, onClose = { runningWebAppId = null }, onEditInStudio = { runningWebAppId = null; webStudioOpen = true })
 }
 AnimatedVisibility(visible = settingsOpen, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
 SettingsSheet(cfg, isDefHome, onAskHome = ::askDefaultHome, onSysHome = { repo.openSystemDefaultAppsSettings() },
 onCfg = { cfg = it; repo.saveConfig(it) }, onClose = { settingsOpen = false })
 }
 interruptApp?.let { app ->
-InterruptModal(app, cfg.interruptSeconds, onCancel = { interruptApp = null }, onGo = { val p = app.packageName; interruptApp = null; repo.launchApp(p) })
+InterruptModal(app, cfg.interruptSeconds, onCancel = { interruptApp = null }, onGo = { val p = app.packageName; interruptApp = null; openAppDirect(p) })
 }
 }
 }

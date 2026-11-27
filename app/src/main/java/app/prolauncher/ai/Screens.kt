@@ -290,7 +290,9 @@ listOf("AUTO" to "자동(맞춤)", "COMPACT" to "작게", "NORMAL" to "표준", 
 }
 }
 if (mode == "AI") {
-Spacer(Modifier.height(4.dp))
+var ctxBarOpen by remember { mutableStateOf(false) }
+var chatCtxDraft by remember(aiCfg.ctxSize) { mutableStateOf(aiCfg.ctxSize.toString()) }
+  Spacer(Modifier.height(4.dp))
 Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) {
 ChipBtn("📂${aiSessions.size}", aiShelfOpen, CA) { aiShelfOpen = !aiShelfOpen }
 ChipBtn("📁$curAiFolder", false, CW) {
@@ -327,7 +329,8 @@ val cpuIcon = when (aiCfg.cpuMode) { 1 -> "🔋"; 3 -> "🚀"; else -> "⚖️" 
 ChipBtn(cpuIcon, true, CG) { val nxM = if (aiCfg.cpuMode == 1) 2 else if (aiCfg.cpuMode == 2) 3 else 1; val nx = aiCfg.copy(cpuMode = nxM); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = when (nxM) { 1 -> "🔋 절전(2코어·저발열)"; 3 -> "🚀 고성능(4코어·최고속)"; else -> "⚖️ 균형(3코어·권장)" } }
 val curTk = aiCfg.maxTok.coerceAtLeast(512)
 ChipBtn("📏${curTk}", true, CA) { val nxTk = when (curTk) { 512 -> 1024; 1024 -> 2048; 2048 -> 4096; else -> 512 }; val nx = aiCfg.copy(maxTok = nxTk, ctxSize = maxOf(aiCfg.ctxSize, nxTk + 512)); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = "📏 최대 출력 토큰: ${nxTk}토큰" }
-ChipBtn("🔗${aiCfg.histTurns}", aiCfg.histTurns > 0, CG) { val nxH = when (aiCfg.histTurns) { 0 -> 2; 2 -> 4; 4 -> 6; 6 -> 10; else -> 0 }; val nx = aiCfg.copy(histTurns = nxH); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = if (nxH == 0) "🔗 기억 대화 0개 (단발·최고속)" else "🔗 이전 대화 ${nxH}개 연속 기억" }
+ChipBtn("🧠ctx:${aiCfg.ctxSize}", ctxBarOpen, CG) { ctxBarOpen = !ctxBarOpen }
+  ChipBtn("🔗${aiCfg.histTurns}", aiCfg.histTurns > 0, CG) { val nxH = when (aiCfg.histTurns) { 0 -> 2; 2 -> 4; 4 -> 6; 6 -> 10; else -> 0 }; val nx = aiCfg.copy(histTurns = nxH); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = if (nxH == 0) "🔗 기억 대화 0개 (단발·최고속)" else "🔗 이전 대화 ${nxH}개 연속 기억" }
 val idLb = when (aiCfg.idleMin) { 0 -> "🧹∞"; 180 -> "🧹3h"; else -> "🧹${aiCfg.idleMin}m" }
 ChipBtn(idLb, aiCfg.idleMin > 0, CW) { val nxI = when (aiCfg.idleMin) { 30 -> 60; 60 -> 180; 180 -> 0; else -> 30 }; val nx = aiCfg.copy(idleMin = nxI); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = if (nxI == 0) "🧹 모델 상주 모드 (자동 해제 OFF)" else "🧹 ${if (nxI == 180) "3시간" else "${nxI}분"} 유휴 시 모델 RAM 자동 해제" }
 ChipBtn(if (thinkOn) "🧠" else "⚡", thinkOn, CA) { setThinkOn(ctx, !thinkOn); aiMsg = if (thinkOn) "🧠 심층 추론 ON" else "⚡ 초고속 직답 모드" }
@@ -338,7 +341,25 @@ ChipBtn("⏱️${vWaitSec}", waitDlgOpen || vOn, CW) { waitSecDraft = vWaitSec.t
 ChipBtn(if (ttsOn) "🔊" else "🔇", ttsOn, CG) { ttsOn = !ttsOn; if (!ttsOn) stopOneShotTts() }
 ChipBtn("🌙", blkOn, CW) { keepAw(ctx, true); blkOn = true }
 }
-if (aiShelfOpen) {
+if (ctxBarOpen) {
+Spacer(Modifier.height(4.dp))
+Surface(color = CS, shape = RoundedCornerShape(11.dp), border = BorderStroke(0.9.dp, CG.copy(alpha = 0.7f)), modifier = FMW) {
+Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+Row(FMW.horizontalScroll(rememberScrollState()), horizontalArrangement = HS6, verticalAlignment = CV) {
+Text("🧠컨텍스트:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CG)
+listOf(2048, 4096, 8192, 16384, 32768).forEach { cv -> ChipBtn(if (cv == 4096) "⭐4096" else "$cv", aiCfg.ctxSize == cv, CG) { val nx = aiCfg.copy(ctxSize = cv); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = "🧠 수동 컨텍스트: ${cv} 토큰 적용됨" } }
+}
+Row(FMW, horizontalArrangement = HS6, verticalAlignment = CV) {
+ChipBtn("-1024", false, CW) { val nv = (aiCfg.ctxSize - 1024).coerceIn(1024, 32768); val nx = aiCfg.copy(ctxSize = nv); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = "🧠 컨텍스트: ${nv}" }
+ ChipBtn("+1024", false, CG) { val nv = (aiCfg.ctxSize + 1024).coerceIn(1024, 32768); val nx = aiCfg.copy(ctxSize = nv); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = "🧠 컨텍스트: ${nv}" }
+  OutlinedTextField(value = chatCtxDraft, onValueChange = { chatCtxDraft = it.filter { c -> c.isDigit() }.take(5) }, placeholder = { Text("1024~32768", fontSize = 11.sp) }, singleLine = true, modifier = Modifier.weight(1f))
+  ChipBtn("적용", true, CG) { chatCtxDraft.toIntOrNull()?.let { v -> val nv = v.coerceIn(1024, 32768); val nx = aiCfg.copy(ctxSize = nv); aiCfg = nx; saveAiCfg(ctx, nx); aiMsg = "✅ 수동 컨텍스트 ${nv} 토큰 저장됨" } }
+ ChipBtn("✕", false, CM) { ctxBarOpen = false }
+}
+}
+}
+}
+  if (aiShelfOpen) {
 Spacer(Modifier.height(4.dp))
 val visSessions = if (aiShelfFilter == "전체") aiSessions else aiSessions.filter { it.folder == aiShelfFilter }
 Surface(color = CS, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, CA.copy(alpha = 0.7f)), modifier = FMW.heightIn(max = 230.dp)) {

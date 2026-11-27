@@ -155,17 +155,31 @@ if (lbl.isNotEmpty()) discovered[pkg] = lbl
 }
 }
 }
-return discovered.map { (pkg, label) ->
+val sysEntries = discovered.map { (pkg, label) ->
 AppEntry(
 label = label,
 packageName = pkg,
 isFavorite = favSet.contains(pkg) || favSet.contains(label),
 isInterruptEnabled = intSet.contains(pkg) || intSet.contains(label)
 )
-}.sortedBy { it.label.lowercase() }
+}
+val webEntries = runCatching {
+loadWebApps(context).map { w ->
+val wPkg = webAppPkgOf(w.id)
+val wLbl = "🌐 ${w.title}"
+AppEntry(
+label = wLbl,
+packageName = wPkg,
+isFavorite = favSet.contains(wPkg) || favSet.contains(wLbl),
+isInterruptEnabled = intSet.contains(wPkg) || intSet.contains(wLbl)
+)
+}
+}.getOrDefault(emptyList())
+return (webEntries + sysEntries).sortedBy { it.label.removePrefix("🌐 ").lowercase() }
 }
 
 fun launchApp(packageName: String) {
+if (packageName.startsWith("webapp://")) return
 val intent = context.packageManager.getLaunchIntentForPackage(packageName)
 if (intent != null) {
 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

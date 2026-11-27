@@ -262,6 +262,41 @@ OutlinedTextField(value = aiCfg.apiKey, onValueChange = { val u = aiCfg.copy(api
 }
 }
 }
+Surface(color = CS2, shape = RoundedCornerShape(13.dp), border = BorderStroke(0.9.dp, CG.copy(alpha = 0.65f)), modifier = Modifier.fillMaxWidth()) {
+var ctxDraft by remember(aiCfg.ctxSize) { mutableStateOf(aiCfg.ctxSize.toString()) }
+var tokDraft by remember(aiCfg.maxTok) { mutableStateOf(aiCfg.maxTok.coerceAtLeast(512).toString()) }
+val curCtx = aiCfg.ctxSize.coerceIn(1024, 32768)
+val estKvMb = ((curCtx / 1024f) * 34f).toInt()
+Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+Text("🧠 컨텍스트(Context) & 출력 토큰 수동 설정 (Gemma 4 E2B 최적화)", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG)
+Text("• 현재 컨텍스트: ${curCtx} 토큰 (예상 KV·작업 버퍼 약 +${estKvMb}MB) · 1,024~32,768 직접 지정 가능", fontSize = ui.subSp, color = CM)
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+listOf(2048 to "🪶2,048(절약)", 4096 to "⭐4,096(표준권장)", 8192 to "🌐8,192(웹앱·장문)", 16384 to "🚀16,384(대형코드)", 32768 to "👑32,768(풀컨텍스트)").forEach { (cv, lb) ->
+ChipBtn(lb, curCtx == cv, if (cv == 4096 || cv == 8192) CG else CA) { val u = aiCfg.copy(ctxSize = cv); onUpdate(u); saveAiCfg(ctx, u); testReport = "🧠 수동 컨텍스트 크기: ${cv} 토큰 적용됨" }
+}
+}
+Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+ChipBtn("-1024", false, CW) { val nv = (curCtx - 1024).coerceIn(1024, 32768); val u = aiCfg.copy(ctxSize = nv); onUpdate(u); saveAiCfg(ctx, u); testReport = "🧠 컨텍스트: ${nv}" }
+ChipBtn("+1024", false, CG) { val nv = (curCtx + 1024).coerceIn(1024, 32768); val u = aiCfg.copy(ctxSize = nv); onUpdate(u); saveAiCfg(ctx, u); testReport = "🧠 컨텍스트: ${nv}" }
+ChipBtn("+2048", false, CA) { val nv = (curCtx + 2048).coerceIn(1024, 32768); val u = aiCfg.copy(ctxSize = nv); onUpdate(u); saveAiCfg(ctx, u); testReport = "🧠 컨텍스트: ${nv}" }
+OutlinedTextField(value = ctxDraft, onValueChange = { ctxDraft = it.filter { c -> c.isDigit() }.take(5) }, label = { Text("컨텍스트 수동입력") }, singleLine = true, modifier = Modifier.weight(1f))
+Button(onClick = { ctxDraft.toIntOrNull()?.let { v -> val nv = v.coerceIn(1024, 32768); val u = aiCfg.copy(ctxSize = nv); onUpdate(u); saveAiCfg(ctx, u); testReport = "✅ 수동 컨텍스트 ${nv} 토큰 적용됨" } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp), colors = ButtonDefaults.buttonColors(containerColor = CG, contentColor = CON_ACCENT)) { Text("적용", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+}
+Slider(value = curCtx.toFloat(), onValueChange = { v -> val nv = ((v / 512f).toInt() * 512).coerceIn(1024, 32768); val u = aiCfg.copy(ctxSize = nv); onUpdate(u); saveAiCfg(ctx, u) }, valueRange = 1024f..32768f, steps = 61, modifier = Modifier.fillMaxWidth().height(22.dp))
+Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
+Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+Text("📏 기본 최대 출력: ${aiCfg.maxTok}t", fontSize = ui.subSp, fontWeight = FontWeight.SemiBold, color = CA)
+OutlinedTextField(value = tokDraft, onValueChange = { tokDraft = it.filter { c -> c.isDigit() }.take(5) }, singleLine = true, modifier = Modifier.weight(1f))
+ChipBtn("출력적용", true, CA) { tokDraft.toIntOrNull()?.let { v -> val nv = v.coerceIn(256, 8192); val u = aiCfg.copy(maxTok = nv, ctxSize = maxOf(aiCfg.ctxSize, nv + 512)); onUpdate(u); saveAiCfg(ctx, u); testReport = "📏 기본 최대 출력 ${nv} 토큰 저장됨" } }
+}
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+listOf(15 to "🧹15분 유휴해제", 30 to "🧹30분 유휴해제(추천)", 60 to "🧹1시간 해제", 0 to "📌RAM 상시고정").forEach { (im, lb) ->
+ChipBtn(lb, aiCfg.idleMin == im, if (im == 30) CG else CW) { val u = aiCfg.copy(idleMin = im); onUpdate(u); saveAiCfg(ctx, u); testReport = if (im == 0) "📌 모델 RAM 상시고정 모드" else "🧹 ${im}분 미사용 시 모델 RAM 자동 반환" }
+}
+ChipBtn("⚡지금 RAM반환", false, Color(0xFFF87171)) { releaseAllLocalModels(); System.gc(); testReport = "🧹 로컬 GGUF 모델 상주 메모리를 즉시 해제했습니다." }
+}
+}
+}
 }
 else -> {
 Surface(color = CS2, shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {

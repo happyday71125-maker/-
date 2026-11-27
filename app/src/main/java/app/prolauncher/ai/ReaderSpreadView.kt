@@ -23,6 +23,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -916,19 +917,40 @@ commitExcerptHook = ::commitDraftIfEditing
                     ReaderTtsRuntime.jumpToPage(ctx, newRaw, remRaw)
                 }
             }
-            val pageTurnAnim = remember(act.id) { Animatable(0f) }
-            fun triggerPaperTurn(dir: Int, fromDragVal: Float = 0f) {
-                val curBase = liveVIdxHolder[0]; val targetIdx = curBase + dir * stepPg
+            var turnDir by remember(act.id, twoPageMode) { mutableStateOf(0) }
+            var dragRubberPx by remember(act.id, twoPageMode) { mutableStateOf(0f) }
+            val pageTurnAnim = remember(act.id, twoPageMode) { Animatable(0f) }
+            fun triggerPaperTurn(dir: Int, fromProgress: Float = 0f) {
+                if (dir == 0 || vPages.isEmpty()) return
+                if (pageTurnAnim.isRunning && turnDir != 0 && fromProgress <= 0f) {
+                    val prevTarget = liveVIdxHolder[0] + turnDir * stepPg
+                    goToVPage(prevTarget, liveVIdxHolder[0])
+                }
+                val curBase = liveVIdxHolder[0]
+                val targetIdx = curBase + dir * stepPg
                 val maxStart = if (twoPageMode) ((vPages.size - 1).coerceAtLeast(0) / 2) * 2 else (vPages.size - 1).coerceAtLeast(0)
                 val clampedTarget = (if (twoPageMode) (targetIdx / 2) * 2 else targetIdx).coerceIn(0, maxStart)
-                if (clampedTarget == curBase || !paperCurlEffectOn) { scope.launch { pageTurnAnim.snapTo(0f) }; goToVPage(targetIdx, curBase); return }
+                if (clampedTarget == curBase) {
+                    turnDir = 0; dragRubberPx = 0f
+                    scope.launch { pageTurnAnim.snapTo(0f) }
+                    return
+                }
+                if (!paperCurlEffectOn) {
+                    turnDir = 0; dragRubberPx = 0f
+                    scope.launch { pageTurnAnim.snapTo(0f) }
+                    goToVPage(clampedTarget, curBase)
+                    return
+                }
+                turnDir = dir
+                dragRubberPx = 0f
                 scope.launch {
-                    val startV = if (kotlin.math.abs(fromDragVal) > 0.02f) fromDragVal else (if (dir > 0) -0.06f else 0.06f)
-                    pageTurnAnim.snapTo(startV)
-                    pageTurnAnim.animateTo(if (dir > 0) -0.94f else 0.94f, tween(durationMillis = 190, easing = FastOutSlowInEasing))
-                    goToVPage(targetIdx, curBase)
-                    pageTurnAnim.snapTo(if (dir > 0) 0.22f else -0.22f)
-                    pageTurnAnim.animateTo(0f, tween(durationMillis = 145, easing = FastOutSlowInEasing))
+                    val sP = fromProgress.coerceIn(0.01f, 0.985f)
+                    pageTurnAnim.snapTo(sP)
+                    val dur = ((1f - sP) * (if (twoPageMode) 330f else 285f)).roundToInt().coerceIn(90, 330)
+                    pageTurnAnim.animateTo(1f, tween(durationMillis = dur, easing = FastOutSlowInEasing))
+                    goToVPage(clampedTarget, curBase)
+                    turnDir = 0
+                    pageTurnAnim.snapTo(0f)
                 }
             }
             fun jumpToCharOffset(targetOff: Int) {
@@ -1259,174 +1281,136 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                             }
                         }
                     }
-               } else {
+                   } else {
                     val latestCanPrev by rememberUpdatedState(vIdx > 0)
                     val latestCanNext by rememberUpdatedState(if (twoPageMode) (vIdx + 2 < vPages.size) else (vIdx + 1 < vPages.size))
-                    val latestTriggerTurn by rememberUpdatedState<(Int, Float) -> Unit> { d, fv -> triggerPaperTurn(d, fv) }
-                    val swipeThresholdPx = with(density) { 38.dp.toPx() }
+                    val latestTriggerTurn by rememberUpdatedState<(Int, Float) -> Unit> { d, fp -> triggerPaperTurn(d, fp) }
+                    val swipeThresholdPx = with(density) { 36.dp.toPx() }
                     val cardRefWPx = with(density) { availW.toPx() }.coerceAtLeast(180f)
-                    val paperBackTint = when (cfg.readerTheme) { "SEPIA" -> Color(0xFFEDE1C4); "PAPER" -> Color(0xFFF1EFEA); else -> Color(0xFF161E2E) }
+                    val paperBackTint = when (cfg.readerTheme) { "SEPIA" -> Color(0xFFEDE0C4); "PAPER" -> Color(0xFFF1EEE7); else -> Color(0xFF161E2E) }
+                    val paperBackHi = when (cfg.readerTheme) { "SEPIA" -> Color(0xFFFBF5E6); "PAPER" -> Color(0xFFFFFFFF); else -> Color(0xFF233048) }
+
+                    fun buildPageAt(idx: Int): Triple<PageSlice, String, RenderedBookPage>? {
+                        if (idx !in vPages.indices) return null
+                        val sl = vPages[idx]
+                        val tx = reflowSrc.fullText.substring(sl.s.coerceIn(0, reflowSrc.fullText.length), sl.e.coerceIn(0, reflowSrc.fullText.length)).trimEnd('\n', '\r')
+                        val stPara = sl.s <= 0 || (sl.s <= reflowSrc.fullText.length && reflowSrc.fullText[sl.s - 1] == CH_NL)
+                        val contMid = sl.e < reflowSrc.fullText.length && sl.e > sl.s && reflowSrc.fullText[sl.e - 1] != CH_NL
+                        val rnd = buildWrappedHighlightedBookPage(tx, effColWPx, fontSizePx, curPt, cfg.readerUseSerif, readerJustifyOn, effectiveIndentOn, stPara, contMid, searchQuery, isNightTheme, sl.s, bookHls)
+                        return Triple(sl, tx, rnd)
+                    }
+
+                    val neighborBaseIdx = if (turnDir > 0) (vIdx + stepPg) else if (turnDir < 0) (vIdx - stepPg) else -1
+                    val neighborLeftData = remember(neighborBaseIdx, vPages, effColWPx, curPt, cfg.readerUseSerif, readerJustifyOn, effectiveIndentOn, searchQuery, isNightTheme, bookHls) {
+                        if (neighborBaseIdx >= 0) buildPageAt(neighborBaseIdx) else null
+                    }
+                    val neighborRightData = remember(neighborBaseIdx, twoPageMode, vPages, effColWPx, curPt, cfg.readerUseSerif, readerJustifyOn, effectiveIndentOn, searchQuery, isNightTheme, bookHls) {
+                        if (twoPageMode && neighborBaseIdx >= 0) buildPageAt(neighborBaseIdx + 1) else null
+                    }
+
+                    fun getCachedPageData(idx: Int): Triple<PageSlice, String, RenderedBookPage>? = when (idx) {
+                        vIdx -> Triple(leftSlice, leftPageTx, leftPageRender)
+                        vIdx + 1 -> if (twoPageMode && hasRightPage && rightSlice != null) Triple(rightSlice, rightPageTx, rightPageRender) else null
+                        neighborBaseIdx -> neighborLeftData
+                        neighborBaseIdx + 1 -> neighborRightData
+                        else -> buildPageAt(idx)
+                    }
+
                     val gestureMod = if (readerSwipeTurnOn) {
-                        Modifier.pointerInput(act.id, readerSwipeTurnOn, swipeThresholdPx, cardRefWPx, paperCurlEffectOn) {
+                        Modifier.pointerInput(act.id, twoPageMode, readerSwipeTurnOn, swipeThresholdPx, cardRefWPx, paperCurlEffectOn) {
                             var totalDx = 0f
                             detectHorizontalDragGestures(
-                                onDragStart = { totalDx = 0f; scope.launch { pageTurnAnim.stop() } },
+                                onDragStart = {
+                                    totalDx = 0f
+                                    if (pageTurnAnim.isRunning && turnDir != 0) {
+                                        val finishDir = turnDir
+                                        turnDir = 0
+                                        scope.launch { pageTurnAnim.snapTo(0f) }
+                                        goToVPage(liveVIdxHolder[0] + finishDir * stepPg, liveVIdxHolder[0])
+                                    } else {
+                                        scope.launch { pageTurnAnim.stop() }
+                                    }
+                                },
                                 onHorizontalDrag = { change, dragAmount ->
-                                    change.consume(); totalDx += dragAmount
-                                    val blocked = (totalDx > 0f && !latestCanPrev) || (totalDx < 0f && !latestCanNext)
-                                    val rawP = totalDx / (cardRefWPx * 0.72f)
-                                    val effP = if (blocked) (rawP * 0.16f).coerceIn(-0.14f, 0.14f) else rawP.coerceIn(-0.92f, 0.92f)
-                                    scope.launch { pageTurnAnim.snapTo(effP) }
+                                    change.consume()
+                                    totalDx += dragAmount
+                                    if (totalDx < -2f) {
+                                        if (latestCanNext && paperCurlEffectOn) {
+                                            turnDir = 1; dragRubberPx = 0f
+                                            val p = (-totalDx / (cardRefWPx * 0.78f)).coerceIn(0.004f, 0.985f)
+                                            scope.launch { pageTurnAnim.snapTo(p) }
+                                        } else {
+                                            turnDir = 0; scope.launch { pageTurnAnim.snapTo(0f) }
+                                            dragRubberPx = (totalDx * (if (latestCanNext) 0.32f else 0.14f)).coerceIn(-24f, 24f)
+                                        }
+                                    } else if (totalDx > 2f) {
+                                        if (latestCanPrev && paperCurlEffectOn) {
+                                            turnDir = -1; dragRubberPx = 0f
+                                            val p = (totalDx / (cardRefWPx * 0.78f)).coerceIn(0.004f, 0.985f)
+                                            scope.launch { pageTurnAnim.snapTo(p) }
+                                        } else {
+                                            turnDir = 0; scope.launch { pageTurnAnim.snapTo(0f) }
+                                            dragRubberPx = (totalDx * (if (latestCanPrev) 0.32f else 0.14f)).coerceIn(-24f, 24f)
+                                        }
+                                    }
                                 },
                                 onDragEnd = {
-                                    val dx = totalDx; val curAnim = pageTurnAnim.value; totalDx = 0f
-                                    if (dx <= -swipeThresholdPx && latestCanNext) latestTriggerTurn(1, curAnim)
-                                    else if (dx >= swipeThresholdPx && latestCanPrev) latestTriggerTurn(-1, curAnim)
-                                    else scope.launch { pageTurnAnim.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 520f)) }
+                                    val dx = totalDx; val curP = pageTurnAnim.value; val curD = turnDir
+                                    totalDx = 0f; dragRubberPx = 0f
+                                    if ((dx <= -swipeThresholdPx || (curD == 1 && curP >= 0.17f)) && latestCanNext) {
+                                        latestTriggerTurn(1, if (curD == 1) curP else 0.02f)
+                                    } else if ((dx >= swipeThresholdPx || (curD == -1 && curP >= 0.17f)) && latestCanPrev) {
+                                        latestTriggerTurn(-1, if (curD == -1) curP else 0.02f)
+                                    } else if (curD != 0) {
+                                        scope.launch {
+                                            pageTurnAnim.animateTo(0f, tween(durationMillis = 175, easing = FastOutSlowInEasing))
+                                            turnDir = 0
+                                        }
+                                    }
                                 },
-                                onDragCancel = { totalDx = 0f; scope.launch { pageTurnAnim.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 520f)) } }
+                                onDragCancel = {
+                                    totalDx = 0f; dragRubberPx = 0f
+                                    if (turnDir != 0) {
+                                        scope.launch {
+                                            pageTurnAnim.animateTo(0f, tween(durationMillis = 175, easing = FastOutSlowInEasing))
+                                            turnDir = 0
+                                        }
+                                    }
+                                }
                             )
                         }
                     } else Modifier
-                    val animVal = pageTurnAnim.value; val absAnim = kotlin.math.abs(animVal)
-                    val paperFxMod = if (paperCurlEffectOn) {
-                        Modifier.graphicsLayer {
-                            transformOrigin = TransformOrigin(0f, 0.5f); cameraDistance = 18f
-                            rotationY = if (animVal < 0f) (animVal * 56f) else (animVal * 26f)
-                            translationX = if (animVal > 0f) (animVal * size.width * 0.14f) else 0f
-                            scaleY = 1f - (absAnim * 0.025f)
-                        }.drawWithContent {
-                            drawContent()
-                            val w = size.width; val h = size.height
-                            val spinePx = 18.dp.toPx().coerceIn(2f, (w * 0.08f).coerceAtLeast(3f))
-                            drawRect(brush = Brush.horizontalGradient(listOf(spineBase.copy(alpha = if (isNightTheme) 0.34f else 0.10f), spineBase.copy(alpha = if (isNightTheme) 0.10f else 0.03f), Color.Transparent), startX = 0f, endX = spinePx), topLeft = Offset.Zero, size = Size(spinePx, h))
-                            val e1 = (w - 3.dp.toPx()).coerceAtLeast(0f); val e2 = (w - 1.5.dp.toPx()).coerceAtLeast(0f)
-                            drawLine(mut.copy(alpha = 0.18f), Offset(e1, 6.dp.toPx()), Offset(e1, (h - 6.dp.toPx()).coerceAtLeast(6.dp.toPx())), strokeWidth = 1f)
-                            drawLine(mut.copy(alpha = 0.26f), Offset(e2, 4.dp.toPx()), Offset(e2, (h - 4.dp.toPx()).coerceAtLeast(4.dp.toPx())), strokeWidth = 1f)
-                            if (absAnim > 0.008f && w > 24f) {
-                                val curlX = if (animVal < 0f) (w * (1f - absAnim * 0.86f)).coerceIn(2f, w - 2f) else (w * (absAnim * 0.86f)).coerceIn(2f, w - 2f)
-                                val foldW = (32.dp.toPx() * (0.55f + 0.45f * kotlin.math.sin(absAnim * 3.14159f))).coerceIn(10f, w * 0.28f)
-                                val shadowW = (44.dp.toPx() * (0.5f + 0.5f * (1f - absAnim * 0.4f))).coerceIn(12f, w * 0.32f)
-                                val foldL = (curlX - foldW * 0.65f).coerceIn(0f, w - 2f); val foldR = (curlX + foldW * 0.35f).coerceIn(foldL + 1.5f, w)
-                                drawRect(brush = Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.12f * absAnim), paperBackTint.copy(alpha = (0.86f * kotlin.math.min(1f, absAnim * 1.6f)).coerceIn(0f, 0.92f)), Color.White.copy(alpha = if (isNightTheme) 0.10f * absAnim else 0.42f * absAnim), paperBackTint.copy(alpha = 0.55f * absAnim)), startX = foldL, endX = foldR), topLeft = Offset(foldL, 0f), size = Size(foldR - foldL, h))
-                                val shEnd = (foldR + shadowW).coerceAtMost(w)
-                                if (shEnd > foldR + 1.5f) drawRect(brush = Brush.horizontalGradient(listOf(Color.Black.copy(alpha = (0.28f * (1f - absAnim * 0.35f)).coerceIn(0f, 0.32f)), Color.Black.copy(alpha = 0.08f * (1f - absAnim * 0.4f)), Color.Transparent), startX = foldR, endX = shEnd), topLeft = Offset(foldR, 0f), size = Size(shEnd - foldR, h))
+
+                    val splitScrollMod = if (shouldScrollPage) Modifier.verticalScroll(ovScroll) else Modifier
+
+                    val renderSinglePage: @Composable (Int, Boolean) -> Unit = { pIdx, interactive ->
+                        val pData = getCachedPageData(pIdx)
+                        val pPct = (((pIdx + 1) * 100) / vPages.size.coerceAtLeast(1)).coerceIn(1, 100)
+                        val pTocIdx = if (pIdx == vIdx) curTocIdx else tocEntries.indexOfLast { it.charOffset <= (pData?.first?.s ?: 0) + 8 }
+                        val pToc = if (pTocIdx in tocEntries.indices) tocEntries[pTocIdx] else null
+                        Column(
+                            Modifier
+                                .fillMaxSize()
+                                .background(pageSurf)
+                                .drawWithContent {
+                                    drawContent()
+                                    val w = size.width; val h = size.height
+                                    val spPx = 14.dp.toPx().coerceIn(2f, (w * 0.06f).coerceAtLeast(3f))
+                                    drawRect(brush = Brush.horizontalGradient(listOf(spineBase.copy(alpha = if (isNightTheme) 0.28f else 0.08f), Color.Transparent), startX = 0f, endX = spPx), topLeft = Offset.Zero, size = Size(spPx, h))
+                                    val e1 = (w - 3.dp.toPx()).coerceAtLeast(0f); val e2 = (w - 1.5.dp.toPx()).coerceAtLeast(0f)
+                                    drawLine(mut.copy(alpha = 0.16f), Offset(e1, 6.dp.toPx()), Offset(e1, (h - 6.dp.toPx()).coerceAtLeast(6.dp.toPx())), strokeWidth = 1f)
+                                    drawLine(mut.copy(alpha = 0.24f), Offset(e2, 4.dp.toPx()), Offset(e2, (h - 4.dp.toPx()).coerceAtLeast(4.dp.toPx())), strokeWidth = 1f)
+                                }
+                                .then(if (interactive) splitScrollMod else Modifier)
+                                .padding(start = outerPad, end = outerPad, top = 5.dp, bottom = if (shouldScrollPage) scrollBottomExtra else 5.dp)
+                        ) {
+                            Row(Modifier.fillMaxWidth().height(15.dp), SB, CV) {
+                                Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                Text("${pPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.8f))
                             }
-                        }
-                    } else Modifier.graphicsLayer { translationX = animVal * 28.dp.toPx() }
-                    Surface(
-                        color = pageSurf,
-                        shape = RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp, topEnd = 12.dp, bottomEnd = 12.dp),
-                        shadowElevation = if (absAnim > 0.01f) 8.dp else 2.dp,
-                        border = BorderStroke(0.8.dp, mut.copy(alpha = 0.28f)),
-                        modifier = Modifier.fillMaxSize().then(gestureMod).then(paperFxMod)
-                    ) {
-                        val splitScrollMod = if (shouldScrollPage) Modifier.verticalScroll(ovScroll) else Modifier
-                        if (twoPageMode) {
-                            val twoPgColMod = if (shouldScrollPage) {
-                                Modifier.width(renderColW).padding(top = 8.dp, bottom = scrollBottomExtra)
-                            } else {
-                                Modifier.width(renderColW).fillMaxHeight().padding(top = 8.dp, bottom = 6.dp)
-                            }
-                            Row(
-                                Modifier
-                                    .fillMaxSize()
-                                    .then(splitScrollMod)
-                                    .padding(horizontal = outerPad),
-                                verticalAlignment = Alignment.Top
-                            ) {
-                                Column(twoPgColMod) {
-                                    Box(Modifier.fillMaxWidth().height(16.dp), contentAlignment = Alignment.CenterStart) {
-                                        Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                    Spacer(Modifier.height(4.dp))
-                                    Box(if (shouldScrollPage) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
-                                        var lLay by remember(leftPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn, effectiveIndentOn) { mutableStateOf<TextLayoutResult?>(null) }
-                                        Text(
-                                            leftPageRender.annotated,
-                                            style = pageTextStyle,
-                                            onTextLayout = { lLay = it },
-                                            modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls, leftPageRender) {
-                                                if (highlightMode || leftPageRender.footnotes.isNotEmpty()) {
-                                                    detectTapGestures { pos ->
-                                                        val off = lLay?.getOffsetForPosition(pos) ?: return@detectTapGestures
-                                                        handleReaderBodyTap(leftPageRender, leftPageTx, leftSlice.s, off)
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
-                                    Spacer(Modifier.height(4.dp))
-                                    Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.CenterStart) {
-                                        Text("${vIdx + 1}", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = mut)
-                                    }
-                                }
-                                Box(
-                                    Modifier
-                                        .width(spineW)
-                                        .height(fixedTextH + 52.dp)
-                                        .background(
-                                            Brush.horizontalGradient(
-                                                listOf(
-                                                    Color.Transparent,
-                                                    spineBase.copy(alpha = 0.08f),
-                                                    spineBase.copy(alpha = 0.22f),
-                                                    spineBase.copy(alpha = 0.08f),
-                                                    Color.Transparent
-                                                )
-                                            )
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Box(Modifier.width(1.dp).fillMaxHeight(0.94f).background(mut.copy(alpha = 0.26f)))
-                                }
-                                Column(twoPgColMod) {
-                                                Box(Modifier.fillMaxWidth().height(16.dp).clickable { tocFilterQuery = ""; tocOpen = true }, contentAlignment = Alignment.CenterEnd) {
-                                        val chapTag = curTocEntry?.let { "☰ ${it.title.take(16)} (${curChapPct}%)" } ?: "☰ ${act.category.ifBlank { "독서" }}"
-                                        Text("$chapTag · 전체 ${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                }
-                                    Spacer(Modifier.height(4.dp))
-                                    Box(if (shouldScrollPage) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
-                                        if (hasRightPage && rightSlice != null) {
-                                            var rLay by remember(rightPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn, effectiveIndentOn) { mutableStateOf<TextLayoutResult?>(null) }
-                                            Text(
-                                                rightPageRender.annotated,
-                                                style = pageTextStyle,
-                                                onTextLayout = { rLay = it },
-                                                modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, rightSlice.s, rightPageTx, hlColorIdx, bookHls, rightPageRender) {
-                                                    if (highlightMode || rightPageRender.footnotes.isNotEmpty()) {
-                                                        detectTapGestures { pos ->
-                                                            val off = rLay?.getOffsetForPosition(pos) ?: return@detectTapGestures
-                                                            handleReaderBodyTap(rightPageRender, rightPageTx, rightSlice.s, off)
-                                                        }
-                                                    }
-                                                }
-                                            )
-                                        } else {
-                                            Box(Modifier.fillMaxWidth().height(fixedTextH), contentAlignment = Alignment.Center) {
-                                                Text("— 마지막 페이지 —", fontSize = ui.subSp, color = mut.copy(alpha = 0.65f))
-                                            }
-                                        }
-                                    }
-                                    Spacer(Modifier.height(4.dp))
-                                    Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.CenterEnd) {
-                                        Text(if (hasRightPage) "${vIdx + 2}" else "", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = mut)
-                                    }
-                                }
-                            }
-                        } else {
-                            Column(
-                                Modifier
-                                    .fillMaxSize()
-                                    .then(splitScrollMod)
-                                    .padding(start = outerPad, end = outerPad, top = 5.dp, bottom = if (shouldScrollPage) scrollBottomExtra else 5.dp)
-                            ) {
-                                Row(Modifier.fillMaxWidth().height(15.dp), SB, CV) {
-                                    Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    Text("${progressPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.8f))
-                                }
-                                Spacer(Modifier.height(2.dp))
-                                Box((if (shouldScrollPage) Modifier.fillMaxWidth().heightIn(min = fixedTextH) else Modifier.fillMaxWidth().weight(1f)).onSizeChanged { bsz ->
+                            Spacer(Modifier.height(2.dp))
+                            Box((if (shouldScrollPage) Modifier.fillMaxWidth().heightIn(min = fixedTextH) else Modifier.fillMaxWidth().weight(1f)).then(
+                                if (interactive) Modifier.onSizeChanged { bsz ->
                                     if (!shouldScrollPage && isFullUnobstructed && bsz.height > 120) {
                                         val hCand = bsz.height.toFloat()
                                         if (abs(hCand - measuredTextHPxState.value) >= 5f) {
@@ -1434,34 +1418,292 @@ else { Button(onClick = { val q = readerAiQ.trim(); if (q.isNotEmpty()) { val t 
                                             readerPrefs.edit().putFloat(fsHKey, hCand).apply()
                                         }
                                     }
-                                }) {
-                                    var sLay by remember(leftPageTx, curPt, twoPageMode, effColWPx, readerJustifyOn, effectiveIndentOn) { mutableStateOf<TextLayoutResult?>(null) }
+                                } else Modifier
+                            )) {
+                                if (pData != null) {
+                                    var sLay by remember(pData.second, curPt, twoPageMode, effColWPx, readerJustifyOn, effectiveIndentOn) { mutableStateOf<TextLayoutResult?>(null) }
                                     Text(
-                                        leftPageRender.annotated,
+                                        pData.third.annotated,
                                         style = pageTextStyle,
-                                        onTextLayout = { sLay = it },
-                                        modifier = Modifier.fillMaxWidth().pointerInput(highlightMode, leftSlice.s, leftPageTx, hlColorIdx, bookHls, leftPageRender) {
-                                            if (highlightMode || leftPageRender.footnotes.isNotEmpty()) {
-                                                detectTapGestures { pos ->
-                                                    val off = sLay?.getOffsetForPosition(pos) ?: return@detectTapGestures
-                                                    handleReaderBodyTap(leftPageRender, leftPageTx, leftSlice.s, off)
+                                        onTextLayout = { if (interactive) sLay = it },
+                                        modifier = Modifier.fillMaxWidth().then(
+                                            if (interactive && (highlightMode || pData.third.footnotes.isNotEmpty())) {
+                                                Modifier.pointerInput(highlightMode, pData.first.s, pData.second, hlColorIdx, bookHls, pData.third) {
+                                                    detectTapGestures { pos ->
+                                                        val off = sLay?.getOffsetForPosition(pos) ?: return@detectTapGestures
+                                                        handleReaderBodyTap(pData.third, pData.second, pData.first.s, off)
+                                                    }
                                                 }
-                                            }
-                                        }
+                                            } else Modifier
+                                        )
                                     )
                                 }
-                                Spacer(Modifier.height(2.dp))
-                                Row(Modifier.fillMaxWidth().height(16.dp), SB, CV) {
-                                               val footerChap = curTocEntry?.let { "☰ ${it.title} · 챕터 ${curChapPct}%" } ?: "☰ ${act.category.ifBlank { "독서" }}"
-                                    Text(footerChap, fontSize = 10.sp, color = mut.copy(alpha = 0.78f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp).clickable { tocFilterQuery = ""; tocOpen = true })
-                                    Text("${vIdx + 1} / ${vPages.size}", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = mut)
+                            }
+                            Spacer(Modifier.height(2.dp))
+                            Row(Modifier.fillMaxWidth().height(16.dp), SB, CV) {
+                                val footerChap = if (pIdx == vIdx) (curTocEntry?.let { "☰ ${it.title} · 챕터 ${curChapPct}%" } ?: "☰ ${act.category.ifBlank { "독서" }}") else (pToc?.let { "☰ ${it.title}" } ?: "☰ ${act.category.ifBlank { "독서" }}")
+                                Text(footerChap, fontSize = 10.sp, color = mut.copy(alpha = 0.78f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp).then(if (interactive) Modifier.clickable { tocFilterQuery = ""; tocOpen = true } else Modifier))
+                                Text("${(pIdx + 1).coerceIn(1, vPages.size.coerceAtLeast(1))} / ${vPages.size}", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = mut)
+                            }
+                        }
+                    }
+
+                    val renderHalfSpread: @Composable (Int, Boolean, Boolean) -> Unit = { pIdx, isRightSide, interactive ->
+                        val pData = getCachedPageData(pIdx)
+                        val spreadPct = ((((if (isRightSide) pIdx + 1 else pIdx + 2).coerceAtMost(vPages.size)) * 100) / vPages.size.coerceAtLeast(1)).coerceIn(1, 100)
+                        val twoPgColMod = if (shouldScrollPage) {
+                            Modifier.width(renderColW).padding(top = 8.dp, bottom = scrollBottomExtra)
+                        } else {
+                            Modifier.width(renderColW).fillMaxHeight().padding(top = 8.dp, bottom = 6.dp)
+                        }
+                        Column(twoPgColMod) {
+                            if (!isRightSide) {
+                                Box(Modifier.fillMaxWidth().height(16.dp), contentAlignment = Alignment.CenterStart) {
+                                    Text(act.title, fontSize = 10.sp, color = mut.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            } else {
+                                Box(Modifier.fillMaxWidth().height(16.dp).then(if (interactive) Modifier.clickable { tocFilterQuery = ""; tocOpen = true } else Modifier), contentAlignment = Alignment.CenterEnd) {
+                                    val chapTag = curTocEntry?.let { "☰ ${it.title.take(16)} (${curChapPct}%)" } ?: "☰ ${act.category.ifBlank { "독서" }}"
+                                    Text("$chapTag · 전체 ${spreadPct}%", fontSize = 10.sp, color = mut.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Box(if (shouldScrollPage) Modifier.width(renderColW).heightIn(min = fixedTextH) else Modifier.width(renderColW).weight(1f)) {
+                                if (pData != null) {
+                                    var hLay by remember(pData.second, curPt, twoPageMode, effColWPx, readerJustifyOn, effectiveIndentOn) { mutableStateOf<TextLayoutResult?>(null) }
+                                    Text(
+                                        pData.third.annotated,
+                                        style = pageTextStyle,
+                                        onTextLayout = { if (interactive) hLay = it },
+                                        modifier = Modifier.fillMaxWidth().then(
+                                            if (interactive && (highlightMode || pData.third.footnotes.isNotEmpty())) {
+                                                Modifier.pointerInput(highlightMode, pData.first.s, pData.second, hlColorIdx, bookHls, pData.third) {
+                                                    detectTapGestures { pos ->
+                                                        val off = hLay?.getOffsetForPosition(pos) ?: return@detectTapGestures
+                                                        handleReaderBodyTap(pData.third, pData.second, pData.first.s, off)
+                                                    }
+                                                }
+                                            } else Modifier
+                                        )
+                                    )
+                                } else if (isRightSide) {
+                                    Box(Modifier.fillMaxWidth().height(fixedTextH), contentAlignment = Alignment.Center) {
+                                        Text("— 마지막 페이지 —", fontSize = ui.subSp, color = mut.copy(alpha = 0.65f))
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = if (isRightSide) Alignment.CenterEnd else Alignment.CenterStart) {
+                                Text(if (pData != null) "${pIdx + 1}" else "", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = mut)
+                            }
+                        }
+                    }
+
+                    val renderCenterSpine: @Composable () -> Unit = {
+                        Box(
+                            Modifier
+                                .width(spineW)
+                                .height(fixedTextH + 52.dp)
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(
+                                            Color.Transparent,
+                                            spineBase.copy(alpha = 0.08f),
+                                            spineBase.copy(alpha = 0.24f),
+                                            spineBase.copy(alpha = 0.08f),
+                                            Color.Transparent
+                                        )
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(Modifier.width(1.dp).fillMaxHeight(0.94f).background(mut.copy(alpha = 0.28f)))
+                        }
+                    }
+
+                    val rawP = pageTurnAnim.value.coerceIn(0f, 1f)
+                    val isTurningNow = paperCurlEffectOn && turnDir != 0 && rawP > 0.002f
+                    val bookShape = if (twoPageMode) RoundedCornerShape(12.dp) else RoundedCornerShape(topStart = 5.dp, bottomStart = 5.dp, topEnd = 12.dp, bottomEnd = 12.dp)
+
+                    Surface(
+                        color = pageSurf,
+                        shape = bookShape,
+                        shadowElevation = 3.dp,
+                        border = BorderStroke(0.8.dp, mut.copy(alpha = 0.28f)),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(gestureMod)
+                            .graphicsLayer { if (dragRubberPx != 0f) translationX = dragRubberPx }
+                    ) {
+                        if (!twoPageMode) {
+                            if (!isTurningNow) {
+                                renderSinglePage(vIdx, true)
+                            } else {
+                                val frontIdx = if (turnDir > 0) vIdx else (vIdx - 1).coerceAtLeast(0)
+                                val underIdx = if (turnDir > 0) (vIdx + 1).coerceAtMost((vPages.size - 1).coerceAtLeast(0)) else vIdx
+                                val curlP = if (turnDir > 0) rawP else (1f - rawP)
+                                Box(Modifier.fillMaxSize()) {
+                                    renderSinglePage(underIdx, false)
+                                    Box(
+                                        Modifier
+                                            .fillMaxSize()
+                                            .drawWithContent {
+                                                val w = size.width; val h = size.height
+                                                val foldX = (w * (1f - curlP)).coerceIn(0f, w)
+                                                val sinCurve = kotlin.math.sin(curlP * 3.1415927f).coerceIn(0f, 1f)
+                                                val flapW = (w * 0.135f * sinCurve).coerceIn(0f, w * 0.18f)
+                                                val flapL = (foldX - flapW).coerceIn(0f, w)
+                                                if (flapL > 0.5f) {
+                                                    clipRect(left = 0f, top = 0f, right = flapL, bottom = h) {
+                                                        this@drawWithContent.drawContent()
+                                                    }
+                                                    val innerShW = (14.dp.toPx() * sinCurve).coerceIn(0f, flapL)
+                                                    if (innerShW > 1f) {
+                                                        drawRect(
+                                                            brush = Brush.horizontalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.10f * sinCurve)), startX = flapL - innerShW, endX = flapL),
+                                                            topLeft = Offset(flapL - innerShW, 0f),
+                                                            size = Size(innerShW, h)
+                                                        )
+                                                    }
+                                                }
+                                                val dropW = (34.dp.toPx() * (0.35f + 0.65f * sinCurve)).coerceIn(0f, (w - foldX).coerceAtLeast(0f))
+                                                if (dropW > 1f) {
+                                                    drawRect(
+                                                        brush = Brush.horizontalGradient(
+                                                            listOf(
+                                                                Color.Black.copy(alpha = (0.24f * (1f - curlP * 0.35f)).coerceIn(0f, 0.26f)),
+                                                                Color.Black.copy(alpha = 0.08f * sinCurve),
+                                                                Color.Transparent
+                                                            ),
+                                                            startX = foldX,
+                                                            endX = foldX + dropW
+                                                        ),
+                                                        topLeft = Offset(foldX, 0f),
+                                                        size = Size(dropW, h)
+                                                    )
+                                                }
+                                                if (foldX - flapL > 1f) {
+                                                    drawRect(
+                                                        brush = Brush.horizontalGradient(
+                                                            listOf(paperBackTint, paperBackHi, paperBackTint),
+                                                            startX = flapL,
+                                                            endX = foldX
+                                                        ),
+                                                        topLeft = Offset(flapL, 0f),
+                                                        size = Size(foldX - flapL, h)
+                                                    )
+                                                    drawLine(mut.copy(alpha = 0.32f * sinCurve), Offset(flapL, 0f), Offset(flapL, h), strokeWidth = 1.2f)
+                                                    drawLine(Color.Black.copy(alpha = 0.20f * sinCurve), Offset(foldX, 0f), Offset(foldX, h), strokeWidth = 1f)
+                                                }
+                                            }
+                                    ) {
+                                        renderSinglePage(frontIdx, false)
+                                    }
+                                }
+                            }
+                        } else {
+                            if (!isTurningNow) {
+                                Row(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .then(splitScrollMod)
+                                        .padding(horizontal = outerPad),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    renderHalfSpread(vIdx, false, true)
+                                    renderCenterSpine()
+                                    renderHalfSpread(vIdx + 1, true, true)
+                                }
+                            } else {
+                                val aIdx = if (turnDir > 0) vIdx else (vIdx - 2).coerceAtLeast(0)
+                                val bIdx = if (turnDir > 0) (vIdx + 2) else vIdx
+                                val flipP = if (turnDir > 0) rawP else (1f - rawP)
+                                val halfLeafW = renderColW + (spineW / 2f)
+                                val cosProj = kotlin.math.abs(kotlin.math.cos(flipP * 3.1415927f)).coerceIn(0f, 1f)
+                                Box(Modifier.fillMaxSize()) {
+                                    Row(
+                                        Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = outerPad),
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Box(Modifier.width(renderColW).fillMaxHeight().drawWithContent {
+                                            drawContent()
+                                            if (flipP > 0.5f) {
+                                                val shW = (size.width * (cosProj + 0.12f)).coerceIn(0f, size.width)
+                                                val stX = (size.width - shW).coerceAtLeast(0f)
+                                                val pk = ((1f - flipP) * 2f * 0.26f).coerceIn(0.05f, 0.26f)
+                                                drawRect(brush = Brush.horizontalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = pk * 0.55f), Color.Black.copy(alpha = pk)), startX = stX, endX = size.width), topLeft = Offset(stX, 0f), size = Size(size.width - stX, size.height))
+                                            }
+                                        }) {
+                                            renderHalfSpread(aIdx, false, false)
+                                        }
+                                        renderCenterSpine()
+                                        Box(Modifier.width(renderColW).fillMaxHeight().drawWithContent {
+                                            drawContent()
+                                            if (flipP < 0.5f) {
+                                                val shW = (size.width * (cosProj + 0.12f)).coerceIn(0f, size.width)
+                                                val pk = (flipP * 2f * 0.26f).coerceIn(0.05f, 0.26f)
+                                                drawRect(brush = Brush.horizontalGradient(listOf(Color.Black.copy(alpha = pk), Color.Black.copy(alpha = pk * 0.55f), Color.Transparent), startX = 0f, endX = shW), topLeft = Offset.Zero, size = Size(shW, size.height))
+                                            }
+                                        }) {
+                                            renderHalfSpread(bIdx + 1, true, false)
+                                        }
+                                    }
+                                    if (flipP < 0.5f) {
+                                        val deg = -flipP * 180f
+                                        val leafShade = (flipP * 2f * 0.16f).coerceIn(0f, 0.18f)
+                                        Box(
+                                            Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(end = outerPad)
+                                                .width(halfLeafW)
+                                                .fillMaxHeight()
+                                                .graphicsLayer {
+                                                    transformOrigin = TransformOrigin(0f, 0.5f)
+                                                    cameraDistance = 24f
+                                                    rotationY = deg
+                                                }
+                                                .background(pageSurf)
+                                                .border(BorderStroke(0.6.dp, mut.copy(alpha = 0.25f)))
+                                        ) {
+                                            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.Top) {
+                                                Box(Modifier.width(spineW / 2f).fillMaxHeight().background(Brush.horizontalGradient(listOf(spineBase.copy(alpha = 0.16f), Color.Transparent))))
+                                                renderHalfSpread(aIdx + 1, true, false)
+                                            }
+                                            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = leafShade)))
+                                        }
+                                    } else {
+                                        val deg = (1f - flipP) * 180f
+                                        val leafShade = ((1f - flipP) * 2f * 0.16f).coerceIn(0f, 0.18f)
+                                        Box(
+                                            Modifier
+                                                .align(Alignment.TopStart)
+                                                .padding(start = outerPad)
+                                                .width(halfLeafW)
+                                                .fillMaxHeight()
+                                                .graphicsLayer {
+                                                    transformOrigin = TransformOrigin(1f, 0.5f)
+                                                    cameraDistance = 24f
+                                                    rotationY = deg
+                                                }
+                                                .background(pageSurf)
+                                                .border(BorderStroke(0.6.dp, mut.copy(alpha = 0.25f)))
+                                        ) {
+                                            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.Top) {
+                                                renderHalfSpread(bIdx, false, false)
+                                                Box(Modifier.width(spineW / 2f).fillMaxHeight().background(Brush.horizontalGradient(listOf(Color.Transparent, spineBase.copy(alpha = 0.16f)))))
+                                            }
+                                            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = leafShade)))
+                                        }
+                                    }
+                                    Box(Modifier.align(Alignment.Center).width(1.2.dp).fillMaxHeight(0.95f).background(mut.copy(alpha = 0.32f)))
                                 }
                             }
                         }
                     }
                 }
             }
-
             }
             Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp).onSizeChanged { sz ->
                 if (!shouldScrollPage && isFullUnobstructed && !isHorizMemoSplit && sz.width > 200) {

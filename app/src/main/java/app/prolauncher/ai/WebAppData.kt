@@ -4,8 +4,13 @@ import android.content.Context
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.json.JSONArray
 import org.json.JSONObject
@@ -57,4 +62,49 @@ fun LiveWebAppRunner(htmlCode: String, reloadTick: Int, modifier: Modifier = Mod
   modifier = modifier,
   update = { wv -> if (lastHtml != htmlCode || lastTick != reloadTick) { lastHtml = htmlCode; lastTick = reloadTick; wv.loadDataWithBaseURL("https://app.prolauncher.local/", htmlCode, "text/html", "UTF-8", null) } }
  )
+}
+
+fun webAppPkgOf(id: Long): String = "webapp://$id"
+
+fun isWebAppPinnedHome(ctx: Context, id: Long): Boolean {
+ val favs = ctx.getSharedPreferences("pl_ai_v2_prefs", Context.MODE_PRIVATE).getStringSet("fav_pkgs", emptySet()) ?: emptySet()
+ return favs.contains(webAppPkgOf(id))
+}
+
+fun toggleWebAppPinnedHome(ctx: Context, id: Long, title: String): Boolean {
+ val repo = LauncherRepository(ctx)
+ val pkg = webAppPkgOf(id)
+ val lbl = "🌐 $title"
+ repo.toggleFavorite(pkg, lbl)
+ packageChangeTick++
+ return repo.getFavoritePackages().contains(pkg)
+}
+
+@Composable
+fun PinnedWebAppRunnerOverlay(appId: Long, onClose: () -> Unit, onEditInStudio: (Long) -> Unit) {
+ val ctx = androidx.compose.ui.platform.LocalContext.current
+ val aiCfg = remember { loadAiCfg(ctx) }
+ val ui = rememberUi(aiCfg.uiScale)
+ val app = remember(appId) { loadWebApps(ctx).find { it.id == appId } }
+ var reloadTick by remember { mutableStateOf(0) }
+ androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(CBG).padding(horizontal = ui.hPad, vertical = ui.vPad), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)) {
+  androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth(), SB, CV) {
+   androidx.compose.material3.Text("🌐 ${app?.title ?: "웹앱"}", fontSize = ui.titleSp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = CW, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+   androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+    ChipBtn("🔄 새로고침", false, CW) { reloadTick++ }
+    ChipBtn("🛠️ 스튜디오편집", false, CA) {
+     ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE).edit()
+      .putLong("webapp_active_id_v1", appId)
+      .putString("webapp_active_title_v1", app?.title ?: "웹앱")
+      .putString("webapp_active_code_v1", app?.htmlCode ?: STARTER_HTML)
+      .apply()
+     onEditInStudio(appId)
+    }
+    ChipBtn("✕ 홈으로", true, CG) { onClose() }
+   }
+  }
+  androidx.compose.material3.Surface(color = CS, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(0.9.dp, CG.copy(alpha = 0.65f)), modifier = Modifier.weight(1f).fillMaxWidth()) {
+   LiveWebAppRunner(app?.htmlCode ?: STARTER_HTML, reloadTick, Modifier.fillMaxSize())
+  }
+ }
 }

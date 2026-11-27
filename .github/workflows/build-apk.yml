@@ -36,9 +36,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: app/src/main/jniLibs/arm64-v8a
-          key: prollama-jni-arm64-v96-r1
-          restore-keys: |
-            prollama-jni-arm64-
+          key: prollama-jni-arm64-v97-ctx32k
 
       - name: Build ProLlama C++ JNI if not cached
         run: |

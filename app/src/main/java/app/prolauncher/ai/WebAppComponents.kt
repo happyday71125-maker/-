@@ -93,7 +93,7 @@ fun WebAppShelfPanel(
      val isPin = p.id in pinnedIds
      Surface(color = if (p.id == curAppId) CG.copy(alpha = 0.16f) else CS2, shape = RoundedCornerShape(8.dp), border = BorderStroke(0.7.dp, if (p.id == curAppId) CG else CBDR), modifier = Modifier.fillMaxWidth().clickable { onOpen(p, true) }) {
       Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), SB, CV) {
-       Column(Modifier.weight(1f)) { Text("🌐 ${p.title}" + (if (isPin) " 📌" else ""), fontSize = ui.bodySp, fontWeight = FontWeight.SemiBold, color = CW, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("📁${p.folder} · ${p.updatedAt} · ${p.htmlCode.length}자", fontSize = 10.sp, color = CM) }
+       Column(Modifier.weight(1f)) { Text("${p.icon.ifBlank { "🌐" }} ${p.title}" + (if (isPin) " 📌" else ""), fontSize = ui.bodySp, fontWeight = FontWeight.SemiBold, color = CW, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("📁${p.folder} · ${p.updatedAt} · ${p.htmlCode.length}자", fontSize = 10.sp, color = CM) }
        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = CV) {
         Text(if (isPin) "📌해제" else "📌홈고정", fontSize = 11.sp, color = if (isPin) CG else CW, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onTogglePin(p) })
         Text("💻편집", fontSize = 11.sp, color = CA, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onOpen(p, false) })
@@ -120,8 +120,9 @@ fun WebAppAiPane(
  val focusReq = remember { FocusRequester() }
  Column(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
   WebHBar {
-   ChipBtn("🔧현재코드 수정모드", reqMode == "MODIFY", CG) { onSetReqMode("MODIFY"); runCatching { focusReq.requestFocus() } }
-   ChipBtn("✨새 웹앱 제작모드", reqMode == "NEW", CA) { onSetReqMode("NEW"); runCatching { focusReq.requestFocus() } }
+   ChipBtn("⚡부분패치(고속)", reqMode == "PATCH", CG) { onSetReqMode("PATCH"); runCatching { focusReq.requestFocus() } }
+   ChipBtn("🔧전체코드 수정", reqMode == "MODIFY", CA) { onSetReqMode("MODIFY"); runCatching { focusReq.requestFocus() } }
+   ChipBtn("✨새 웹앱 제작", reqMode == "NEW", CW) { onSetReqMode("NEW"); runCatching { focusReq.requestFocus() } }
    ChipBtn("🪙${maxTok}·🧠${webCtx}", tokenOpen, CA) { onToggleTok() }
    if (aiAns.contains("<") && !aiBusy && !hasEndHtml) ChipBtn("➕끊긴코드 이어쓰기", false, CW) { onLaunch("CONTINUE", "") }
    if (canUndoCode && !aiBusy) ChipBtn("↩️이전코드 복원", false, CA) { onUndoCode() }
@@ -140,10 +141,10 @@ fun WebAppAiPane(
   Surface(color = CS2, shape = RoundedCornerShape(9.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.weight(1f).fillMaxWidth()) {
    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp)) {
     val w = if (!aiBusy && aiAns.contains("<html", true) && !hasEndHtml) "⚠️ 코드가 </html> 전에 멈췄습니다. [➕끊긴코드 이어쓰기] 또는 토큰 상향을 이용해 보세요.\n\n" else ""
-    val guide = if (reqMode == "MODIFY") {
-     "🔧 [현재 코드 수정 모드] (최대 ${maxTok} 토큰)\n• 임의로 코드를 바꾸지 않습니다. 바꾸고 싶은 기능·디자인·버그 수정 사항을 아래 입력창에 직접 적고 [수정요청 ↑]을 눌러주세요.\n• 완료 후 [✅ 코드 반영&실행]을 눌러야 실제 코드에 적용됩니다."
-    } else {
-     "✨ [새 웹앱 제작 모드] (최대 ${maxTok} 토큰)\n• 새로 만들고 싶은 웹앱의 기능을 아래 입력창에 적고 [제작요청 ↑]을 눌러주세요."
+    val guide = when (reqMode) {
+     "PATCH" -> "⚡ [부분 패치 고속 수정 모드] (출력 ${maxTok}t · 컨텍스트 ${webCtx})\n• 전체를 다시 쓰지 않고 바꿀 부분만 SEARCH/REPLACE 블록으로 빠르게 교체합니다.\n• 완료 후 [✅ 코드 반영&실행]을 눌러 적용하세요."
+     "MODIFY" -> "🔧 [전체 코드 수정 모드] (출력 ${maxTok}t · 컨텍스트 ${webCtx})\n• 임의로 코드를 바꾸지 않습니다. 수정 사항을 아래 입력창에 직접 적고 [수정요청 ↑]을 눌러주세요."
+     else -> "✨ [새 웹앱 제작 모드] (출력 ${maxTok}t · 컨텍스트 ${webCtx})\n• 새로 만들고 싶은 웹앱의 기능을 아래 입력창에 적고 [제작요청 ↑]을 눌러주세요."
     }
     Text(w + aiAns.ifBlank { guide }, fontSize = 11.5.sp, lineHeight = 16.sp, fontFamily = FontFamily.Monospace, color = CW)
    }
@@ -152,7 +153,7 @@ fun WebAppAiPane(
    OutlinedTextField(
     value = aiPromptIn,
     onValueChange = onPrompt,
-    placeholder = { Text(if (reqMode == "MODIFY") "수정할 내용을 구체적으로 입력 후 [수정요청 ↑]..." else "새로 만들 웹앱 설명 입력 후 [제작요청 ↑]...", fontSize = ui.subSp) },
+    placeholder = { Text(if (reqMode == "NEW") "새로 만들 웹앱 설명 입력 후 [제작요청 ↑]..." else if (reqMode == "PATCH") "빠르게 패치할 부분 입력 후 [패치요청 ↑]..." else "수정할 내용을 구체적으로 입력 후 [수정요청 ↑]...", fontSize = ui.subSp) },
     singleLine = true,
     modifier = Modifier.weight(1f).focusRequester(focusReq)
    )
@@ -169,8 +170,8 @@ fun WebAppAiPane(
      }
     },
     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-    colors = ButtonDefaults.buttonColors(containerColor = if (reqMode == "MODIFY") CG else CA, contentColor = CON_ACCENT)
-   ) { Text(if (reqMode == "MODIFY") "수정요청 ↑" else "제작요청 ↑", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+    colors = ButtonDefaults.buttonColors(containerColor = if (reqMode == "NEW") CA else CG, contentColor = CON_ACCENT)
+   ) { Text(if (reqMode == "PATCH") "패치요청 ↑" else if (reqMode == "MODIFY") "수정요청 ↑" else "제작요청 ↑", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
   }
  }
 }

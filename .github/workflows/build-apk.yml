@@ -36,23 +36,25 @@ jobs:
         uses: actions/cache@v4
         with:
           path: app/src/main/jniLibs/arm64-v8a
-          key: prollama-jni-arm64-v97-ctx32k
+          key: prollama-jni-arm64-v98-static-ctx32k
 
       - name: Build ProLlama C++ JNI if not cached
         run: |
-          if [ ! -f app/src/main/jniLibs/arm64-v8a/libprollama_jni.so ]; then
+          if [ ! -f app/src/main/jniLibs/arm64-v8a/libprollama_jni.so ] || [ "$(stat -c%s app/src/main/jniLibs/arm64-v8a/libprollama_jni.so)" -lt 2000000 ]; then
             P="ht""tps"
             git clone --depth 1 "${P}://github.com/ggerganov/llama.cpp.git" app/src/main/cpp/llama.cpp
-            cmake -S app/src/main/cpp -B /tmp/build_jni -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 -DCMAKE_BUILD_TYPE=Release -DGGML_OPENMP=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_COMMON=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF
+            cmake -S app/src/main/cpp -B /tmp/build_jni -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_STATIC=ON -DGGML_OPENMP=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_COMMON=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF
             cmake --build /tmp/build_jni --target prollama_jni -j4
             mkdir -p app/src/main/jniLibs/arm64-v8a
             cp /tmp/build_jni/libprollama_jni.so app/src/main/jniLibs/arm64-v8a/
           fi
-
+          ls -lh app/src/main/jniLibs/arm64-v8a/libprollama_jni.so
+          test "$(stat -c%s app/src/main/jniLibs/arm64-v8a/libprollama_jni.so)" -gt 2000000
+          
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.11.1'
 
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon

@@ -150,16 +150,19 @@ var subTab by remember { mutableStateOf(0) }
 val curTab = if (fixedTab >= 0) fixedTab else subTab
 val pScope = rememberCoroutineScope()
 val chatGPick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { u ->
-if (u != null) { testReport = "⏳ 채팅용 GGUF 모델 등록 중..."; pScope.launch { testReport = importGgufModelUri(ctx, u, false) } }
+if (u != null) { testReport = "⏳ 로컬 AI 모델(.gguf/.litertlm) 등록 중..."; pScope.launch { testReport = importGgufModelUri(ctx, u, false) } }
 }
-val embGPick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { u ->
+val liteRtPick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { u ->
+ if (u != null) { testReport = "⏳ LiteRT-LM (.litertlm) 모델 등록 중..."; pScope.launch { testReport = LiteRtLmBridge.importModelUri(ctx, u) } }
+ }
+ val embGPick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { u ->
 if (u != null) { testReport = "⏳ 임베딩젬마2 텍스트 GGUF 등록·검증 중..."; pScope.launch { testReport = importGgufModelUri(ctx, u, true) } }
 }
 val stPick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { us -> if (us.isNotEmpty()) { testReport = "⏳ Supertonic TTS 모델·보이스 파일 등록 중..."; pScope.launch { testReport = SupertonicTtsEngine.importUris(ctx, us) } } }
 val stExpPick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip")) { u -> if (u != null) { testReport = "⏳ Supertonic 모델·보이스 ZIP 백업 내보내는 중..."; pScope.launch { testReport = SupertonicTtsEngine.exportBackupZip(ctx, u) } } }
 val chatExpPick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")) { u -> if (u != null) { testReport = "⏳ 채팅 LLM GGUF 백업 내보내는 중..."; pScope.launch { testReport = SupertonicTtsEngine.exportGgufToUri(ctx, u, false) } } }
 val embExpPick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")) { u -> if (u != null) { testReport = "⏳ 임베딩젬마2 GGUF 백업 내보내는 중..."; pScope.launch { testReport = SupertonicTtsEngine.exportGgufToUri(ctx, u, true) } } }
-SideEffect { SupertonicTtsEngine.init(ctx) }
+SideEffect { SupertonicTtsEngine.init(ctx); LiteRtLmBridge.initPrefs(ctx) }
 val wrapMod = if (fixedTab >= 0) Modifier.fillMaxWidth() else Modifier.fillMaxWidth().heightIn(max = ui.panelMaxH)
 Surface(color = CS, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, CBDR), modifier = wrapMod) {
 Column(Modifier.then(if (fixedTab >= 0) Modifier else Modifier.verticalScroll(rememberScrollState())).padding(ui.cardPad + 2.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -229,8 +232,8 @@ testReport = "🔄 기본 명령어(깨우기: 자비스 · 쉬기: 쉬어)로 �
 1 -> {
 Surface(color = CS2, shape = RoundedCornerShape(13.dp), border = BorderStroke(0.8.dp, CBDR), modifier = Modifier.fillMaxWidth()) {
 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-Text("🦙 온디바이스 GGUF 채팅 & 임베딩젬마2 관리", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG)
-Text("• 채팅 LLM: " + AiResidentManager.gemmaName.take(24) + (if (AiResidentManager.gemmaMb > 0L) " (${AiResidentManager.gemmaMb}MB)" else ""), fontSize = ui.subSp, color = CW)
+Text("🦙 온디바이스 GGUF & ⚡ LiteRT-LM 듀얼 엔진 관리", fontSize = (ui.subSp.value + 1).sp, fontWeight = FontWeight.Bold, color = CG)
+Text("• GGUF 엔진: " + (if (ProLlamaJni.ready) "✅ JNI 정상" else "⚠️ JNI 미로드") + " · " + AiResidentManager.gemmaName.take(22) + (if (AiResidentManager.gemmaMb > 0L) " (${AiResidentManager.gemmaMb}MB)" else ""), fontSize = ui.subSp, color = CW)
 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
 ChipBtn("⬇️ 채팅LLM 자동받기", AiResidentManager.gemmaMb > 0L, CG) { SupertonicTtsEngine.downloadGgufAuto(ctx, false) { testReport = it } }
 ChipBtn("📂 GGUF 파일넣기", false, CG) { chatGPick.launch(arrayOf("*/*")) }
@@ -242,7 +245,22 @@ Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalA
 ChipBtn("⬇️ 임베딩젬마2 자동받기", AiResidentManager.embedMb > 0L, CA) { SupertonicTtsEngine.downloadGgufAuto(ctx, true) { testReport = it } }
 ChipBtn("📂 임베딩 파일넣기", false, CA) { embGPick.launch(arrayOf("*/*")) }
 ChipBtn("📤 임베딩 백업", false, CW) { embExpPick.launch(findEmbedGguf()?.name ?: "embeddinggemma2_backup.gguf") }
-ChipBtn("🗑️ 전체비우기", false, Color(0xFFF87171)) { testReport = AiResidentManager.clearStorage(ctx) }
+ChipBtn("🗑️ GGUF비우기", false, Color(0xFFF87171)) { testReport = AiResidentManager.clearStorage(ctx) }
+}
+Box(Modifier.fillMaxWidth().height(0.8.dp).background(CBDR))
+Text("⚡ LiteRT-LM (.litertlm · Gemma 4 E2B 저메모리 GPU/CPU)", fontSize = (ui.subSp.value + 0.5f).sp, fontWeight = FontWeight.Bold, color = CA)
+Text("• 모델: " + LiteRtLmBridge.modelName.take(24) + (if (LiteRtLmBridge.modelMb > 0L) " (${LiteRtLmBridge.modelMb}MB)" else "") + " · 백엔드: ${LiteRtLmBridge.backendPref} (${LiteRtLmBridge.activeBackendLabel})", fontSize = ui.subSp, color = CW)
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+ChipBtn("📂 .litertlm 파일넣기", LiteRtLmBridge.modelMb > 0L, CA) { liteRtPick.launch(arrayOf("*/*")) }
+ChipBtn("⚡ GPU 가속(추천)", LiteRtLmBridge.backendPref == "GPU", CG) { LiteRtLmBridge.setBackendPref(ctx, "GPU"); testReport = "⚡ LiteRT-LM GPU 우선 가속 설정됨 (미지원 시 CPU 자동전환)" }
+ChipBtn("🪶 CPU 절전", LiteRtLmBridge.backendPref == "CPU", CW) { LiteRtLmBridge.setBackendPref(ctx, "CPU"); testReport = "🪶 LiteRT-LM CPU 백엔드 설정됨" }
+ChipBtn("🗑️ .litertlm비우기", false, Color(0xFFF87171)) { testReport = LiteRtLmBridge.clearModels(ctx) }
+}
+Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = CV) {
+Text("우선 엔진:", fontSize = ui.subSp, color = CM)
+listOf("AUTO" to "🔄 자동선택", "LITERT" to "⚡ LiteRT 우선", "GGUF" to "🦙 GGUF 우선").forEach { (k, lb) ->
+ChipBtn(lb, LiteRtLmBridge.enginePref == k, if (k == "LITERT") CA else CG) { LiteRtLmBridge.setEnginePref(ctx, k); testReport = "✅ 로컬 우선 엔진: $lb 적용됨" }
+}
 }
 }
 }

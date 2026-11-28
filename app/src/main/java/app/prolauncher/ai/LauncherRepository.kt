@@ -166,7 +166,8 @@ isInterruptEnabled = intSet.contains(pkg) || intSet.contains(label)
 val webEntries = runCatching {
 loadWebApps(context).map { w ->
 val wPkg = webAppPkgOf(w.id)
-val wLbl = "🌐 ${w.title}"
+val ic = w.icon.ifBlank { "🌐" }
+  val wLbl = "$ic ${w.title}"
 AppEntry(
 label = wLbl,
 packageName = wPkg,
@@ -175,7 +176,7 @@ isInterruptEnabled = intSet.contains(wPkg) || intSet.contains(wLbl)
 )
 }
 }.getOrDefault(emptyList())
-return (webEntries + sysEntries).sortedBy { it.label.removePrefix("🌐 ").lowercase() }
+return (webEntries + sysEntries).sortedBy { it.label.substringAfter(" ", it.label).lowercase() }
 }
 
 fun launchApp(packageName: String) {

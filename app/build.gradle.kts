@@ -22,10 +22,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     packaging {
-        jniLibs { pickFirsts += setOf("**/libc++_shared.so", "**/libonnxruntime.so", "**/libonnxruntime4j_jni.so", "**/liblitertlm_jni.so") }
+        jniLibs { pickFirsts += setOf("**/libc++_shared.so", "**/libonnxruntime.so", "**/libonnxruntime4j_jni.so", "**/liblitertlm_jni.so", "**/libLiteRt.so", "**/libLiteRtClGlAccelerator.so") }
         resources { excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "META-INF/DEPENDENCIES") }
+    }
+}
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 dependencies {

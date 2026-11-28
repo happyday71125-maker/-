@@ -31,7 +31,7 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
  val sp = remember { ctx.getSharedPreferences("pl_ai_v4_custom", Context.MODE_PRIVATE) }
  var projects by remember { mutableStateOf(loadWebApps(ctx)) }; var folders by remember { mutableStateOf(loadWebAppFolders(ctx)) }
  val initP = remember { val lid = sp.getLong("webapp_active_id_v1", 9001L); projects.find { it.id == lid } ?: projects.firstOrNull() }
- var curAppId by remember { mutableStateOf(initP?.id ?: 9001L) }; var curFolder by remember { mutableStateOf(initP?.folder ?: "유틸리티") }
+ var curAppId by remember { mutableStateOf(initP?.id ?: 9001L) }; var curFolder by remember { mutableStateOf(initP?.folder ?: "유틸리티") }; var curIcon by remember { mutableStateOf(initP?.icon?.ifBlank { "🌐" } ?: "🌐") }; var iconPickerOpen by remember { mutableStateOf(false) }
  var titleTfv by remember { val t = sp.getString("webapp_active_title_v1", initP?.title ?: "더치페이 계산기") ?: "새 웹앱"; mutableStateOf(TextFieldValue(t, TextRange(t.length))) }
  var codeTfv by remember { val c = sp.getString("webapp_active_code_v1", initP?.htmlCode ?: SEED_CALC) ?: STARTER_HTML; mutableStateOf(TextFieldValue(c, TextRange(c.length))) }
  var viewMode by remember { mutableStateOf(sp.getInt("webapp_view_mode_v1", 1).coerceIn(0, 2)) }
@@ -60,12 +60,12 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
   val id = if (curAppId > 0L && projects.any { it.id == curAppId }) curAppId else System.currentTimeMillis()
   curAppId = id; val fld = curFolder.ifBlank { "유틸리티" }
   if (!folders.contains(fld)) { folders = folders + fld; saveWebAppFolders(ctx, folders) }
-  projects = (listOf(WebAppProject(id, t, codeTfv.text, SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), fld)) + projects.filterNot { it.id == id }).also { saveWebApps(ctx, it) }
+  projects = (listOf(WebAppProject(id, t, codeTfv.text, SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date()), fld, curIcon.ifBlank { "🌐" })) + projects.filterNot { it.id == id }).also { saveWebApps(ctx, it) }; packageChangeTick++
   sp.edit().putLong("webapp_active_id_v1", id).putString("webapp_active_title_v1", t).putString("webapp_active_code_v1", codeTfv.text).apply()
   reloadTick++; statusMsg = "💾 [$fld] 『$t』 저장 완료!"
  }
  fun openApp(p: WebAppProject, runNow: Boolean = true) {
-  curAppId = p.id; curFolder = p.folder; titleTfv = TextFieldValue(p.title, TextRange(p.title.length)); setCode(p.htmlCode)
+  curAppId = p.id; curFolder = p.folder; curIcon = p.icon.ifBlank { "🌐" }; titleTfv = TextFieldValue(p.title, TextRange(p.title.length)); setCode(p.htmlCode)
   pendingAiHtml = null; prevCodeBackup = null; aiReqMode = "MODIFY"
   sp.edit().putLong("webapp_active_id_v1", p.id).putString("webapp_active_title_v1", p.title).apply()
   shelfOpen = false; reloadTick++; setModeP(if (runNow) 1 else 0); statusMsg = "▶️ 『${p.title}』 준비 완료"
@@ -89,7 +89,7 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
  }
  val htmlExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/html")) { u -> if (u != null) runCatching { ctx.contentResolver.openOutputStream(u)?.use { it.write(codeTfv.text.toByteArray()) }; saveApp(); statusMsg = "⬇️ .html 저장 완료!" } }
  val htmlImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) runCatching { val tx = ctx.contentResolver.openInputStream(u)?.bufferedReader()?.use { it.readText() } ?: ""; val g = Regex("<title>(.*?)</title>", RegexOption.IGNORE_CASE).find(tx)?.groupValues?.getOrNull(1)?.trim()?.take(26)?.ifEmpty { "불러온 웹앱" } ?: "불러온 웹앱"; curAppId = System.currentTimeMillis(); titleTfv = TextFieldValue(g, TextRange(g.length)); setCode(tx); saveApp(); setModeP(1) } }
- fun stopAi() { activeGenId++; if (ProLlamaJni.ready) runCatching { ProLlamaJni.abortGeneration() }; aiJob?.cancel(); aiBusy = false; aiAns = aiAns.removeSuffix(" ▍") }
+ fun stopAi() { activeGenId++; if (ProLlamaJni.ready) runCatching { ProLlamaJni.abortGeneration() }; LiteRtLmBridge.abortCurrent(); aiJob?.cancel(); aiBusy = false; aiAns = aiAns.removeSuffix(" ▍") }
  fun launchAi(mode: String, req: String) {
   if (mode != "CONTINUE" && req.isBlank()) {
    statusMsg = "⚠️ 수정하거나 만들 내용을 입력창에 먼저 적어주세요!"
@@ -102,7 +102,10 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
   val effCtx = maxOf(if (syncGlobalCtx) cfg.ctxSize else webCtx, maxTok + 512).coerceIn(1024, 32768)
   val maxModChars = ((effCtx - maxTok - 384).coerceAtLeast(1024) * 3).coerceIn(4000, 64000)
   val seed = extractCleanHtmlFromAi(aiAns).takeIf { mode == "CONTINUE" && it.contains("<") } ?: codeTfv.text
+  val pFmt = "<".repeat(3) + "SEARCH\n기존코드\n===\n새코드\n" + ">".repeat(3) + "REPLACE"
+  val effSysP = if (mode == "PATCH") "부분 코드 패치 도구입니다: $pFmt" else sysP
   val uP = when (mode) {
+   "PATCH" -> "[코드]\n${codeTfv.text.take(maxModChars)}\n\n[요청]\n$req\n형식:\n$pFmt"
    "MODIFY" -> "[현재 HTML]\n${codeTfv.text.take(maxModChars)}\n\n[수정 요청]\n$req\n전체 <!DOCTYPE html>...</html> 코드를 출력하세요."
    "CONTINUE" -> "아래 끊긴 HTML의 마지막 부분 바로 뒤부터 중복 없이 </html>까지 이어서 완성하세요:\n\n${seed.takeLast(1400)}"
    else -> "다음 기능의 모바일 단일 파일 HTML5 웹앱(localStorage 활용)을 <!DOCTYPE html>부터 </html>까지 생략 없이 작성하세요: $req"
@@ -110,10 +113,16 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
   val pfx = if (mode == "CONTINUE") seed else ""
   aiAns = "⚡ 웹앱 생성 중 (최대 ${maxTok} 토큰)... ▍"
   aiJob = scope.launch {
-   val ans = withContext(Dispatchers.IO) { callLlmHttp(sysP, "", emptyList(), uP, cfg.apiUrl, cfg.apiModel, cfg.apiKey, { pt -> if (g == activeGenId && pt.isNotBlank()) uiP { aiAns = (if (pfx.isNotEmpty()) pfx + "\n" + pt else pt) + " ▍" } }, g, cfg.temp.coerceIn(0.1f, 0.7f), effCtx, maxTok, cfg.cpuMode, 0) }
+   val ans = withContext(Dispatchers.IO) { callLlmHttp(effSysP, "", emptyList(), uP, cfg.apiUrl, cfg.apiModel, cfg.apiKey, { pt -> if (g == activeGenId && pt.isNotBlank()) uiP { aiAns = (if (pfx.isNotEmpty()) pfx + "\n" + pt else pt) + " ▍" } }, g, cfg.temp.coerceIn(0.1f, 0.7f), effCtx, maxTok, cfg.cpuMode, 0) }
    if (g == activeGenId) {
     aiAns = (if (pfx.isNotEmpty() && !ans.isNullOrBlank()) pfx + "\n" + extractCleanHtmlFromAi(ans) else (ans ?: "").ifBlank { aiAns.removeSuffix(" ▍") }).ifBlank { "⚠️ 생성 실패: AI 세팅이나 토큰을 확인하세요." }
-    aiBusy = false; val ex = extractCleanHtmlFromAi(aiAns)
+    aiBusy = false
+    val (patched, patchHits) = if (mode == "PATCH") applyWebAppPatch(codeTfv.text, aiAns) else ("" to 0)
+    if (patchHits > 0) {
+     pendingAiHtml = patched
+     statusMsg = "⚡ 부분 패치 ${patchHits}곳 준비됨! [✅ 코드 반영&실행]을 눌러 적용하세요."
+    } else {
+    val ex = extractCleanHtmlFromAi(aiAns)
     if (ex.contains("<html", true) || ex.contains("<!DOC" + "TYPE", true)) {
      val isStarterBlank = codeTfv.text.trim() == STARTER_HTML.trim() && lastGenMode == "NEW"
      if (isStarterBlank) {
@@ -124,6 +133,7 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
       pendingAiHtml = ex
       statusMsg = "✅ 요청하신 코드가 준비되었습니다! [✅ 코드 반영&실행]을 눌러 적용하세요."
      }
+    }
     }
    }
   }
@@ -173,10 +183,11 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
     ChipBtn("🔧 AI 수정요청", aiMode != 0 && aiReqMode == "MODIFY", CG) { aiReqMode = "MODIFY"; if (aiMode == 0) aiMode = 1; floatMin = false; statusMsg = "🔧 아래 AI 입력창에 원하는 코드 수정사항을 적어주세요." }
     ChipBtn(if (curPinned) "📌 홈고정됨" else "📌 홈고정", curPinned, if (curPinned) CG else CA) {
      saveApp()
-     val nowPin = toggleWebAppPinnedHome(ctx, curAppId, titleTfv.text.trim().ifEmpty { "내 웹앱" })
+     val nowPin = toggleWebAppPinnedHome(ctx, curAppId, titleTfv.text.trim().ifEmpty { "내 웹앱" }, curIcon)
      pinnedIds = projects.filter { isWebAppPinnedHome(ctx, it.id) }.map { it.id }.toSet() + (if (nowPin) setOf(curAppId) else emptySet())
      statusMsg = if (nowPin) "📌 홈 화면 바로가기에 고정됨! 홈에서 탭하면 즉시 실행됩니다." else "📌 홈 화면 바로가기 고정이 해제되었습니다."
     }
+    ChipBtn("${curIcon} 아이콘", iconPickerOpen, CA) { iconPickerOpen = !iconPickerOpen }
     ChipBtn("📂 보관함(${projects.size})", shelfOpen, CA) { shelfOpen = !shelfOpen }
     ChipBtn("💾 저장", false, CG) { saveApp() }
     if (prevCodeBackup != null) ChipBtn("↩️ 되돌리기", false, CA) { undoAiCode() }
@@ -188,6 +199,12 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
     ChipBtn("⬇️ .html저장", false, CG) { htmlExport.launch((titleTfv.text.trim().ifEmpty { "webapp" }) + ".html") }
     ChipBtn("📤 메모보관", false, CM) { onSaveToMemo("🌐 [웹앱: ${titleTfv.text.trim()}]\n```html\n${codeTfv.text.take(1500)}\n```"); statusMsg = "✅ 메모 탭에 저장됨" }
    }
+   if (iconPickerOpen) Surface(color = CS, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.9.dp, CA.copy(alpha = 0.7f)), modifier = Modifier.fillMaxWidth()) {
+    WebHBar {
+     Text("대표 아이콘:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CA, modifier = Modifier.padding(start = 6.dp))
+     WEBAPP_ICON_PRESETS.forEach { ic -> ChipBtn(ic, curIcon == ic, CG) { curIcon = ic; iconPickerOpen = false; saveApp(); statusMsg = "✅ 대표 아이콘이 [$ic]로 변경되었습니다 (홈 타일 자동 반영)" } }
+    }
+   }
    if (viewMode == 1 && projects.isNotEmpty() && !shelfOpen) {
     WebHBar { Text("⚡내 앱:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CM); projects.forEach { p -> ChipBtn(p.title, p.id == curAppId, CG) { openApp(p, true) } } }
    } else {
@@ -197,7 +214,7 @@ fun WebAppStudioView(onClose: () -> Unit, onSaveToMemo: (String) -> Unit) {
      ChipBtn("🔤${codeFontSp}", false, CW) { codeFontSp = if (codeFontSp >= 20) 12 else codeFontSp + 2; sp.edit().putInt("webapp_code_font_v1", codeFontSp).apply() }
     }
    }
-   if (shelfOpen) WebAppShelfPanel(projects, folders, curAppId, pinnedIds, ui, { nf -> if (!folders.contains(nf)) { folders = folders + nf; saveWebAppFolders(ctx, folders); curFolder = nf } }, ::openApp, { p -> val np = toggleWebAppPinnedHome(ctx, p.id, p.title); pinnedIds = if (np) pinnedIds + p.id else pinnedIds - p.id; statusMsg = if (np) "📌 『${p.title}』 홈 화면 고정 완료!" else "📌 『${p.title}』 홈 고정 해제됨" }) { did -> if (isWebAppPinnedHome(ctx, did)) toggleWebAppPinnedHome(ctx, did, ""); pinnedIds = pinnedIds - did; projects = projects.filterNot { it.id == did }.also { saveWebApps(ctx, it) }; packageChangeTick++; if (curAppId == did) projects.firstOrNull()?.let { openApp(it, true) } }
+   if (shelfOpen) WebAppShelfPanel(projects, folders, curAppId, pinnedIds, ui, { nf -> if (!folders.contains(nf)) { folders = folders + nf; saveWebAppFolders(ctx, folders); curFolder = nf } }, ::openApp, { p -> val np = toggleWebAppPinnedHome(ctx, p.id, p.title, p.icon); pinnedIds = if (np) pinnedIds + p.id else pinnedIds - p.id; statusMsg = if (np) "📌 『${p.icon} ${p.title}』 홈 화면 고정 완료!" else "📌 『${p.title}』 홈 고정 해제됨" }) { did -> if (isWebAppPinnedHome(ctx, did)) toggleWebAppPinnedHome(ctx, did, ""); pinnedIds = pinnedIds - did; projects = projects.filterNot { it.id == did }.also { saveWebApps(ctx, it) }; packageChangeTick++; if (curAppId == did) projects.firstOrNull()?.let { openApp(it, true) } }
    val codeField: @Composable (Modifier) -> Unit = { m -> Surface(color = CS, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.8.dp, CBDR), modifier = m) { OutlinedTextField(value = codeTfv, onValueChange = { codeTfv = it; sp.edit().putString("webapp_active_code_v1", it.text).apply() }, textStyle = TextStyle(fontSize = codeFontSp.sp, lineHeight = (codeFontSp * 1.4f).sp, fontFamily = FontFamily.Monospace, color = CW), modifier = Modifier.fillMaxSize()) } }
    val webField: @Composable (Modifier) -> Unit = { m -> Surface(color = CS, shape = RoundedCornerShape(10.dp), border = BorderStroke(0.9.dp, CG.copy(alpha = 0.6f)), modifier = m) { LiveWebAppRunner(codeTfv.text, reloadTick, Modifier.fillMaxSize()) } }
    val renderWorkspace: @Composable (Modifier) -> Unit = { mod ->
